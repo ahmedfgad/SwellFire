@@ -816,6 +816,43 @@ def resolve_squad_attrition(
     return losses
 
 
+def resolve_squad_attrition_dual(
+    enemy_controller: EnemyController,
+    p1_cx: float, p1_cy: float, p1_front_y: float, on_p1_loss,
+    p2_cx: float, p2_cy: float, p2_front_y: float, on_p2_loss,
+    zone_half_w: float,
+) -> tuple[int, int]:
+    """Two-hero variant for versus mode (M13).
+
+    Walks the enemy pool once and charges whichever hero's contact zone
+    the enemy crossed. p1 has priority (checked first) so an enemy in
+    both zones is attributed to p1 — preferable to double-counting.
+    Returns (p1_losses, p2_losses).
+    """
+    pool = enemy_controller.pool
+    active = pool.active
+    cx = pool.cx
+    cy = pool.cy
+    p1_losses = 0
+    p2_losses = 0
+    for i in range(pool.capacity):
+        if not active[i]:
+            continue
+        ex, ey = cx[i], cy[i]
+        if ey < p1_front_y and abs(ex - p1_cx) < zone_half_w:
+            on_p1_loss(ex, ey)
+            pool.release(i)
+            enemy_controller.recycled_total += 1
+            p1_losses += 1
+            continue
+        if ey < p2_front_y and abs(ex - p2_cx) < zone_half_w:
+            on_p2_loss(ex, ey)
+            pool.release(i)
+            enemy_controller.recycled_total += 1
+            p2_losses += 1
+    return p1_losses, p2_losses
+
+
 def resolve_projectile_collisions(
     projectile_controller: ProjectileController,
     enemy_controller: EnemyController,

@@ -688,6 +688,18 @@ class GameScreen(ui.StyledScreen):
         self._teardown_boss()
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
+        # M13 — also tear the opponent hero off the stage; the on_enter
+        # path checks "is None" before creating one, so without this the
+        # next versus match would keep the stale ghost AND skip making
+        # the new one. Same shape as the hero cleanup just above.
+        if self.opponent_hero is not None and self.opponent_hero.parent:
+            self.opponent_hero.parent.remove_widget(self.opponent_hero)
+        self.opponent_hero = None
+        self.opponent_target_x = 0.0
+        self.opponent_squad = 1
+        self.opponent_kills = 0
+        self.opponent_coins = 0
+        self.opponent_alive = True
         self.enemy_pool = None
         self.enemy_controller = None
         self.enemy_spawner = None
@@ -1328,13 +1340,31 @@ class GameScreen(ui.StyledScreen):
 
             # Squad attrition: enemies that pierce the squad's front line cost one runner each.
             # When squad_count hits 0 the hero falls and the level fails.
-            entities.resolve_squad_attrition(
-                self.enemy_controller,
-                self.hero.center_x, self.hero.center_y,
-                ATTRITION_ZONE_HALF_W,
-                self.hero.center_y + ATTRITION_FRONT_OFFSET,
-                self._on_squad_loss,
-            )
+            # M13 — in versus, also attrit the opponent's squad when an
+            # enemy reaches their front line. Single pass over the enemy
+            # pool covers both heroes so the bookkeeping (release +
+            # recycle counter) stays consistent.
+            if (self._mp_role() == "host"
+                    and self.opponent_hero is not None
+                    and self.opponent_alive):
+                entities.resolve_squad_attrition_dual(
+                    self.enemy_controller,
+                    self.hero.center_x, self.hero.center_y,
+                    self.hero.center_y + ATTRITION_FRONT_OFFSET,
+                    self._on_squad_loss,
+                    self.opponent_hero.center_x, self.opponent_hero.center_y,
+                    self.opponent_hero.center_y + ATTRITION_FRONT_OFFSET,
+                    self._on_opponent_squad_loss,
+                    ATTRITION_ZONE_HALF_W,
+                )
+            else:
+                entities.resolve_squad_attrition(
+                    self.enemy_controller,
+                    self.hero.center_x, self.hero.center_y,
+                    ATTRITION_ZONE_HALF_W,
+                    self.hero.center_y + ATTRITION_FRONT_OFFSET,
+                    self._on_squad_loss,
+                )
 
             self.particle_controller.update(dt)
 
@@ -1899,6 +1929,18 @@ class GameScreen(ui.StyledScreen):
                         if hasattr(self.enemy_controller, "type") else 0,
                     ])
 
+        # Live projectiles (just positions — they all use the same atlas
+        # frame, so no type byte needed).
+        projectiles = []
+        if self.projectile_pool is not None:
+            pool = self.projectile_pool
+            for i in range(pool.capacity):
+                if pool.active[i]:
+                    projectiles.append([
+                        round((pool.cx[i] - sx) / sw, 4),
+                        round((pool.cy[i] - sy) / sh, 4),
+                    ])
+
         running.mp_net.send({
             "t": "snap",
             "tick": self._mp_tick,
@@ -1919,6 +1961,7 @@ class GameScreen(ui.StyledScreen):
             "dist":  round(self.distance, 1),
             "g":     gate_pairs,
             "e":     enemies,
+            "pr":    projectiles,
             "ended": self._level_ended,
         })
 
@@ -1952,6 +1995,17 @@ class GameScreen(ui.StyledScreen):
 
         if latest is not None:
             self._mp_apply_snapshot(latest)
+            # Mesh-batched renderers rebuild their vertex buffers from
+            # pool state, and that rebuild only ever runs from inside
+            # the host's _update body — which the client skips. Drive
+            # the rebuilds here so client-side enemies and projectiles
+            # actually appear on screen.
+            if self.enemy_renderer is not None:
+                self.enemy_renderer.rebuild()
+            if self.projectile_renderer is not None:
+                self.projectile_renderer.rebuild()
+            if self.squad_renderer is not None:
+                self.squad_renderer.rebuild()
 
         # Drive the local centerline-stripe scroll so the world feels
         # alive on the client too — host's distance is authoritative,
@@ -2041,6 +2095,9 @@ class GameScreen(ui.StyledScreen):
         # BatchedRenderer picks them up on its next vertex rebuild.
         if self.enemy_pool is not None:
             self._mp_apply_enemies(snap.get("e", []), sx, sy, sw, sh)
+        # --- projectiles ---------------------------------------------
+        if self.projectile_pool is not None:
+            self._mp_apply_projectiles(snap.get("pr", []), sx, sy, sw, sh)
 
     def _mp_rebuild_gates(self, pairs_snap: list, sx: float, sy: float,
                           sw: float, sh: float) -> None:
@@ -2116,6 +2173,27 @@ class GameScreen(ui.StyledScreen):
             pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
                        0.0, 0.0, 40.0, 40.0, frame_name)
 
+    def _mp_apply_projectiles(self, projectiles_snap: list,
+                              sx: float, sy: float,
+                              sw: float, sh: float) -> None:
+        """Same shape as _mp_apply_enemies — zero the pool, repopulate
+        from the snapshot. Projectiles use a single atlas frame so no
+        per-slot type byte is needed."""
+        pool = self.projectile_pool
+        for i in range(pool.capacity):
+            if pool.active[i]:
+                pool.active[i] = 0
+        pool.active_count = 0
+        for i, entry in enumerate(projectiles_snap):
+            if i >= pool.capacity:
+                break
+            try:
+                x_frac, y_frac = entry
+            except (ValueError, TypeError):
+                continue
+            pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
+                       0.0, 0.0, 14.0, 22.0, "projectile")
+
     def _mp_broadcast_result(self, host_completed_won: bool) -> None:
         """Host side: compute scores for both players, declare the winner
         by higher score, and send each side its own framed result message.
@@ -2176,6 +2254,31 @@ class GameScreen(ui.StyledScreen):
                    "distance":     int(self.distance), "time": self._run_time},
         )
         dialog.open()
+
+    # --- opponent squad-loss handler (versus only, host side) ------------
+
+    def _on_opponent_squad_loss(self, hit_x: float, hit_y: float) -> None:
+        """Versus only: an enemy reached the opponent's front line.
+
+        Mirrors _on_squad_loss but writes to opponent_squad instead of
+        squad_count, and never ends the level (only the LOCAL player's
+        death does that — opponent's loss is opponent's problem and
+        will be reflected in their snapshot).
+        """
+        if self._level_ended or self.opponent_squad <= 0:
+            return
+        self.opponent_squad -= 1
+        if self.particle_controller is not None:
+            self.particle_controller.burst(
+                hit_x, hit_y, count=6, speed=240.0, ttl=0.4,
+                size=10.0, frame="particle", rng=self._fire_rng,
+            )
+            self.particle_controller.burst(
+                hit_x, hit_y, count=6, speed=180.0, ttl=0.55,
+                size=14.0, frame="enemy_red", rng=self._fire_rng,
+            )
+        if self.opponent_squad <= 0:
+            self.opponent_alive = False
 
     # --- squad-loss handler (shared by attrition and escape) -------------
 
