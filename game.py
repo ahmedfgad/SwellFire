@@ -46,6 +46,10 @@ SCROLL_SPEED_PX_PER_SEC = 360.0     # forward scroll rate (visual + distance)
 HERO_W = 64.0
 HERO_H = 80.0
 HERO_BOTTOM_FRAC = 0.16             # hero stays this fraction up from the road floor
+# Lateral speed cap used by the autoplayer (M12). Tuned to roughly the
+# top end of a sustained finger drag, so the GA reads like a real player
+# steering rather than teleporting between targets every retarget tick.
+AUTO_HERO_MAX_SPEED = 1800.0        # px/sec
 LANE_GRAVITY_STRENGTH = 6.0         # per-second pull rate toward nearest lane
 LANE_GRAVITY_RADIUS_PX = 80.0       # only engages within this distance of a lane center
 N_STRIPES = 14                      # dashed centerline stripes
@@ -903,7 +907,23 @@ class GameScreen(ui.StyledScreen):
             max_x = sx + sw - HERO_W * 0.5
             target = max(min_x, min(max_x, target))
             self._hero_target_x = target
-            self.hero.center_x = target
+            # Hero motion: manual touch already feels smooth because the
+            # finger updates target_x incrementally. The GA, however,
+            # sets a target far from the current hero position once per
+            # retarget tick (~6-12 Hz), so writing center_x directly
+            # would teleport the hero. Cap the per-frame slide at
+            # AUTO_HERO_MAX_SPEED so it reads like a real player.
+            if self.auto_mode:
+                desired_dx = target - self.hero.center_x
+                max_step = AUTO_HERO_MAX_SPEED * dt
+                if desired_dx > max_step:
+                    self.hero.center_x += max_step
+                elif desired_dx < -max_step:
+                    self.hero.center_x -= max_step
+                else:
+                    self.hero.center_x = target
+            else:
+                self.hero.center_x = target
 
             # Running bob — vertical sine driven by distance (so it looks
             # right even at varying frame rates).

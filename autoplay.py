@@ -50,7 +50,13 @@ GATE_WEIGHT = 600.0
 # Bumped to 800 and ENEMY_RADIUS widened to 0.14 so dense lanes get a
 # real "go around" signal.
 ENEMY_PENALTY = 800.0
-PICKUP_WEIGHT = 80.0
+# Pickup attraction is intentionally disabled. With any non-zero weight,
+# a near coin (d ≈ 0.05) scored ~PICKUP_WEIGHT / 0.05 ≈ 1600 — enough
+# to drag the agent through a SUB or DIV gate, which always loses more
+# squad than the pickup is worth. Coins still get collected when they
+# happen to lie on the way to a good gate; they just don't drive the
+# steering decision anymore.
+PICKUP_WEIGHT = 0.0
 # Centering used to be 5.0, strong enough to fight a marginal dodge.
 # At 1.5 the agent freely commits to a side when threats are present
 # but still returns to the middle on an empty stretch.
@@ -245,10 +251,13 @@ def fitness(snapshot: dict | None, target_frac: float) -> float:
             severity = 1.0 - lateral_gap / ENEMY_RADIUS
             score -= ENEMY_PENALTY * STYLE_SAFE_MULT * proximity * severity
 
-    # Pickup pull — small, just enough to grab coins when on the way.
-    for px, py in snapshot["pickups"]:
-        d = abs(target_frac - px) + 0.05
-        score += PICKUP_WEIGHT / d * (1.0 / (py + 0.20))
+    # Pickup pull intentionally disabled — see PICKUP_WEIGHT comment.
+    # The block is left in place behind a weight check so it can be
+    # re-enabled cleanly if the tuning is revisited.
+    if PICKUP_WEIGHT > 0.0:
+        for px, py in snapshot["pickups"]:
+            d = abs(target_frac - px) + 0.05
+            score += PICKUP_WEIGHT / d * (1.0 / (py + 0.20))
 
     # Mild centering bias — keeps the hero from drifting to the rail
     # when nothing else demands a side.
