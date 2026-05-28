@@ -28,6 +28,7 @@ from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import boss as boss_module
 import entities
 import gates
 import graphics
@@ -127,6 +128,11 @@ class GameScreen(ui.StyledScreen):
         self.level_config: dict | None = None
         self.distance_goal = 0.0
         self._level_ended = False
+        # Boss systems (M10).
+        self.boss: boss_module.Boss | None = None
+        self.boss_controller: boss_module.BossController | None = None
+        self.boss_widget: boss_module.BossWidget | None = None
+        self.boss_hp_bar: boss_module.BossHPBar | None = None
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
@@ -323,6 +329,7 @@ class GameScreen(ui.StyledScreen):
             self.gate_controller.clear()
         if self.gate_layer is not None and self.gate_layer.parent:
             self.gate_layer.parent.remove_widget(self.gate_layer)
+        self._teardown_boss()
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
         self.enemy_pool = None
@@ -358,7 +365,12 @@ class GameScreen(ui.StyledScreen):
             self._update_event = Clock.schedule_interval(self._update, 1 / 60.0)
 
     def _apply_level_config(self) -> None:
-        """Look up the per-level config and push it to the spawners."""
+        """Look up the per-level config and push it to the spawners.
+
+        Boss levels (M10) disable the regular enemy + gate spawners — the
+        boss controller handles all enemy spawning, and the player gets a
+        head-start squad/weapon so the fight isn't pistol+1.
+        """
         running = ui.app()
         cfg = levels.get_level(running.current_level) if running.current_level else None
         # Multiplayer (versus) doesn't go through the level table; use a
@@ -367,16 +379,81 @@ class GameScreen(ui.StyledScreen):
             cfg = levels.get_level(1)
         self.level_config = cfg
         self.distance_goal = float(cfg["distance_goal"])
+        is_boss = bool(cfg.get("boss"))
+
         if self.enemy_spawner is not None:
-            self.enemy_spawner.interval = cfg["enemy_spawn_interval"]
+            if is_boss:
+                # Boss controls all spawning during the fight.
+                self.enemy_spawner.interval = 0.0
+            else:
+                self.enemy_spawner.interval = cfg["enemy_spawn_interval"]
             self.enemy_spawner.enemy_speed = cfg["enemy_speed"]
             self.enemy_spawner.enemy_hp = cfg["enemy_hp"]
             self.enemy_spawner.chase_strength_min = cfg["enemy_chase_min"]
             self.enemy_spawner.chase_strength_max = cfg["enemy_chase_max"]
+
         if self.gate_spawner is not None:
-            self.gate_spawner.interval_px = cfg["gate_interval_px"]
+            if is_boss:
+                # No gates during the boss fight; bump the interval out of reach.
+                self.gate_spawner.interval_px = 1e9
+            else:
+                self.gate_spawner.interval_px = cfg["gate_interval_px"]
             self.gate_spawner.allowed_ops = list(cfg["allowed_ops"])
             self.gate_spawner.allowed_weapons = list(cfg["allowed_weapons"])
+
+        # Boss spawn / teardown.
+        self._teardown_boss()
+        if is_boss:
+            self._spawn_boss(cfg)
+            # Head-start squad + weapon so the fight has weight.
+            self.squad_count = int(cfg.get("starting_squad", 1))
+            self.current_weapon_id = cfg.get("starting_weapon", DEFAULT_WEAPON_ID)
+            self._fire_cooldown = 0.0
+
+    def _spawn_boss(self, cfg: dict) -> None:
+        if self._atlas is None or self.stage is None:
+            return
+        sx, sy = self.stage.pos
+        sw, sh = self.stage.size
+        boss_w = 160.0
+        boss_h = 160.0
+        boss_cx = sx + sw * 0.5
+        boss_cy = sy + sh * 0.82
+        self.boss = boss_module.Boss(
+            max_hp=int(cfg.get("boss_hp", 100)),
+            cx=boss_cx, cy=boss_cy,
+            width=boss_w, height=boss_h,
+        )
+        self.boss_widget = boss_module.BossWidget(
+            self.boss, self._atlas,
+            size_hint=(None, None), size=(boss_w, boss_h),
+        )
+        self.stage.add_widget(self.boss_widget)
+        self.boss_hp_bar = boss_module.BossHPBar(
+            self.boss,
+            size_hint=(0.6, None), height=dp(22),
+            pos_hint={"center_x": 0.5, "top": 0.99},
+        )
+        self.root_layout.add_widget(self.boss_hp_bar)
+        # Controller after widgets so an opening volley can render this frame.
+        self.boss_controller = boss_module.BossController(
+            self.boss, self.enemy_controller,
+        )
+        # Fire one volley now so the player sees an immediate threat.
+        self.boss_controller.opening_volley(
+            self.hero.center_x if self.hero else boss_cx,
+            sx, sy + sh,
+        )
+
+    def _teardown_boss(self) -> None:
+        if self.boss_widget is not None and self.boss_widget.parent:
+            self.boss_widget.parent.remove_widget(self.boss_widget)
+        if self.boss_hp_bar is not None and self.boss_hp_bar.parent:
+            self.boss_hp_bar.parent.remove_widget(self.boss_hp_bar)
+        self.boss = None
+        self.boss_widget = None
+        self.boss_hp_bar = None
+        self.boss_controller = None
 
     # --- per-frame update -------------------------------------------------
 
@@ -445,6 +522,17 @@ class GameScreen(ui.StyledScreen):
                 self.hero.center_y,
             )
 
+        # 3c. Boss (M10): drift + attack patterns. Boss spawns minions through
+        # `enemy_controller`; everything else (squad fire, attrition, particles)
+        # works on those minions unchanged.
+        if (self.boss_controller is not None
+                and self.boss is not None
+                and self.hero is not None):
+            self.boss_controller.update(
+                dt, self.hero.center_x, self.hero.center_y,
+                x_min, y_min, x_max, y_max,
+            )
+
         # 4. Squad: sync pool to squad_count, position followers in formation.
         if (self.squad_controller is not None
                 and self.hero is not None):
@@ -493,6 +581,24 @@ class GameScreen(ui.StyledScreen):
             )
             self.kills_total += kills
 
+            # Projectile vs boss (M10): AABB-only — boss is one big entity.
+            if self.boss_controller is not None and self.boss is not None and self.boss.alive:
+                def _on_boss_hit(hit_x, hit_y, died,
+                                 _pc=self.particle_controller, _rng=self._fire_rng,
+                                 _self=self):
+                    _pc.burst(hit_x, hit_y, count=4, speed=200.0, ttl=0.30,
+                              size=10.0, frame="particle", rng=_rng)
+                    if died:
+                        # Big celebratory burst at the boss center on kill.
+                        if _self.boss is not None:
+                            _pc.burst(_self.boss.cx, _self.boss.cy,
+                                      count=30, speed=380.0, ttl=0.65,
+                                      size=14.0, frame="particle", rng=_rng)
+                        _self._end_level(won=True)
+                boss_module.resolve_projectile_vs_boss(
+                    self.projectile_controller, self.boss_controller, _on_boss_hit,
+                )
+
             # Squad attrition: enemies that pierce the squad's front line cost one runner each.
             # When squad_count hits 0 the hero falls and the level fails.
             def _on_loss(hit_x, hit_y, _self=self, _rng=self._fire_rng):
@@ -528,9 +634,17 @@ class GameScreen(ui.StyledScreen):
             self.particle_renderer.rebuild()
         if self.squad_renderer is not None:
             self.squad_renderer.rebuild()
+        # 6b. Boss widget + HP bar follow the underlying data each frame.
+        if self.boss_widget is not None:
+            self.boss_widget.update_from_boss()
+        if self.boss_hp_bar is not None:
+            self.boss_hp_bar.update_from_boss()
 
-        # 6b. Distance goal reached → level complete.
+        # 6c. Distance goal reached → level complete (skipped on boss levels —
+        #     boss death drives the win condition there).
+        is_boss_level = bool(self.level_config and self.level_config.get("boss"))
         if (not self._level_ended
+                and not is_boss_level
                 and self.distance_goal > 0
                 and self.distance >= self.distance_goal):
             self._end_level(won=True)

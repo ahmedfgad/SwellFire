@@ -95,6 +95,23 @@ def build_levels() -> dict[int, dict[str, Any]]:
             squad_target_2 = int(round(_lerp(10.0, 40.0, t)))
             squad_target_3 = int(round(_lerp(20.0, 80.0, t)))
 
+            # The last level of every world is a boss fight (M10). It
+            # overrides the distance-goal win condition with "deplete boss
+            # HP", disables gates (the player can't pivot mid-fight) and
+            # gives the player a head-start squad + a world-appropriate weapon
+            # so the fight isn't starting from pistol+1.
+            is_boss = (in_world == LEVELS_PER_WORLD)
+            boss_hp = int(round(_lerp(60.0, 320.0, t))) if is_boss else 0
+            starting_squad = int(round(_lerp(8.0, 45.0, world / NUM_WORLDS))) if is_boss else 1
+            if not is_boss:
+                starting_weapon = "pistol"
+            elif world >= 4:
+                starting_weapon = "sniper"
+            elif world >= 2:
+                starting_weapon = "rifle"
+            else:
+                starting_weapon = "rifle"
+
             levels[index] = {
                 "index": index,
                 "world": world,
@@ -110,6 +127,10 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 "allowed_weapons": allowed_weapons,
                 "squad_target_2_star": squad_target_2,
                 "squad_target_3_star": squad_target_3,
+                "boss": is_boss,
+                "boss_hp": boss_hp,
+                "starting_squad": starting_squad,
+                "starting_weapon": starting_weapon,
             }
     return levels
 
