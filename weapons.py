@@ -61,6 +61,18 @@ WEAPONS: dict[str, Weapon] = {
 # Stable order for cycle / shortcut keys.
 ORDERED_IDS: list[str] = list(WEAPONS.keys())
 
+# Weapon tier scaling. Tier 1 is the base weapon (free for all); each
+# higher tier multiplies projectile damage. Index by tier 1..4 so the
+# zero slot is unused.
+MAX_TIER = 4
+TIER_DAMAGE_MULT: list[float] = [None, 1.0, 1.5, 2.0, 3.0]
+
+
+def tier_damage(weapon: "Weapon", tier: int) -> int:
+    """Effective damage for `weapon` at tier `tier` (clamped to MAX_TIER)."""
+    tier = max(1, min(MAX_TIER, int(tier)))
+    return max(1, int(round(weapon.damage * TIER_DAMAGE_MULT[tier])))
+
 
 def get(weapon_id: str) -> Weapon:
     return WEAPONS[weapon_id]

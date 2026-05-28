@@ -151,6 +151,9 @@ class GameScreen(ui.StyledScreen):
         self.level_config: dict | None = None
         self.distance_goal = 0.0
         self._level_ended = False
+        # Touch-HUD buttons (M11.5 follow-up). Initialized in build().
+        self.grenade_btn = None
+        self.shield_btn = None
         # Boss systems (M10).
         self.boss: boss_module.Boss | None = None
         self.boss_controller: boss_module.BossController | None = None
@@ -225,6 +228,25 @@ class GameScreen(ui.StyledScreen):
         )
         self.back_btn.bind(on_release=lambda *_: self._exit())
         self.root_layout.add_widget(self.back_btn)
+
+        # Bottom-left touch HUD: grenade + shield buttons. Visible during
+        # gameplay; tap to fire/activate. Counts update every frame; greyed
+        # out when the player has none.
+        self.grenade_btn = ui.StyledButton(
+            text="G 0", bg=[0.20, 0.80, 0.95, 1], font_size=sp(18),
+            size_hint=(0.10, 0.10),
+            pos_hint={"x": 0.02, "y": 0.03},
+        )
+        self.grenade_btn.bind(on_release=lambda *_: self._detonate_grenade())
+        self.root_layout.add_widget(self.grenade_btn)
+
+        self.shield_btn = ui.StyledButton(
+            text="S 0", bg=[0.50, 0.85, 1.00, 1], font_size=sp(18),
+            size_hint=(0.10, 0.10),
+            pos_hint={"x": 0.14, "y": 0.03},
+        )
+        self.shield_btn.bind(on_release=lambda *_: self._activate_shield())
+        self.root_layout.add_widget(self.shield_btn)
 
     # --- layout ----------------------------------------------------------
 
@@ -851,9 +873,17 @@ class GameScreen(ui.StyledScreen):
                     # enemies are no longer trivialized by a 100-runner squad.
                     if len(positions) > MAX_SHOOTERS_PER_SHOT:
                         positions = self._fire_rng.sample(positions, MAX_SHOOTERS_PER_SHOT)
+                    # Apply weapon-tier damage multiplier from the player's
+                    # shop purchases (state.get_weapon_tier). Tier 1 (default)
+                    # = 1.0×; tier 4 = 3.0×.
+                    running_app = ui.app()
+                    tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
+                            if running_app and running_app.state else 1)
+                    effective_damage = weapons.tier_damage(weapon, tier)
                     entities.fire_from_positions(
                         positions, target_x, target_y, weapon,
                         self.projectile_controller, self._fire_rng,
+                        damage_override=effective_damage,
                     )
                     self._fire_cooldown = 1.0 / weapon.fire_rate
                     # M11 polish: muzzle flash + gun smoke at the hero's muzzle,
@@ -992,19 +1022,30 @@ class GameScreen(ui.StyledScreen):
         weapon_name = weapons.get(self.current_weapon_id).name
         progress = "{:.0f} / {:.0f}".format(self.distance, self.distance_goal) \
             if self.distance_goal > 0 else "{:.0f}".format(self.distance)
-        booster_bits = []
-        if self.grenade_count > 0:
-            booster_bits.append("[G]{}".format(self.grenade_count))
-        if self.shield_count > 0 or self.shield_active_until > self._run_time:
-            shield_label = "[S]{}".format(self.shield_count)
+        # Sync the on-screen booster buttons (count + dimmed when empty).
+        if self.grenade_btn is not None:
+            self.grenade_btn.text = "G\n{}".format(self.grenade_count)
+            self.grenade_btn.disabled = self.grenade_count <= 0
+            self.grenade_btn.bg = (
+                [0.20, 0.80, 0.95, 1] if self.grenade_count > 0
+                else [0.30, 0.30, 0.35, 1]
+            )
+        if self.shield_btn is not None:
             if self.shield_active_until > self._run_time:
-                shield_label += "*{:.1f}s".format(self.shield_active_until - self._run_time)
-            booster_bits.append(shield_label)
-        booster_hud = ("   " + "  ".join(booster_bits)) if booster_bits else ""
+                remaining = self.shield_active_until - self._run_time
+                self.shield_btn.text = "S ACT\n{:.1f}s".format(remaining)
+                self.shield_btn.bg = [1.0, 0.85, 0.30, 1]
+                self.shield_btn.disabled = True
+            else:
+                self.shield_btn.text = "S\n{}".format(self.shield_count)
+                self.shield_btn.disabled = self.shield_count <= 0
+                self.shield_btn.bg = (
+                    [0.50, 0.85, 1.00, 1] if self.shield_count > 0
+                    else [0.30, 0.30, 0.35, 1]
+                )
         self.hud_label.text = ("Distance {}     Squad {}     "
-                               "Weapon: {}     Kills {}{}").format(
+                               "Weapon: {}     Kills {}").format(
             progress, self.squad_count, weapon_name, self.kills_total,
-            booster_hud,
         )
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0

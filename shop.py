@@ -51,29 +51,56 @@ class ShopItem:
     booster_id: str = ""
     booster_qty: int = 0
     squad_target: int = 0
+    weapon_id: str = ""    # for weapon items — which weapon this row represents
+
+
+# Per-weapon, per-tier prices: TIER_PRICES[weapon][tier] = coins.
+# Cheaper weapons have cheaper upgrades; tier 1 is always free for all weapons.
+TIER_PRICES: dict[str, dict[int, int]] = {
+    "pistol":  {2: 200,  3: 500,  4: 1200},
+    "rifle":   {2: 400,  3: 1000, 4: 2200},
+    "shotgun": {2: 700,  3: 1500, 4: 3000},
+    "sniper":  {2: 1000, 3: 2500, 4: 5000},
+}
+
+
+def next_tier_price(weapon_id: str, current_tier: int) -> int | None:
+    """Price to upgrade `weapon_id` from `current_tier` to the next tier.
+    Returns None if the weapon is already at the max tier."""
+    if current_tier >= 4:
+        return None
+    return TIER_PRICES.get(weapon_id, {}).get(current_tier + 1)
 
 
 # Order matters: items render in this order under their category.
 CATALOG: list[ShopItem] = [
-    # --- starting weapons ------------------------------------------------
+    # --- weapons --------------------------------------------------------
+    # All four weapons are tier-1 free. The card's `price` is set dynamically
+    # in the UI based on the player's current tier; this static price is
+    # the floor (tier 2 entry price) used for the catalog declaration only.
     ShopItem(
-        id="weapon_rifle", label="Rifle (starter)", price=800,
-        category="weapon",
-        description="Permanent. Every non-boss level starts with a rifle "
-                    "(7 shots/s) instead of a pistol — the difference that "
-                    "makes W4+ playable.",
+        id="weapon_pistol", label="Pistol", price=200, category="weapon",
+        description="Reliable starter — 2.5 shots/s, 1 damage. Tap to equip; "
+                    "tap upgrade for more damage per shot.",
+        weapon_id="pistol",
     ),
     ShopItem(
-        id="weapon_shotgun", label="Shotgun (starter)", price=1500,
-        category="weapon",
-        description="Permanent. 5 projectiles per shot with spread — crushes "
-                    "the dense W5+ swarmer + bomber waves.",
+        id="weapon_rifle", label="Rifle", price=400, category="weapon",
+        description="7 shots/s, 1 damage — the everyday workhorse. "
+                    "Crucial for W4+ regular levels.",
+        weapon_id="rifle",
     ),
     ShopItem(
-        id="weapon_sniper", label="Sniper (starter)", price=2500,
-        category="weapon",
-        description="Permanent. 3 damage per shot — punches through tanks and "
-                    "boss HP. Pair with a big squad and W6 is on the table.",
+        id="weapon_shotgun", label="Shotgun", price=700, category="weapon",
+        description="5 projectiles per shot, wide spread. Crushes swarmer "
+                    "clusters and dense W5+ waves.",
+        weapon_id="shotgun",
+    ),
+    ShopItem(
+        id="weapon_sniper", label="Sniper", price=1000, category="weapon",
+        description="3 damage per shot, slow fire rate. Punches through "
+                    "tanks; pairs with a big squad for W6.",
+        weapon_id="sniper",
     ),
 
     # --- boosters --------------------------------------------------------
@@ -134,13 +161,13 @@ CATEGORY_LABELS = {
 
 
 def is_owned(item: ShopItem, state) -> bool:
-    """One-off items (weapons, squad bonuses) become owned after purchase.
-    Boosters are consumable — never "owned"."""
+    """Squad bonuses become permanently owned after purchase. Weapons are
+    always "owned" (tier 1 is free) — the meaningful state is whether the
+    current tier is maxed out. Boosters are consumable, never "owned"."""
     if item.category == "weapon":
-        # Weapon item id is "weapon_<id>"; strip the prefix to get the
-        # weapon id used by state.weapon_unlocks.
-        wid = item.id.split("_", 1)[1]
-        return state.is_weapon_unlocked(wid)
+        # All weapons are owned at tier 1 by default; "owned" in the UI
+        # sense means at MAX tier (no more upgrades to buy).
+        return state.get_weapon_tier(item.weapon_id) >= 4
     if item.category == "squad":
         return state.squad_bonus >= item.squad_target
     return False

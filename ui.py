@@ -587,39 +587,69 @@ class ShopScreen(StyledScreen):
 
     def _make_item_widget(self, item: shop.ShopItem, state) -> "BoxLayout":
         """Each shop item is a single ButtonBehavior card — clicking
-        anywhere on the card triggers the purchase. Visual states make
-        owned / locked / can't-afford unambiguous.
+        anywhere on the card triggers either a buy (upgrade/booster/squad)
+        or an equip (weapon). Visual states make owned / locked /
+        can't-afford / equipped unambiguous.
         """
+        # Weapons: ALL owned at tier 1; the "ownable" state is MAX tier.
+        # Price is dynamic — depends on the current tier the player has.
+        if item.category == "weapon":
+            wid = item.weapon_id
+            current_tier = state.get_weapon_tier(wid)
+            next_price = shop.next_tier_price(wid, current_tier)
+            is_max = (next_price is None)
+            is_equipped = (state.starting_weapon == wid)
+            # The "effective price" used to render the card.
+            effective_price = next_price if next_price is not None else 0
+            can_afford = (next_price is not None) and state.can_afford(next_price)
+            owned = is_max          # for the OWNED border treatment when at MAX
+            squad_locked = False
+            is_selected = is_equipped
+            can_buy = is_max or can_afford  # can interact: equip (always) or upgrade
+            card = ShopItemCard(
+                item=item, can_buy=can_buy, owned=owned,
+                squad_locked=False, is_selected=is_selected,
+                on_buy=self._buy,
+                weapon_tier=current_tier, weapon_next_price=next_price,
+                weapon_is_max=is_max, weapon_is_equipped=is_equipped,
+            )
+            return card
+
         owned = shop.is_owned(item, state)
         can_afford = state.can_afford(item.price)
-        # Squad bonuses must be bought in order (1 → 2 → 3).
         squad_locked = False
         if item.category == "squad" and not owned:
             if state.squad_bonus < item.squad_target - 1:
                 squad_locked = True
-
-        # Currently-selected weapon = the player's highest-tier weapon
-        # that's also THIS item's weapon, so the gold-border treatment
-        # only appears on the active starting weapon.
-        is_selected = False
-        if item.category == "weapon" and owned:
-            wid = item.id.split("_", 1)[1]
-            is_selected = (state.starting_weapon == wid)
-
         can_buy = (not owned) and can_afford and (not squad_locked)
-
-        card = ShopItemCard(item=item, can_buy=can_buy, owned=owned,
-                            squad_locked=squad_locked,
-                            is_selected=is_selected,
-                            on_buy=self._buy)
+        card = ShopItemCard(
+            item=item, can_buy=can_buy, owned=owned,
+            squad_locked=squad_locked, is_selected=False,
+            on_buy=self._buy,
+        )
         return card
 
     def _buy(self, item: shop.ShopItem) -> None:
+        """Card-click handler. For weapons:
+          * if not equipped → equip it.
+          * if equipped and a higher tier is available + affordable → upgrade.
+          * otherwise → ignored (negative SFX).
+        For other categories: regular purchase.
+        """
         state = app().state
         success = False
         if item.category == "weapon":
-            wid = item.id.split("_", 1)[1]
-            success = state.purchase_weapon(wid, item.price)
+            wid = item.weapon_id
+            current_tier = state.get_weapon_tier(wid)
+            next_price = shop.next_tier_price(wid, current_tier)
+            is_equipped = (state.starting_weapon == wid)
+            if not is_equipped:
+                state.equip_weapon(wid)
+                success = True
+            elif next_price is not None and state.can_afford(next_price):
+                success = state.upgrade_weapon_tier(wid, current_tier + 1, next_price)
+            else:
+                success = False
         elif item.category == "booster":
             success = state.purchase_booster(
                 item.booster_id, item.booster_qty, item.price,
@@ -645,7 +675,11 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
     """
 
     def __init__(self, *, item, can_buy: bool, owned: bool,
-                 squad_locked: bool, is_selected: bool, on_buy, **kwargs):
+                 squad_locked: bool, is_selected: bool, on_buy,
+                 weapon_tier: int = 1, weapon_next_price=None,
+                 weapon_is_max: bool = False,
+                 weapon_is_equipped: bool = False,
+                 **kwargs):
         super().__init__(orientation="horizontal", spacing=dp(10),
                          size_hint_y=None, height=dp(96),
                          padding=(dp(10), dp(8)),
@@ -656,6 +690,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         self.squad_locked = squad_locked
         self.is_selected = is_selected
         self._on_buy = on_buy
+        self.weapon_tier = weapon_tier
+        self.weapon_next_price = weapon_next_price
+        self.weapon_is_max = weapon_is_max
+        self.weapon_is_equipped = weapon_is_equipped
 
         # Background card (color depends on state) + outer border.
         with self.canvas.before:
@@ -709,7 +747,32 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
 
         # Right: price / state stack
         right = BoxLayout(orientation="vertical",
-                          size_hint_x=None, width=dp(112), spacing=dp(4))
+                          size_hint_x=None, width=dp(124), spacing=dp(4))
+        # Weapons render their own special right column (tier indicator +
+        # upgrade price + equip badge) and skip the generic rendering.
+        if item.category == "weapon":
+            self._build_weapon_right_column(right)
+            self.add_widget(right)
+            self._sync_bg()
+            return
+        # Booster items get a current-count chip pinned to the top.
+        if item.category == "booster":
+            state = app().state
+            count_now = state.get_booster_balance(item.booster_id)
+            owned_chip = Label(
+                text="[b]You have: {}[/b]".format(count_now),
+                font_size=sp(14), color=(0.55, 0.95, 0.55, 1),
+                halign="center", valign="middle", markup=True,
+                size_hint_y=0.32,
+            )
+            owned_chip.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+            right.add_widget(owned_chip)
+            price_size_hint = 0.36
+            state_size_hint = 0.32
+        else:
+            price_size_hint = 0.55
+            state_size_hint = 0.45
+
         # Top of right column = price OR owned check
         if owned:
             top_text = "[b]OWNED[/b]"
@@ -726,7 +789,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         price_lbl = Label(
             text=top_text, font_size=sp(18), color=top_color,
             halign="center", valign="middle", markup=True,
-            size_hint_y=0.55,
+            size_hint_y=price_size_hint,
         )
         price_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         right.add_widget(price_lbl)
@@ -743,7 +806,6 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
             state_text = "Need +{}".format(item.squad_target - 1)
             state_color = (1, 1, 1, 0.7)
         elif not can_buy:
-            # show shortfall
             shortfall = item.price - app().state.coins_balance
             state_text = "Need +{} c".format(shortfall)
             state_color = (0.95, 0.55, 0.55, 1)
@@ -753,7 +815,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         state_lbl = Label(
             text=state_text, font_size=sp(13), bold=True,
             color=state_color, halign="center", valign="middle",
-            size_hint_y=0.45,
+            size_hint_y=state_size_hint,
         )
         state_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         right.add_widget(state_lbl)
@@ -761,6 +823,57 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
 
         # Initial bg/border sync
         self._sync_bg()
+
+    def _build_weapon_right_column(self, right):
+        """Special right-column layout for weapon cards."""
+        tier = self.weapon_tier
+        # Top: tier indicator "Lv 2 / 4"
+        tier_lbl = Label(
+            text="[b]Lv {} / 4[/b]".format(tier),
+            font_size=sp(18), color=(1, 1, 1, 0.92), markup=True,
+            halign="center", valign="middle",
+            size_hint_y=0.30,
+        )
+        tier_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        right.add_widget(tier_lbl)
+        # Middle: EQUIPPED badge or "Tap to equip"
+        if self.weapon_is_equipped:
+            equip_text = "[b]EQUIPPED[/b]"
+            equip_color = (1.0, 0.85, 0.20, 1.0)
+        else:
+            equip_text = "Tap to equip"
+            equip_color = (0.55, 0.95, 0.55, 1.0)
+        equip_lbl = Label(
+            text=equip_text, font_size=sp(13), color=equip_color, markup=True,
+            halign="center", valign="middle",
+            size_hint_y=0.30,
+        )
+        equip_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        right.add_widget(equip_lbl)
+        # Bottom: upgrade chip — "Buy Lv X+1: Yc" / "MAX" / "Need +c"
+        if self.weapon_is_max:
+            up_text = "[b]MAX[/b]"
+            up_color = (0.55, 0.95, 0.55, 1.0)
+        else:
+            if self.weapon_is_equipped:
+                can_pay = app().state.can_afford(self.weapon_next_price)
+                if can_pay:
+                    up_text = "Tap: Lv {} {}c".format(tier + 1, self.weapon_next_price)
+                    up_color = (1.0, 0.92, 0.40, 1.0)
+                else:
+                    shortfall = self.weapon_next_price - app().state.coins_balance
+                    up_text = "Lv {}: need +{}c".format(tier + 1, shortfall)
+                    up_color = (0.95, 0.55, 0.55, 1.0)
+            else:
+                up_text = "Lv {}: {}c".format(tier + 1, self.weapon_next_price)
+                up_color = (1, 1, 1, 0.5)
+        up_lbl = Label(
+            text=up_text, font_size=sp(13), bold=True, color=up_color,
+            markup=True, halign="center", valign="middle",
+            size_hint_y=0.40,
+        )
+        up_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        right.add_widget(up_lbl)
 
     def _icon_kind_for(self, item):
         if item.category == "weapon":
@@ -780,20 +893,21 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         ]
 
     def on_release(self):
+        # For weapons: tap is always actionable (equip if not equipped, OR
+        # upgrade if equipped and affordable). The on_buy handler in
+        # ShopScreen disambiguates.
+        if self.item.category == "weapon":
+            self._on_buy(self.item)
+            return
         if not self.can_buy:
-            # Brief negative feedback when the player taps a card they can't buy.
             running = app()
             if running is not None and getattr(running, "audio", None):
                 running.audio.play_sfx("hit")
-            # Flash the border red briefly.
             from kivy.animation import Animation
             self._border_color.rgba = (1.0, 0.30, 0.30, 1.0)
             Animation(rgba=(1.0, 1.0, 1.0, 0.18),
                       duration=0.5, t="out_quad").start(self._border_color)
             return
-        # Already-owned weapon: switch starting weapon (cosmetic — same effect
-        # as buying the highest tier the player owns, but feels right).
-        # For non-weapon owned items there's nothing to do.
         self._on_buy(self.item)
 
 
@@ -827,20 +941,134 @@ class WorldMapScreen(StyledScreen):
             self.grid.add_widget(btn)
 
 
+class LevelNode(ButtonBehavior, Widget):
+    """Candy-Crush-style circular level node. Click handler is `on_click(index)`."""
+
+    NODE_RADIUS = dp(38)
+    BOSS_RADIUS = dp(50)
+    STAR_STRIP_HEIGHT = dp(24)
+
+    def __init__(self, *, level_index, in_world, is_boss, unlocked, stars,
+                 theme, on_click, **kwargs):
+        radius = self.BOSS_RADIUS if is_boss else self.NODE_RADIUS
+        super().__init__(size_hint=(None, None),
+                         size=(radius * 2, radius * 2 + self.STAR_STRIP_HEIGHT),
+                         **kwargs)
+        self.level_index = level_index
+        self.in_world = in_world
+        self.is_boss = is_boss
+        self.unlocked = unlocked
+        self.stars = stars
+        self._on_click = on_click
+        self._theme = theme
+        self._radius = radius
+        self._build_canvas()
+        self._build_children()
+        self.bind(pos=self._sync, size=self._sync)
+        self._sync()
+
+    def _build_canvas(self) -> None:
+        accent = self._theme["accent"]
+        with self.canvas:
+            if not self.unlocked:
+                Color(0.35, 0.35, 0.42, 0.85)
+            else:
+                Color(accent[0], accent[1], accent[2], 0.95)
+            self._halo = Ellipse()
+            if not self.unlocked:
+                Color(0.18, 0.18, 0.22, 0.98)
+            elif self.is_boss:
+                Color(0.92, 0.30, 0.30, 1.0)
+            elif self.stars > 0:
+                Color(0.20, 0.62, 0.40, 1.0)
+            else:
+                Color(0.22, 0.55, 0.92, 1.0)
+            self._inner = Ellipse()
+
+    def _build_children(self) -> None:
+        if self.unlocked:
+            text = str(self.in_world)
+            color = (1.0, 1.0, 1.0, 1.0)
+        else:
+            text = "?"
+            color = (1.0, 1.0, 1.0, 0.45)
+        font_size = sp(28) if self.is_boss else sp(22)
+        self._label = Label(text=text, font_size=font_size, bold=True, color=color,
+                            halign="center", valign="middle")
+        self.add_widget(self._label)
+        self._star_row = None
+        if self.unlocked and self.stars > 0:
+            self._star_row = StarRow(stars=self.stars)
+            self.add_widget(self._star_row)
+
+    def _sync(self, *_):
+        x, y = self.pos
+        r = self._radius
+        circle_y = y
+        self._halo.pos = (x - dp(4), circle_y - dp(4))
+        self._halo.size = (r * 2 + dp(8), r * 2 + dp(8))
+        self._inner.pos = (x, circle_y)
+        self._inner.size = (r * 2, r * 2)
+        self._label.pos = (x, circle_y)
+        self._label.size = (r * 2, r * 2)
+        self._label.text_size = self._label.size
+        if self._star_row is not None:
+            self._star_row.pos = (x, circle_y + r * 2 + dp(2))
+            self._star_row.size = (r * 2, self.STAR_STRIP_HEIGHT - dp(4))
+
+    def on_release(self):
+        running = app()
+        if not self.unlocked:
+            if running and getattr(running, "audio", None):
+                running.audio.play_sfx("hit")
+            return
+        self._on_click(self.level_index)
+
+
 class LevelSelectScreen(StyledScreen):
+    """Candy-Crush-style level map for the current world.
+
+    10 circular `LevelNode`s on a zigzag path, level 1 at the bottom
+    (player starts low and climbs up), level 10 (boss) at the top.
+    Wrapped in a ScrollView so all nodes fit on any window height.
+    Auto-scrolls to the highest-unlocked level on entry.
+    """
+
     theme_world = 1
+    NODE_SPACING_Y = dp(82)
+    NODE_LEFT_X_FRAC = 0.30
+    NODE_RIGHT_X_FRAC = 0.70
 
     def build(self):
-        self.outer = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(12))
-        self.title_label = Label(text="", font_size=sp(30), bold=True,
-                                 size_hint_y=0.14, color=[1, 1, 1, 1])
-        self.outer.add_widget(self.title_label)
-        self.grid = GridLayout(cols=5, spacing=dp(12), size_hint_y=0.72)
-        self.outer.add_widget(self.grid)
-        back = StyledButton(text="Back", bg=[0.45, 0.45, 0.5, 1], size_hint_y=0.14)
+        outer = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+
+        self.title_label = Label(
+            text="", font_size=sp(26), bold=True, color=[1, 1, 1, 1],
+            size_hint_y=None, height=dp(50),
+        )
+        outer.add_widget(self.title_label)
+
+        self.scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False, do_scroll_y=True,
+            bar_width=dp(4), scroll_type=["bars", "content"],
+        )
+        self.map_widget = Widget(
+            size_hint=(1, None),
+            height=self.NODE_SPACING_Y * levels.LEVELS_PER_WORLD + dp(80),
+        )
+        self.scroll.add_widget(self.map_widget)
+        outer.add_widget(self.scroll)
+
+        back = StyledButton(text="Back", bg=[0.45, 0.45, 0.5, 1],
+                            size_hint_y=None, height=BTN_HEIGHT)
         back.bind(on_release=lambda *_: app().go("worldmap"))
-        self.outer.add_widget(back)
-        self.root_layout.add_widget(self.outer)
+        outer.add_widget(back)
+
+        self.root_layout.add_widget(outer)
+        self.map_widget.bind(
+            width=lambda *_: self._layout_nodes(),
+            height=lambda *_: self._layout_nodes(),
+        )
 
     def on_enter(self):
         running = app()
@@ -849,20 +1077,69 @@ class LevelSelectScreen(StyledScreen):
         theme = levels.get_world(world)
         self.title_label.text = "World {}  -  {}".format(world, theme["name"])
         self.bg.set_theme(theme)
-        self.grid.clear_widgets()
-        for lvl in levels.levels_in_world(world):
+
+        self.map_widget.clear_widgets()
+        self.map_widget.canvas.before.clear()
+
+        nodes_data = list(levels.levels_in_world(world))
+        for lvl in nodes_data:
             index = lvl["index"]
             unlocked = running.state.is_unlocked(index)
             stars = running.state.get_stars(index)
-            label = "W{} L{}".format(lvl["world"], lvl["world_index"])
-            if unlocked:
-                btn = LevelButton(text=label, bg=[0.25, 0.55, 0.9, 1])
-                btn.stars = stars
-                btn.bind(on_release=lambda b, i=index: running.start_level(i))
-            else:
-                btn = StyledButton(text=label + "\nLocked",
-                                   bg=[0.3, 0.3, 0.35, 1], halign="center")
-            self.grid.add_widget(btn)
+            in_world = lvl["world_index"]
+            is_boss = (in_world == levels.LEVELS_PER_WORLD)
+            node = LevelNode(
+                level_index=index, in_world=in_world, is_boss=is_boss,
+                unlocked=unlocked, stars=stars, theme=theme,
+                on_click=lambda i: running.start_level(i),
+            )
+            self.map_widget.add_widget(node)
+
+        from kivy.clock import Clock as _Clock
+        _Clock.schedule_once(lambda _dt: self._layout_nodes(), 0)
+        _Clock.schedule_once(lambda _dt: self._scroll_to_highest(), 0)
+
+    def _layout_nodes(self) -> None:
+        nodes = [c for c in self.map_widget.children if isinstance(c, LevelNode)]
+        if not nodes:
+            return
+        nodes.sort(key=lambda nd: nd.in_world)
+        n = len(nodes)
+        map_w = self.map_widget.width
+        map_h = self.map_widget.height
+        if map_w <= 1 or map_h <= 1:
+            return
+        line_points = []
+        for i, node in enumerate(nodes):
+            x_frac = (self.NODE_LEFT_X_FRAC
+                      if i % 2 == 0
+                      else self.NODE_RIGHT_X_FRAC)
+            y_frac = (i + 0.5) / n
+            cx = map_w * x_frac
+            cy = map_h * y_frac
+            node.x = cx - node._radius
+            node.y = cy - node._radius
+            line_points.extend([cx, cy])
+        self.map_widget.canvas.before.clear()
+        with self.map_widget.canvas.before:
+            Color(1, 1, 1, 0.15)
+            Line(points=line_points, width=10.0, joint="round", cap="round")
+            Color(1, 1, 1, 0.45)
+            Line(points=line_points, width=2.8, joint="round", cap="round")
+
+    def _scroll_to_highest(self) -> None:
+        running = app()
+        nodes = [c for c in self.map_widget.children if isinstance(c, LevelNode)]
+        if not nodes:
+            return
+        nodes.sort(key=lambda nd: nd.in_world)
+        highest = 1
+        for node in nodes:
+            if node.unlocked:
+                highest = node.in_world
+        n = len(nodes)
+        scroll_y = (highest - 1) / max(1, n - 1)
+        self.scroll.scroll_y = max(0.0, min(1.0, scroll_y))
 
 
 class SettingsScreen(StyledScreen):

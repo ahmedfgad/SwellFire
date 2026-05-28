@@ -608,17 +608,20 @@ class SquadController:
 
 def fire_from_positions(positions, target_x: float, target_y: float,
                         weapon, projectile_controller: ProjectileController,
-                        rng: random.Random) -> int:
+                        rng: random.Random,
+                        damage_override: int | None = None) -> int:
     """Spawn one projectile per shooter position, all aimed at one target.
 
     Shooter positions are `(x, y)` tuples — typically the hero's muzzle plus
     every active squad-runner's muzzle. Weapon spread applies per-shot so the
-    swarm doesn't read as a single laser. Returns number actually spawned
-    (the projectile pool may be saturated).
+    swarm doesn't read as a single laser. `damage_override` lets the caller
+    apply a tier multiplier without mutating the immutable `Weapon`. Returns
+    number actually spawned (the projectile pool may be saturated).
     """
     speed = weapon.projectile_speed
     size = weapon.projectile_size
     spread = math.radians(weapon.spread_deg)
+    damage = weapon.damage if damage_override is None else max(1, int(damage_override))
     spawned = 0
     for (sx, sy) in positions:
         dx = target_x - sx
@@ -636,7 +639,7 @@ def fire_from_positions(positions, target_x: float, target_y: float,
         vy = (aim_x * sin_a + aim_y * cos_a) * speed
         idx = projectile_controller.spawn(
             sx, sy, vx, vy, size, size,
-            weapon.frame, weapon.damage, weapon.ttl,
+            weapon.frame, damage, weapon.ttl,
         )
         if idx >= 0:
             spawned += 1

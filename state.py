@@ -64,6 +64,14 @@ class GameState:
             "grenade_balance": 0,
             "shield_balance": 0,
             "weapon_unlocks": dict(DEFAULT_WEAPON_UNLOCKS),
+            # Per-weapon upgrade tiers (1-4). All four weapons start at
+            # tier 1 (free). The shop sells tier 2 → 3 → 4 upgrades; higher
+            # tier → more damage per projectile.
+            "weapon_tiers": {"pistol": 1, "rifle": 1, "shotgun": 1, "sniper": 1},
+            # Equipped weapon = which one the player starts every non-boss
+            # level with. Default pistol; the shop lets the player tap any
+            # owned weapon to make it the active starting weapon.
+            "equipped_weapon": "pistol",
             # Permanent shop upgrade — +N to every non-boss level's starting
             # squad. Capped at +6 by `set_squad_bonus`.
             "squad_bonus": 0,
@@ -182,15 +190,42 @@ class GameState:
 
     @property
     def starting_weapon(self) -> str:
-        """The highest-tier weapon the player owns — used as the default
-        starting weapon for non-boss levels.
+        """The player's currently-equipped weapon (set via the shop). All
+        four weapons are owned at tier 1 by default, so this is whichever
+        one the player tapped to equip — pistol initially.
 
         Boss levels override with their own `starting_weapon` field.
         """
-        for tier in reversed(WEAPON_TIERS):
-            if self.is_weapon_unlocked(tier):
-                return tier
-        return "pistol"
+        equipped = self.data.get("equipped_weapon", "pistol")
+        if equipped not in DEFAULT_WEAPON_UNLOCKS:
+            return "pistol"
+        return equipped
+
+    def get_weapon_tier(self, weapon_id: str) -> int:
+        tiers = self.data.get("weapon_tiers", {})
+        return max(1, int(tiers.get(weapon_id, 1)))
+
+    def equip_weapon(self, weapon_id: str) -> None:
+        if weapon_id in DEFAULT_WEAPON_UNLOCKS:
+            self.data["equipped_weapon"] = weapon_id
+            self.save()
+
+    def upgrade_weapon_tier(self, weapon_id: str, target_tier: int,
+                            price: int) -> bool:
+        """Raise this weapon's tier from current to target. Returns True
+        on success (deducts coins, persists)."""
+        current = self.get_weapon_tier(weapon_id)
+        if target_tier != current + 1:
+            return False    # only one tier at a time
+        if target_tier > 4:
+            return False
+        if not self.spend_coins(price):
+            return False
+        tiers = dict(self.data.get("weapon_tiers", {}))
+        tiers[weapon_id] = target_tier
+        self.data["weapon_tiers"] = tiers
+        self.save()
+        return True
 
     @property
     def squad_bonus(self) -> int:
