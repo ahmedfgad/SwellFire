@@ -35,7 +35,7 @@ import main as m                    # noqa: E402
 
 
 SIM_DT = 1.0 / 60.0
-SIM_MAX_SECONDS = 35.0
+SIM_MAX_SECONDS = 60.0   # bumped after the 20-s minimum-duration change
 
 
 @dataclass

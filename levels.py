@@ -79,16 +79,22 @@ def build_levels() -> dict[int, dict[str, Any]]:
     `t` is the overall difficulty ramp in [0, 1] across all 60 levels.
     """
     levels: dict[int, dict[str, Any]] = {}
+    # Per-level duration is the canonical "how long should this level feel"
+    # knob — everything that scales with level length (distance_goal,
+    # kill_target) derives from it. Two parameters control the ramp:
+    #   LEVEL_BASE_DURATION_SEC  — L1's floor
+    #   LEVEL_DURATION_STEP_SEC  — added per level (globally, not per world)
+    # so the ramp is monotonic and the player can feel each new level
+    # extending. L1 = 20 s, L60 = 20 + 59*2 = 138 s.
+    LEVEL_BASE_DURATION_SEC = 20.0
+    LEVEL_DURATION_STEP_SEC = 2.0
     for world in range(1, NUM_WORLDS + 1):
-        # Minimum level duration ramps from 10s (W1) to 20s (W6). Levels
-        # later than the world's start nudge higher within the world.
-        world_min_duration_floor = 8.0 + 2.0 * world
         for in_world in range(1, LEVELS_PER_WORLD + 1):
             index = (world - 1) * LEVELS_PER_WORLD + in_world
             t = (index - 1) / max(1, TOTAL_LEVELS - 1)
 
-            min_duration = world_min_duration_floor + (in_world - 1) * 0.4
-            distance_goal = max(_lerp(2400.0, 7200.0, t),
+            min_duration = LEVEL_BASE_DURATION_SEC + (index - 1) * LEVEL_DURATION_STEP_SEC
+            distance_goal = max(_lerp(7200.0, 14400.0, t),
                                 min_duration * SCROLL_SPEED_PX_PER_SEC)
             enemy_spawn_interval = _lerp(0.18, 0.05, t)     # ~5/s → ~20/s
             enemy_speed = _lerp(180.0, 290.0, t)            # px/sec downward
@@ -112,9 +118,12 @@ def build_levels() -> dict[int, dict[str, Any]]:
             else:
                 level_type = TYPE_DYNAMIC
 
-            # Kill target — how many enemies the player should expect to put
-            # down. Roughly (level_seconds * spawns_per_sec * 0.55), capped
-            # so the player isn't punished for over-shooting.
+            # Kill target derives from level length × spawn rate × 0.55.
+            # Adjust `min_duration` and this updates automatically — the same
+            # auto-flow applies if a future tuner edits `enemy_spawn_interval`
+            # directly. (`kill_target` is informational right now — the win
+            # condition is distance + boss death; M14 polish can fold it into
+            # stars or a per-level objective panel.)
             level_seconds = distance_goal / SCROLL_SPEED_PX_PER_SEC
             kill_target = int(round(level_seconds * (1.0 / enemy_spawn_interval) * 0.55))
 
