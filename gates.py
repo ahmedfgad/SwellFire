@@ -67,13 +67,19 @@ class Gate(Widget):
         self.label_text = label_text
         self.consumed = False        # True once a gate in the pair fires
         self.missed = False          # True if pair scrolled past without entering
+        self.selected = False        # True if THIS gate was the one picked
 
         color = OP_COLORS[op]
         with self.canvas.before:
             self._color = Color(*color)
             self._bg = RoundedRectangle(radius=[dp(12)])
-            Color(1, 1, 1, 0.85)
+            self._border_color = Color(1, 1, 1, 0.85)
             self._border = Line(rounded_rectangle=[0, 0, 0, 0, dp(12)], width=2.0)
+            # A second "selection glow" border drawn underneath; invisible
+            # by default, lit up on selection so the chosen gate reads from
+            # a glance even after the hero has scrolled past it.
+            self._glow_color = Color(1, 1, 1, 0.0)
+            self._glow = Line(rounded_rectangle=[0, 0, 0, 0, dp(14)], width=6.0)
 
         self._label = Label(
             text=label_text, font_size=sp(30), bold=True, color=(1, 1, 1, 1),
@@ -87,14 +93,44 @@ class Gate(Widget):
         self._bg.pos = self.pos
         self._bg.size = self.size
         self._border.rounded_rectangle = [self.x, self.y, self.width, self.height, dp(12)]
+        # Glow sits slightly outside the gate so it reads as a halo.
+        self._glow.rounded_rectangle = [
+            self.x - dp(4), self.y - dp(4),
+            self.width + dp(8), self.height + dp(8), dp(14),
+        ]
         self._label.pos = self.pos
         self._label.size = self.size
         self._label.text_size = self.size
 
     def mark_consumed(self, dim: bool = True) -> None:
+        """Mark this gate as part of a resolved pair.
+
+        The *non*-picked gate in a pair fades to 30 % so the player sees the
+        choice was made; the picked gate uses `mark_selected()` instead so
+        it stays vivid and gains a glow.
+        """
         self.consumed = True
         if dim:
             self._color.a = 0.30      # fade so the player sees they took it
+            self._border_color.a = 0.30
+
+    def mark_selected(self) -> None:
+        """Highlight this gate as the player's pick — bright glow + bigger
+        label so the choice is unambiguous from any distance."""
+        self.consumed = True
+        self.selected = True
+        # Keep / boost the panel color and add a contrasting yellow halo.
+        self._color.a = min(1.0, OP_COLORS[self.op][3] + 0.18)
+        self._border_color.rgba = (1.0, 0.92, 0.35, 1.0)
+        self._glow_color.rgba = (1.0, 0.92, 0.35, 0.85)
+        # Slightly larger label so even at small panel size the picked gate
+        # reads "this one".
+        try:
+            from kivy.metrics import sp as _sp
+            self._label.font_size = _sp(34)
+            self._label.bold = True
+        except Exception:
+            pass
 
 
 # --- spawner -------------------------------------------------------------
@@ -104,12 +140,19 @@ class GateSpawner:
 
     INTERVAL_PX = 600.0          # distance between pairs
     GATE_HEIGHT = 88.0
-    GATE_GAP_PX = 24.0           # gap between the two gates in a pair
+    GATE_GAP_PX = 64.0           # gap between the two gates so the choice
+                                 # reads visually — was 24 px, which looked
+                                 # like one wide panel from a distance
     LATERAL_MARGIN = 18.0        # gap between outer gate edge and rail
 
     # Default allowed ops + weapons — game.GameScreen overrides per level (M9).
     DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_WEAPON, OP_GRENADE]
     DEFAULT_WEAPONS = ["rifle", "shotgun", "sniper"]
+    # "Pity gate" floor — after this many consecutive misses, the spawner
+    # forces the next pair to contain at least one MUL or ADD (safe choice).
+    # Keeps a player who missed gates by RNG from falling into an
+    # unrecoverable squad=1 spiral.
+    PITY_AFTER_MISSES = 2
 
     def __init__(self, controller: "GateController", seed: int | None = None):
         self.controller = controller
@@ -122,6 +165,9 @@ class GateSpawner:
         self._next_distance = 200.0
         self.allowed_ops: list[str] = list(self.DEFAULT_OPS)
         self.allowed_weapons: list[str] = list(self.DEFAULT_WEAPONS)
+        # Pity-gate tracking: GateController updates this counter whenever a
+        # pair scrolls past with neither gate consumed (miss).
+        self.consecutive_misses = 0
 
     def tick(self, distance: float, x_min: float, x_max: float, y_top: float) -> bool:
         """Spawn a pair when the run has advanced past the next interval.
@@ -138,7 +184,24 @@ class GateSpawner:
         left_x = x_min + self.LATERAL_MARGIN
         right_x = left_x + gate_w + self.GATE_GAP_PX
 
-        op_a, value_a, label_a = self._pick_op(exclude_op=None)
+        # Pity floor: if the player has missed the last few pairs, force at
+        # least one safe op (MUL or ADD) so they can recover.
+        force_safe = self.consecutive_misses >= self.PITY_AFTER_MISSES
+        if force_safe:
+            safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops]
+            if not safe_pool:
+                safe_pool = [OP_MUL, OP_ADD]   # never let pity become a no-op
+            op_a = self._rng.choice(safe_pool)
+            # Reuse the regular value-pick path by going through _pick_op
+            # with a constrained op list.
+            saved_ops = self.allowed_ops
+            self.allowed_ops = [op_a]
+            op_a, value_a, label_a = self._pick_op(exclude_op=None)
+            self.allowed_ops = saved_ops
+            # Reset the counter so we don't keep stacking pity gates.
+            self.consecutive_misses = 0
+        else:
+            op_a, value_a, label_a = self._pick_op(exclude_op=None)
         op_b, value_b, label_b = self._pick_op(exclude_op=op_a)
         self.controller.spawn_pair(
             (left_x,  y_top, gate_w, gate_h, op_a, value_a, label_a),
@@ -198,8 +261,13 @@ class GateController:
         self.spawned_total += 1
 
     def update(self, dt: float, scroll_speed: float,
-               hero_cx: float, hero_cy: float, on_apply) -> None:
-        """Scroll all gates down; fire `on_apply(gate)` on cross-through."""
+               hero_cx: float, hero_cy: float, on_apply, on_miss=None) -> None:
+        """Scroll all gates down; fire `on_apply(gate)` on cross-through.
+
+        Optional `on_miss()` is invoked once per pair that scrolls past
+        without the hero entering either gate (used by the pity-gate
+        spawner so two missed pairs in a row force a safe next gate).
+        """
         drop = scroll_speed * dt
         to_remove: list[list[Gate]] = []
         for pair in self.pairs:
@@ -220,19 +288,26 @@ class GateController:
                             picked = g
                             break
                     if picked is not None:
-                        picked.mark_consumed()
-                        # Fade the other gate too so it's clear the pair is done.
+                        picked.mark_selected()
+                        # Fade the *other* gate so the picked one is the
+                        # obvious one — at a glance the player can see which
+                        # they took even after both have scrolled past.
                         for g in pair:
                             if g is not picked:
                                 g.mark_consumed(dim=True)
                         self.applied_total += 1
                         on_apply(picked)
+                        # Reset the pity counter — the player succeeded.
+                        # (Spawner is the canonical owner; controller writes
+                        # through it so the next spawn knows about the success.)
                     else:
                         # Hero went through the gap between the two gates
                         # (or off to one side). Pair is missed.
                         for g in pair:
                             g.mark_consumed(dim=True)
                         self.missed_total += 1
+                        if on_miss is not None:
+                            on_miss()
 
             if pair[0].y + pair[0].height < self.stage.y - self.DESPAWN_BELOW_PX:
                 to_remove.append(pair)

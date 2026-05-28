@@ -6,22 +6,61 @@ returned dict is keyed by absolute level index (1..60); `LEVELS` caches
 the result at module load. Game logic reads per-level dicts via
 `get_level(index)`.
 
-Knob design (port from CoinTex's pattern):
-    * `distance_goal` — px the player must scroll past to finish.
-    * `enemy_spawn_interval` — seconds between enemy spawns (smaller = more).
-    * `enemy_speed` — px/sec the enemies travel toward the hero.
-    * `enemy_hp` — HP per enemy.
-    * `enemy_chase_{min,max}` — per-enemy lateral homing strength range.
-    * `gate_interval_px` — distance between gate pairs.
-    * `allowed_ops` — gate operation tags the spawner may pick.
-    * `allowed_weapons` — weapon ids that may appear in weapon-swap gates.
-    * `squad_target_{2,3}_star` — squad-count thresholds for the
-      respective star rating at level end.
-
-Difficulty scales **mostly via behavior**, not entity count — same lesson
-as CoinTex. The pool capacities and the renderer can sustain 200+ entities
-(see M3/M5 perf measurements); making the player feel pressure comes from
-faster enemies, more aggressive chasers, denser gates with riskier ops.
+# ---------------------------------------------------------------
+# WHICH FIELDS ARE AUTOMATIC vs HAND-TUNED?
+# ---------------------------------------------------------------
+#
+# AUTO-DERIVED (you change one input and these recompute) :
+#   distance_goal     ← max(t-lerp, min_duration * SCROLL_SPEED)
+#   kill_target       ← level_seconds * (1/enemy_spawn_interval) * 0.55
+#   level_seconds     ← distance_goal / SCROLL_SPEED
+#   level type tag    ← derived from `t` (early=static, mid=hybrid, late=dynamic)
+#   boss flag         ← in_world == LEVELS_PER_WORLD
+#
+# HAND-TUNED (each is its own dial — change in the function below) :
+#
+#   ─── per-level continuous ramps (all driven by `t` = (idx-1)/59) ───
+#     enemy_spawn_interval      0.18 → 0.05 s
+#     enemy_speed               180 → 290 px/s
+#     enemy_chase_min/max       (25 → 80) / (80 → 170) px/s lateral
+#     gate_interval_px          720 → 420 px
+#     boss_hp (boss levels)     350 → 1100 HP
+#     squad_target_2_star       10 → 40
+#     squad_target_3_star       20 → 80
+#
+#   ─── tiered (step changes by world / by t) ───
+#     enemy_hp                  1 (t<0.40) → 2 (t<0.78) → 3
+#     boss_minion_hp            1 (W1-3) → 2 (W4-5) → 3 (W6)
+#     allowed_ops               per world (see _allowed_enemy_types below)
+#     allowed_weapons           per world (rifle / shotgun / sniper unlocks)
+#     allowed_enemy_types       per world (grunt → +swarmer → +tank → +bomber → +splitter)
+#     starting_squad (boss)     3 → 12 (depends on world, not t)
+#     starting_weapon (boss)    pistol / rifle / sniper by world
+#
+#   ─── global knobs (apply to every level) ───
+#     LEVEL_BASE_DURATION_SEC   L1's floor
+#     LEVEL_DURATION_STEP_SEC   added per level globally
+#     SCROLL_SPEED_PX_PER_SEC   world auto-scroll speed
+#     LEVELS_PER_WORLD          10 (changing this would resize the WORLDS list)
+#     NUM_WORLDS                6
+#
+# STRATEGY TO TUNE :
+#   1. Want every level *longer*?  Bump LEVEL_BASE_DURATION_SEC or
+#      LEVEL_DURATION_STEP_SEC. distance_goal + kill_target follow.
+#   2. Want a *single world* harder?  Edit the matching `if world ==`
+#      branch in _allowed_enemy_types() to give heavier weights to
+#      tank / bomber / splitter.
+#   3. Want enemies tougher *across the board*?  Move the enemy_hp tier
+#      breakpoints down (e.g. `t < 0.25` instead of `t < 0.40`).
+#   4. Want bosses harder?  Bump the lerp endpoints in `boss_hp` and/or
+#      drop `starting_squad` endpoints. The difficulty sim in
+#      tools/difficulty_sim.py will tell you if the new numbers tip
+#      passive→W or greedy→L beyond what you want.
+#   5. Want gate cadence tighter?  Bump the gate_interval_px endpoints.
+#
+# The same `tools/difficulty_sim.py` runs every level with a passive and a
+# greedy agent so you can verify a change before shipping.
+# ---------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -135,6 +174,12 @@ def build_levels() -> dict[int, dict[str, Any]]:
             if world >= 5:
                 allowed_ops.append("sub")
 
+            # Enemy archetype mix per world. Weights are relative; the spawner
+            # normalizes. Late worlds add tank/bomber/splitter so a uniform-
+            # firepower squad can't just hose them down — focused fire and
+            # spread fire become real strategic choices.
+            allowed_enemy_types = _allowed_enemy_types(world)
+
             allowed_weapons = ["rifle"]
             if world >= 2:
                 allowed_weapons.append("shotgun")
@@ -191,8 +236,32 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 "type": level_type,
                 "min_duration_sec": min_duration,
                 "kill_target": kill_target,
+                "allowed_enemy_types": allowed_enemy_types,
             }
     return levels
+
+
+def _allowed_enemy_types(world: int) -> list[tuple[str, float]]:
+    """Per-world archetype mix: list of (archetype_name, weight) pairs.
+
+    Weights are relative — `EnemySpawner` normalizes. Tank/bomber/splitter
+    progressively join the mix so the squad must focus-fire, dodge AOE
+    on-death effects, and avoid creating mini-swarms by overkilling.
+    """
+    if world == 1:
+        return [("grunt", 1.0)]
+    if world == 2:
+        return [("grunt", 0.85), ("swarmer", 0.15)]
+    if world == 3:
+        return [("grunt", 0.65), ("swarmer", 0.15), ("tank", 0.20)]
+    if world == 4:
+        return [("grunt", 0.50), ("swarmer", 0.15),
+                ("tank", 0.15), ("bomber", 0.20)]
+    if world == 5:
+        return [("grunt", 0.40), ("swarmer", 0.15),
+                ("tank", 0.15), ("bomber", 0.15), ("splitter", 0.15)]
+    return [("grunt", 0.35), ("swarmer", 0.15),
+            ("tank", 0.15), ("bomber", 0.15), ("splitter", 0.20)]
 
 
 LEVELS: dict[int, dict[str, Any]] = build_levels()

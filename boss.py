@@ -58,6 +58,12 @@ class Boss:
         # Stream-pattern internal state.
         self._stream_timer = 0.0
         self._stream_left = 0
+        # Phase 2 trigger: True once HP drops below 50 %. Phase 2 is the
+        # "enraged" mode — faster pattern cadence, denser streams, and every
+        # volley adds 1 tank. The HP bar tints darker red and the boss flash
+        # ring fires on the transition so the player sees the shift.
+        self.phase2 = False
+        self.phase2_transition_pending = False
 
     def aabb(self) -> tuple[float, float, float, float]:
         hw = self.width * 0.5
@@ -95,10 +101,19 @@ class BossController:
         if not boss.alive:
             return
 
+        # Phase-2 transition: once below 50 % HP, enrage. Pattern cadence
+        # tightens; volleys add a tank; target re-pick happens twice as fast.
+        if not boss.phase2 and boss.hp * 2 <= boss.max_hp:
+            boss.phase2 = True
+            boss.phase2_transition_pending = True
+            # Reset the pattern timer so the next action fires within ~1s.
+            boss.pattern_timer = max(0.0, self.PATTERN_DURATION - 1.0)
+
         # Lateral drift toward target_cx; re-pick the target every
-        # ~3-4 seconds within the road.
-        self._target_timer += dt
-        if self._target_timer >= self.TARGET_REPICK_EVERY:
+        # ~3-4 seconds within the road (faster in phase 2).
+        repick_interval = (self.TARGET_REPICK_EVERY * 0.55
+                           if boss.phase2 else self.TARGET_REPICK_EVERY)
+        if self._target_timer >= repick_interval:
             self._target_timer = 0.0
             margin = boss.width * 0.5 + 20.0
             boss.target_cx = self._rng.uniform(x_min + margin, x_max - margin)
@@ -114,14 +129,17 @@ class BossController:
         if boss.flash_time > 0.0:
             boss.flash_time = max(0.0, boss.flash_time - dt)
 
-        # Pattern progression.
+        # Pattern progression. Phase 2 shortens the per-pattern duration.
+        pattern_duration = (self.PATTERN_DURATION * 0.65
+                            if boss.phase2 else self.PATTERN_DURATION)
         boss.pattern_timer += dt
-        if boss.pattern == PATTERN_VOLLEY and boss.pattern_timer >= self.PATTERN_DURATION:
+        if boss.pattern == PATTERN_VOLLEY and boss.pattern_timer >= pattern_duration:
             boss.pattern = PATTERN_STREAM
             boss.pattern_timer = 0.0
-            boss._stream_left = self.STREAM_COUNT
+            stream_count = (self.STREAM_COUNT + 4) if boss.phase2 else self.STREAM_COUNT
+            boss._stream_left = stream_count
             boss._stream_timer = 0.0
-        elif boss.pattern == PATTERN_STREAM and boss.pattern_timer >= self.PATTERN_DURATION:
+        elif boss.pattern == PATTERN_STREAM and boss.pattern_timer >= pattern_duration:
             boss.pattern = PATTERN_VOLLEY
             boss.pattern_timer = 0.0
             self._volley(hero_cx, x_min, y_max)
@@ -133,8 +151,10 @@ class BossController:
             pass
         elif boss.pattern == PATTERN_STREAM and boss._stream_left > 0:
             boss._stream_timer += dt
-            while boss._stream_timer >= self.STREAM_INTERVAL and boss._stream_left > 0:
-                boss._stream_timer -= self.STREAM_INTERVAL
+            stream_interval = (self.STREAM_INTERVAL * 0.55
+                               if boss.phase2 else self.STREAM_INTERVAL)
+            while boss._stream_timer >= stream_interval and boss._stream_left > 0:
+                boss._stream_timer -= stream_interval
                 self._stream_one(hero_cx, x_min, x_max, y_max)
                 boss._stream_left -= 1
 
@@ -152,24 +172,46 @@ class BossController:
     # --- attack patterns -------------------------------------------------
 
     def _volley(self, hero_cx: float, x_min: float, y_max: float) -> None:
-        """Fan of N enemies spawned at the top of the play area."""
+        """Fan of N enemies spawned at the top of the play area.
+
+        Phase 2 adds one tank per volley so the squad can't just hose grunts.
+        """
+        # Import here to avoid a circular import (entities imports graphics
+        # which doesn't import boss; boss doesn't normally need entities
+        # constants at module load time).
+        import entities as ent
+        boss = self.boss
         for _ in range(self.VOLLEY_COUNT):
-            x = self._rng.uniform(x_min + 30.0, x_min + 2 * (self.boss.cx - x_min) - 30.0)
-            # Use a uniform across the whole road actually — clearer pattern.
-            x = self._rng.uniform(x_min + 30.0, x_min + (self.boss.cx - x_min) * 2 - 30.0)
+            x = self._rng.uniform(x_min + 30.0,
+                                  x_min + (self.boss.cx - x_min) * 2 - 30.0)
             self.enemy_controller.spawn(
                 x, y_max + 20.0, 44.0, 44.0, "enemy_red",
                 hp=self.minion_hp, speed=240.0, chase=self._rng.uniform(40.0, 110.0),
+                enemy_type=ent.TYPE_GRUNT,
+            )
+        if boss.phase2:
+            tank_arch = ent.ARCHETYPES[ent.TYPE_TANK]
+            tank_size = float(tank_arch["size"])
+            tank_x = self._rng.uniform(x_min + tank_size,
+                                       x_min + (self.boss.cx - x_min) * 2 - tank_size)
+            self.enemy_controller.spawn(
+                tank_x, y_max + 20.0, tank_size, tank_size, tank_arch["frame"],
+                hp=int(max(1, self.minion_hp * tank_arch["hp_mult"])),
+                speed=240.0 * tank_arch["speed_mult"],
+                chase=self._rng.uniform(40.0, 90.0) * tank_arch["chase_mult"],
+                enemy_type=ent.TYPE_TANK,
             )
 
     def _stream_one(self, hero_cx: float, x_min: float, x_max: float,
                     y_max: float) -> None:
         """Single enemy spawned near the boss aimed roughly at hero."""
+        import entities as ent
         offset = self._rng.uniform(-self.boss.width * 0.45, self.boss.width * 0.45)
         x = max(x_min + 30.0, min(x_max - 30.0, self.boss.cx + offset))
         self.enemy_controller.spawn(
             x, self.boss.cy - self.boss.height * 0.5 - 20.0, 44.0, 44.0, "enemy_red",
             hp=self.minion_hp, speed=300.0, chase=self._rng.uniform(110.0, 180.0),
+            enemy_type=ent.TYPE_GRUNT,
         )
 
     # --- damage ---------------------------------------------------------

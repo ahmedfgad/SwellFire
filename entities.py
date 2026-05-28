@@ -27,6 +27,68 @@ STATE_WALKING = 1
 STATE_DYING = 2     # reserved for multi-frame death anim (M11)
 
 
+# --- Enemy archetypes ----------------------------------------------------
+#
+# Each archetype shares the same chase FSM but has distinct stats and an
+# on-death effect (handled in game.py since it touches the squad).
+#
+#   grunt     — the standard chaser. 1-3 HP per level, normal size/speed.
+#   tank      — slow, large, 8x base HP. Forces focused fire; small squads
+#               can't burn it down quickly without sub-linear-fire wasting
+#               shots on grunts behind it.
+#   bomber    — yellow (projectile frame), 2x HP, faster, EXPLODES on death
+#               and triggers attrition on squad members within radius.
+#               Punishes letting them die at the front line.
+#   splitter  — 4x HP, medium-slow, on death splits into 3 grunts at the
+#               kill location. Punishes overkill and clumping.
+#   swarmer   — small, fast, 1 HP. Spawns in clusters of 4 — high-volume
+#               peripheral threat that bypasses focused fire.
+
+TYPE_GRUNT = 0
+TYPE_TANK = 1
+TYPE_BOMBER = 2
+TYPE_SPLITTER = 3
+TYPE_SWARMER = 4
+
+TYPE_NAMES = {
+    "grunt": TYPE_GRUNT,
+    "tank": TYPE_TANK,
+    "bomber": TYPE_BOMBER,
+    "splitter": TYPE_SPLITTER,
+    "swarmer": TYPE_SWARMER,
+}
+
+# Per-archetype stats. `base_hp` is multiplied by the level's `enemy_hp`
+# baseline so worlds still ramp HP within an archetype.
+ARCHETYPES: dict[int, dict] = {
+    TYPE_GRUNT: dict(
+        frame="enemy_red", size=44.0,
+        hp_mult=1.0, speed_mult=1.0, chase_mult=1.0,
+        spawn_count=1, label="grunt",
+    ),
+    TYPE_TANK: dict(
+        frame="enemy_red", size=72.0,
+        hp_mult=8.0, speed_mult=0.55, chase_mult=0.50,
+        spawn_count=1, label="tank",
+    ),
+    TYPE_BOMBER: dict(
+        frame="projectile", size=50.0,
+        hp_mult=2.0, speed_mult=1.15, chase_mult=1.0,
+        spawn_count=1, label="bomber",
+    ),
+    TYPE_SPLITTER: dict(
+        frame="enemy_red", size=60.0,
+        hp_mult=4.0, speed_mult=0.85, chase_mult=0.7,
+        spawn_count=1, label="splitter",
+    ),
+    TYPE_SWARMER: dict(
+        frame="enemy_red", size=28.0,
+        hp_mult=1.0, speed_mult=1.30, chase_mult=1.20,
+        spawn_count=4, label="swarmer",
+    ),
+}
+
+
 # --- enemy controller ----------------------------------------------------
 
 class EnemyController:
@@ -42,6 +104,7 @@ class EnemyController:
         self.pool = pool
         cap = pool.capacity
         self.state = bytearray(cap)       # one of STATE_*
+        self.type = bytearray(cap)        # one of TYPE_* (archetype tag)
         self.hp = [0] * cap                # current HP
         self.speed = [0.0] * cap           # px/sec downward
         self.chase = [0.0] * cap           # max lateral px/sec toward hero
@@ -49,12 +112,14 @@ class EnemyController:
         self.recycled_total = 0
 
     def spawn(self, x: float, y: float, w: float, h: float,
-              frame_name: str, hp: int, speed: float, chase: float) -> int:
+              frame_name: str, hp: int, speed: float, chase: float,
+              enemy_type: int = TYPE_GRUNT) -> int:
         # vy is negative because y grows upward in Kivy and enemies travel
         # toward the player at the bottom.
         idx = self.pool.spawn(x, y, 0.0, -speed, w, h, frame_name)
         if idx >= 0:
             self.state[idx] = STATE_WALKING
+            self.type[idx] = enemy_type
             self.hp[idx] = hp
             self.speed[idx] = speed
             self.chase[idx] = chase
@@ -137,15 +202,15 @@ class EnemySpawner:
         self._rng = random.Random(seed)
         self.timer = 0.0
         self.interval = self.DEFAULT_INTERVAL
-        # Visual + behaviour defaults; level config (M9) overwrites these on level entry.
-        self.enemy_w = 44.0
-        self.enemy_h = 44.0
-        self.enemy_speed = 220.0          # px/sec straight down
-        self.enemy_hp = 1                 # HP per enemy; M9 raises this per level
-        self.chase_strength_min = 30.0    # weak chasers
-        self.chase_strength_max = 90.0    # strong chasers (still subtler than the hero)
-        self.frame_name = "enemy_red"
+        # Per-archetype defaults; level config overwrites these on level entry.
+        self.enemy_speed = 220.0          # base px/sec straight down (grunt)
+        self.enemy_hp = 1                 # base HP per enemy
+        self.chase_strength_min = 30.0
+        self.chase_strength_max = 90.0
         self.spawn_above_top = 30.0
+        # Archetype mix: list of (type_int, weight). Default is all grunts.
+        # game.GameScreen._apply_level_config overrides with the per-level mix.
+        self.spawn_table: list[tuple[int, float]] = [(TYPE_GRUNT, 1.0)]
 
     def tick(self, dt: float, x_min: float, y_min: float,
              x_max: float, y_max: float) -> int:
@@ -169,14 +234,44 @@ class EnemySpawner:
 
     def _spawn_one(self, x_min: float, y_min: float,
                    x_max: float, y_max: float) -> int:
+        """Pick an archetype from `spawn_table`, then spawn 1+ enemies of that
+        type (some archetypes like swarmer spawn a cluster per pick)."""
         rng = self._rng
-        x = rng.uniform(x_min + self.enemy_w * 0.5, x_max - self.enemy_w * 0.5)
-        y = y_max + self.spawn_above_top
-        chase = rng.uniform(self.chase_strength_min, self.chase_strength_max)
-        return self.controller.spawn(
-            x, y, self.enemy_w, self.enemy_h, self.frame_name,
-            hp=self.enemy_hp, speed=self.enemy_speed, chase=chase,
-        )
+        # Weighted-random archetype pick.
+        total = sum(w for _, w in self.spawn_table) or 1.0
+        r = rng.uniform(0.0, total)
+        cum = 0.0
+        enemy_type = TYPE_GRUNT
+        for t, w in self.spawn_table:
+            cum += w
+            if r <= cum:
+                enemy_type = t
+                break
+        arch = ARCHETYPES[enemy_type]
+        size = float(arch["size"])
+        hp = max(1, int(round(self.enemy_hp * arch["hp_mult"])))
+        speed = self.enemy_speed * arch["speed_mult"]
+        chase_lo = self.chase_strength_min * arch["chase_mult"]
+        chase_hi = self.chase_strength_max * arch["chase_mult"]
+        frame = arch["frame"]
+
+        count = int(arch["spawn_count"])
+        last_idx = -1
+        # Cluster spawn (swarmers): tile horizontally near the chosen X with
+        # a tight spread so they read as one wave.
+        anchor_x = rng.uniform(x_min + size * 0.5 + 40.0,
+                               x_max - size * 0.5 - 40.0)
+        for k in range(count):
+            offset = (k - (count - 1) / 2.0) * (size * 0.95)
+            x = max(x_min + size * 0.5,
+                    min(x_max - size * 0.5, anchor_x + offset))
+            chase = rng.uniform(chase_lo, chase_hi)
+            last_idx = self.controller.spawn(
+                x, y_max + self.spawn_above_top,
+                size, size, frame,
+                hp=hp, speed=speed, chase=chase, enemy_type=enemy_type,
+            )
+        return last_idx
 
 
 # --- projectile controller -----------------------------------------------
@@ -350,29 +445,35 @@ class SpatialGrid:
 
 def find_nearest_enemy(hero_cx: float, hero_cy: float,
                        enemy_controller: EnemyController) -> int:
-    """Linear scan for the closest *living* enemy above the hero.
+    """Pick the most urgent enemy above the hero (threat-weighted).
 
-    Returns the slot index, or -1 if there's nothing to shoot. O(N) per
-    shot is fine — at 8 shots/sec * 200 enemies that's 1600 ops/sec, well
-    below anything that would show up on a profile.
+    Score = vertical_distance + lateral_distance * 0.30. The vertical
+    component dominates so the squad always engages the closest-to-the-
+    front-line target — a small squad spends its limited firepower on
+    the imminent threat instead of grunts drifting at the top of the
+    road, and a big squad (after sub-linear-fire cap) wastes fewer shots
+    on already-doomed back-line enemies.
+
+    O(N) per shot is fine — at 8 shots/sec * 200 enemies that's 1600
+    ops/sec, below anything that would show up on a profile.
     """
     pool = enemy_controller.pool
     active = pool.active
     cx = pool.cx
     cy = pool.cy
     best_idx = -1
-    best_d2 = float("inf")
+    best_score = float("inf")
     for i in range(pool.capacity):
         if not active[i]:
             continue
         # Only target enemies the hero hasn't passed.
         if cy[i] < hero_cy:
             continue
-        dx = cx[i] - hero_cx
-        dy = cy[i] - hero_cy
-        d2 = dx * dx + dy * dy
-        if d2 < best_d2:
-            best_d2 = d2
+        front = cy[i] - hero_cy            # vertical distance (smaller = more urgent)
+        lateral = abs(cx[i] - hero_cx)
+        score = front + lateral * 0.30
+        if score < best_score:
+            best_score = score
             best_idx = i
     return best_idx
 
@@ -567,8 +668,9 @@ def resolve_projectile_collisions(
 
     Indexes enemies into the grid once per call, then per-projectile
     queries the grid for candidate enemies and runs a narrow-phase
-    circle-circle check. On a kill, calls `on_kill(hit_x, hit_y)` so
-    the caller can spawn a particle burst. Returns number of kills.
+    circle-circle check. On a kill, calls `on_kill(hit_x, hit_y, type)`
+    so the caller can spawn the right particles + archetype-specific
+    effects (bomber AOE, splitter spawn). Returns number of kills.
     """
     grid.clear()
     grid.insert_pool(enemy_controller.pool)
@@ -586,8 +688,10 @@ def resolve_projectile_collisions(
     p_damage = projectile_controller.damage
     e_hp = enemy_controller.hp
 
+    e_type = enemy_controller.type
     kills = 0
-    enemy_max_radius = 30.0
+    # Bumped from 30 to 40 to cover the larger tank/splitter hit boxes.
+    enemy_max_radius = 40.0
     for pi in range(pp.capacity):
         if not p_active[pi]:
             continue
@@ -608,9 +712,10 @@ def resolve_projectile_collisions(
                 if e_hp[ei] <= 0:
                     hit_x = e_cx[ei]
                     hit_y = e_cy[ei]
+                    enemy_type = int(e_type[ei])
                     ep.release(ei)
                     enemy_controller.recycled_total += 1
-                    on_kill(hit_x, hit_y)
+                    on_kill(hit_x, hit_y, enemy_type)
                     kills += 1
                 break   # projectile consumed
     return kills

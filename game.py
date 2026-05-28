@@ -51,6 +51,13 @@ STRIPE_LENGTH = 36.0                # px
 ENEMY_POOL_CAPACITY = 200           # M5: 50 typical, stress to 200
 PROJECTILE_POOL_CAPACITY = 500      # M8: squad of 100 at high fire rate
 PARTICLE_POOL_CAPACITY = 500        # M8: kills + gate pickups + attrition bursts
+# Sub-linear firepower cap: above this many active shooters in the squad,
+# only a rotating subset fires each shot. Keeps a 100-runner squad from
+# trivializing late-world levels at 700 bullets/sec while still letting
+# big squads absorb attrition. The cap value is tuned against the late-world
+# enemy density — 22 keeps roughly 150 bullets/sec which lets W6 levels
+# stay challenging at any squad size.
+MAX_SHOOTERS_PER_SHOT = 22
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 HERO_FRAME_NAME = "runner_blue"
@@ -326,6 +333,15 @@ class GameScreen(ui.StyledScreen):
         else:
             self.grenade_count = 0
             self.shield_count = 0
+        # Free grenade at level start. Guarantees the player always has a
+        # panic button — they can't get into an unrecoverable squad=1 + no-
+        # gate-in-sight death spiral from RNG. The free grenade does NOT
+        # persist back to the save (see _end_level): we cap the persisted
+        # delta against the starting balance so spending the free one isn't
+        # treated as "consumed save grenades".
+        self._free_grenade_baseline = self.grenade_count
+        if self.grenade_count < 1:
+            self.grenade_count = 1
         self.shield_active_until = 0.0
         self._run_time = 0.0
         if self.squad_controller is not None:
@@ -426,6 +442,16 @@ class GameScreen(ui.StyledScreen):
             self.enemy_spawner.enemy_hp = cfg["enemy_hp"]
             self.enemy_spawner.chase_strength_min = cfg["enemy_chase_min"]
             self.enemy_spawner.chase_strength_max = cfg["enemy_chase_max"]
+            # Per-world enemy archetype mix. Boss levels keep the default
+            # grunt-only table since the boss controller hard-codes its
+            # minions.
+            if is_boss:
+                self.enemy_spawner.spawn_table = [(entities.TYPE_GRUNT, 1.0)]
+            else:
+                self.enemy_spawner.spawn_table = [
+                    (entities.TYPE_NAMES[name], weight)
+                    for name, weight in cfg["allowed_enemy_types"]
+                ]
 
         if self.gate_spawner is not None:
             if is_boss:
@@ -545,6 +571,80 @@ class GameScreen(ui.StyledScreen):
         pc.burst(hit_x, hit_y, count=5, speed=160.0, ttl=0.48,
                  size=14.0, frame="enemy_red", rng=rng)
 
+    # --- archetype on-death effects --------------------------------------
+
+    BOMBER_AOE_RADIUS = 95.0       # px; squad members in this circle attrited
+    BOMBER_MAX_LOSSES = 3          # cap squad losses per bomber explosion
+
+    def _bomber_explode(self, x: float, y: float) -> None:
+        """Bomber AOE: extra particle ring + attrition for nearby squad.
+
+        Models the bomber as a melee-style threat: kill it early or pay
+        when it pops at the squad's front line.
+        """
+        if self.particle_controller is not None:
+            self.particle_controller.burst(
+                x, y, count=14, speed=380.0, ttl=0.45,
+                size=14.0, frame="particle", rng=self._fire_rng,
+            )
+            self.particle_controller.burst(
+                x, y, count=10, speed=260.0, ttl=0.55,
+                size=16.0, frame="enemy_red", rng=self._fire_rng,
+            )
+        self._add_shake(2.2)
+        # Squad members in radius take one hit each (capped). Shield blocks.
+        if self.shield_active_until > self._run_time:
+            return
+        if self.squad_pool is None:
+            return
+        sp = self.squad_pool
+        r2 = self.BOMBER_AOE_RADIUS * self.BOMBER_AOE_RADIUS
+        losses = 0
+        for i in range(sp.capacity):
+            if losses >= self.BOMBER_MAX_LOSSES:
+                break
+            if not sp.active[i]:
+                continue
+            dx = sp.cx[i] - x
+            dy = sp.cy[i] - y
+            if dx * dx + dy * dy <= r2:
+                losses += 1
+        # Also catch the hero if close.
+        hero_caught = False
+        if self.hero is not None:
+            dx = self.hero.center_x - x
+            dy = self.hero.center_y - y
+            if dx * dx + dy * dy <= r2:
+                hero_caught = True
+        total_losses = losses + (1 if hero_caught else 0)
+        if total_losses == 0:
+            return
+        self.squad_count = max(0, self.squad_count - total_losses)
+        self.attrition_total += total_losses
+        if self.hero is not None:
+            self.hero.flash(duration=0.30,
+                            color=(1.0, 0.25, 0.25, 0.78))
+        ui.app().audio.play_sfx("damage")
+        if self.squad_count <= 0:
+            self._end_level(won=False)
+
+    def _splitter_split(self, x: float, y: float) -> None:
+        """Splitter on-death: spawn 3 grunts at the kill location with
+        outward velocity. Punishes overkill — if a wave of splitters all
+        die at the front line, the squad eats 9 fresh grunts immediately.
+        """
+        if self.enemy_controller is None:
+            return
+        # Lower base hp so split grunts don't feel like infinite respawns.
+        speed = self.enemy_spawner.enemy_speed if self.enemy_spawner else 220.0
+        for k in (-1, 0, 1):
+            self.enemy_controller.spawn(
+                x + k * 35.0, y, 36.0, 36.0, "enemy_red",
+                hp=1, speed=speed,
+                chase=self._fire_rng.uniform(50.0, 110.0),
+                enemy_type=entities.TYPE_GRUNT,
+            )
+
     def _update(self, dt):
         if self._level_ended:
             return
@@ -599,15 +699,24 @@ class GameScreen(ui.StyledScreen):
             base_interval = self.level_config["enemy_spawn_interval"]
             lvl_type = self.level_config.get("type", "static")
             if lvl_type == "static":
-                self.enemy_spawner.interval = base_interval * 1.10
+                type_mult = 1.10
             elif lvl_type == "hybrid":
                 # Alternating spikes every ~3 s — half the level the spawn
                 # pressure ratchets up so the player can't autopilot.
                 phase = (self.distance / SCROLL_SPEED_PX_PER_SEC) / 3.0
                 spike = (int(phase) % 2 == 1)
-                self.enemy_spawner.interval = base_interval * (0.70 if spike else 1.0)
+                type_mult = 0.70 if spike else 1.0
             else:   # dynamic
-                self.enemy_spawner.interval = base_interval * 0.65
+                type_mult = 0.65
+            # In-level ramp: start at +40% interval (gentler), end at -45%
+            # (denser). Player has breathing room to set up the squad, then
+            # the level ramps as the kill_target builds.
+            if self.distance_goal > 0:
+                progress = min(1.0, self.distance / self.distance_goal)
+            else:
+                progress = 0.0
+            ramp = 1.40 - 0.85 * progress
+            self.enemy_spawner.interval = base_interval * type_mult * ramp
 
         if (self.enemy_controller is not None
                 and self.enemy_spawner is not None
@@ -626,6 +735,7 @@ class GameScreen(ui.StyledScreen):
                 dt, SCROLL_SPEED_PX_PER_SEC,
                 self.hero.center_x, self.hero.center_y,
                 self._on_apply_gate,
+                on_miss=self._on_miss_gate,
             )
             # Lane gravity follows the active pair's gates.
             self.lane_centers = self.gate_controller.active_lane_centers(
@@ -642,6 +752,18 @@ class GameScreen(ui.StyledScreen):
                 dt, self.hero.center_x, self.hero.center_y,
                 x_min, y_min, x_max, y_max,
             )
+            # Phase-2 transition fanfare: a one-shot ring of red particles
+            # at the boss center + a shake so the player sees it happened.
+            if self.boss.phase2_transition_pending:
+                self.boss.phase2_transition_pending = False
+                if self.particle_controller is not None:
+                    self.particle_controller.burst(
+                        self.boss.cx, self.boss.cy, count=22, speed=420.0,
+                        ttl=0.55, size=15.0, frame="enemy_red",
+                        rng=self._fire_rng,
+                    )
+                self._add_shake(6.0)
+                ui.app().audio.play_sfx("hit")
 
         # 4. Squad: sync pool to squad_count, position followers in formation.
         if (self.squad_controller is not None
@@ -675,6 +797,14 @@ class GameScreen(ui.StyledScreen):
                     for i in range(sp.capacity):
                         if sp.active[i]:
                             positions.append((sp.cx[i], sp.cy[i] + sc.MUZZLE_OFFSET_Y))
+                    # Sub-linear firepower cap. Above MAX_SHOOTERS_PER_SHOT,
+                    # randomly sample so every squad member rotates in over
+                    # time (every shot picks a different subset). Squad
+                    # redundancy stays meaningful for absorbing attrition but
+                    # firepower plateaus — late-world levels with dense
+                    # enemies are no longer trivialized by a 100-runner squad.
+                    if len(positions) > MAX_SHOOTERS_PER_SHOT:
+                        positions = self._fire_rng.sample(positions, MAX_SHOOTERS_PER_SHOT)
                     entities.fire_from_positions(
                         positions, target_x, target_y, weapon,
                         self.projectile_controller, self._fire_rng,
@@ -687,13 +817,16 @@ class GameScreen(ui.StyledScreen):
 
             self.projectile_controller.update(dt, x_min, y_min, x_max, y_max)
 
-            # Projectile vs enemy collisions; each kill bursts particles.
-            # M11: combined sparks + red body fragments via _spawn_death_polish,
-            # plus a small per-kill shake (capped via SHAKE_CAP so 30 simultaneous
-            # kills don't blow the screen out).
-            def _on_kill(hit_x, hit_y, _self=self):
+            # Projectile vs enemy collisions. on_kill receives the archetype
+            # tag so we can trigger the on-death effect (bomber AOE, splitter
+            # split) on top of the standard particle burst.
+            def _on_kill(hit_x, hit_y, enemy_type, _self=self):
                 _self._spawn_death_polish(hit_x, hit_y)
                 _self._add_shake(0.35)
+                if enemy_type == entities.TYPE_BOMBER:
+                    _self._bomber_explode(hit_x, hit_y)
+                elif enemy_type == entities.TYPE_SPLITTER:
+                    _self._splitter_split(hit_x, hit_y)
             kills = entities.resolve_projectile_collisions(
                 self.projectile_controller, self.enemy_controller, self.grid, _on_kill,
             )
@@ -837,10 +970,23 @@ class GameScreen(ui.StyledScreen):
 
     # --- gate effect application -----------------------------------------
 
+    def _on_miss_gate(self) -> None:
+        """Called once per gate pair the player let scroll past untouched.
+
+        Drives the pity-gate floor on the spawner side — two consecutive
+        misses guarantee at least one safe (MUL / ADD) option in the next
+        pair so the player can recover.
+        """
+        if self.gate_spawner is not None:
+            self.gate_spawner.consecutive_misses += 1
+
     def _on_apply_gate(self, gate) -> None:
         """Apply a passed gate's effect: mutate squad_count or swap weapon."""
         if self._level_ended:
             return
+        # Player picked a gate → reset the pity-counter.
+        if self.gate_spawner is not None:
+            self.gate_spawner.consecutive_misses = 0
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
@@ -895,9 +1041,15 @@ class GameScreen(ui.StyledScreen):
         if running.current_mode == "single" and level_index:
             running.state.record_result(level_index, score, stars,
                                         distance=int(self.distance))
-            # Persist leftover booster balances. Compare run total to saved
-            # to compute delta — works whether the player gained or spent.
-            g_delta = self.grenade_count - running.state.get_booster_balance("grenade")
+            # Persist leftover booster balances. The free starter grenade
+            # is excluded: we only count grenades collected during the run
+            # (anything above the baseline at level start).
+            baseline = getattr(self, "_free_grenade_baseline", 0)
+            effective_grenades = self.grenade_count
+            if baseline == 0:
+                # Player got the free grenade; don't credit it back if unused.
+                effective_grenades = max(0, self.grenade_count - 1)
+            g_delta = effective_grenades - running.state.get_booster_balance("grenade")
             if g_delta != 0:
                 running.state.add_booster("grenade", g_delta)
             s_delta = self.shield_count - running.state.get_booster_balance("shield")
