@@ -123,6 +123,10 @@ class GameScreen(ui.StyledScreen):
         self.squad_controller: entities.SquadController | None = None
         self.squad_renderer: graphics.BatchedRenderer | None = None
         self.attrition_total = 0
+        # Level config + result handling (M9).
+        self.level_config: dict | None = None
+        self.distance_goal = 0.0
+        self._level_ended = False
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
@@ -287,6 +291,7 @@ class GameScreen(ui.StyledScreen):
         self.kills_total = 0
         self.squad_count = 1
         self.attrition_total = 0
+        self._level_ended = False
         if self.squad_controller is not None:
             self.squad_controller.sync_to_count(0)   # hero alone at level start
         if self.gate_controller is not None:
@@ -295,6 +300,9 @@ class GameScreen(ui.StyledScreen):
             # Reset the spawner so a fresh level starts past its first interval.
             self.gate_spawner._next_distance = 400.0  # noqa: SLF001 — first-spawn distance
         self.lane_centers = []
+
+        # Apply the per-level config now that pools + spawners exist.
+        self._apply_level_config()
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -349,9 +357,32 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is None:
             self._update_event = Clock.schedule_interval(self._update, 1 / 60.0)
 
+    def _apply_level_config(self) -> None:
+        """Look up the per-level config and push it to the spawners."""
+        running = ui.app()
+        cfg = levels.get_level(running.current_level) if running.current_level else None
+        # Multiplayer (versus) doesn't go through the level table; use a
+        # gentle baseline so the screen still runs end-to-end.
+        if cfg is None:
+            cfg = levels.get_level(1)
+        self.level_config = cfg
+        self.distance_goal = float(cfg["distance_goal"])
+        if self.enemy_spawner is not None:
+            self.enemy_spawner.interval = cfg["enemy_spawn_interval"]
+            self.enemy_spawner.enemy_speed = cfg["enemy_speed"]
+            self.enemy_spawner.enemy_hp = cfg["enemy_hp"]
+            self.enemy_spawner.chase_strength_min = cfg["enemy_chase_min"]
+            self.enemy_spawner.chase_strength_max = cfg["enemy_chase_max"]
+        if self.gate_spawner is not None:
+            self.gate_spawner.interval_px = cfg["gate_interval_px"]
+            self.gate_spawner.allowed_ops = list(cfg["allowed_ops"])
+            self.gate_spawner.allowed_weapons = list(cfg["allowed_weapons"])
+
     # --- per-frame update -------------------------------------------------
 
     def _update(self, dt):
+        if self._level_ended:
+            return
         self.distance += SCROLL_SPEED_PX_PER_SEC * dt
 
         sx, sy = self.stage.pos
@@ -463,8 +494,11 @@ class GameScreen(ui.StyledScreen):
             self.kills_total += kills
 
             # Squad attrition: enemies that pierce the squad's front line cost one runner each.
+            # When squad_count hits 0 the hero falls and the level fails.
             def _on_loss(hit_x, hit_y, _self=self, _rng=self._fire_rng):
-                _self.squad_count = max(1, _self.squad_count - 1)
+                if _self._level_ended or _self.squad_count <= 0:
+                    return
+                _self.squad_count -= 1
                 _self.attrition_total += 1
                 if _self.particle_controller is not None:
                     _self.particle_controller.burst(
@@ -473,6 +507,8 @@ class GameScreen(ui.StyledScreen):
                     )
                 running = ui.app()
                 running.audio.play_sfx("damage")
+                if _self.squad_count <= 0:
+                    _self._end_level(won=False)
             entities.resolve_squad_attrition(
                 self.enemy_controller,
                 self.hero.center_x, self.hero.center_y,
@@ -493,13 +529,22 @@ class GameScreen(ui.StyledScreen):
         if self.squad_renderer is not None:
             self.squad_renderer.rebuild()
 
+        # 6b. Distance goal reached → level complete.
+        if (not self._level_ended
+                and self.distance_goal > 0
+                and self.distance >= self.distance_goal):
+            self._end_level(won=True)
+            return
+
         # 7. HUD + debug overlay.
         hero_cx = self.hero.center_x if self.hero is not None else 0.0
         enemy_count = self.enemy_pool.active_count if self.enemy_pool is not None else 0
         weapon_name = weapons.get(self.current_weapon_id).name
-        self.hud_label.text = ("Distance {:5.0f} m     Squad {}     "
+        progress = "{:.0f} / {:.0f}".format(self.distance, self.distance_goal) \
+            if self.distance_goal > 0 else "{:.0f}".format(self.distance)
+        self.hud_label.text = ("Distance {}     Squad {}     "
                                "Weapon: {}     Kills {}").format(
-            self.distance, self.squad_count, weapon_name, self.kills_total,
+            progress, self.squad_count, weapon_name, self.kills_total,
         )
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
@@ -518,12 +563,15 @@ class GameScreen(ui.StyledScreen):
 
     def _on_apply_gate(self, gate) -> None:
         """Apply a passed gate's effect: mutate squad_count or swap weapon."""
+        if self._level_ended:
+            return
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
             self.squad_count = min(MAX_SQUAD, self.squad_count + int(gate.value))
         elif gate.op == gates.OP_SUB:
-            self.squad_count = max(1, self.squad_count - int(gate.value))
+            # SUB can take the squad to zero — game over if that happens.
+            self.squad_count = max(0, self.squad_count - int(gate.value))
         elif gate.op == gates.OP_WEAPON:
             if gate.value in weapons.WEAPONS:
                 self.current_weapon_id = gate.value
@@ -537,6 +585,68 @@ class GameScreen(ui.StyledScreen):
                 count=10, speed=260.0, ttl=0.45, size=12.0,
                 frame="particle", rng=self._fire_rng,
             )
+        if self.squad_count <= 0:
+            self._end_level(won=False)
+
+    def _end_level(self, won: bool) -> None:
+        """Cancel the update loop, persist progress, show the result dialog."""
+        if self._level_ended:
+            return
+        self._level_ended = True
+        if self._update_event is not None:
+            self._update_event.cancel()
+            self._update_event = None
+
+        running = ui.app()
+        final_squad = max(0, self.squad_count)
+        gates_applied = self.gate_controller.applied_total if self.gate_controller else 0
+        gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
+        score = levels.score_for(self.kills_total, final_squad, gates_applied, gates_missed)
+        level_index = running.current_level
+        level_cfg = self.level_config or levels.get_level(level_index) or levels.get_level(1)
+        stars = levels.stars_for(level_cfg, won, final_squad)
+
+        # Persist for single-player levels. Multiplayer never touches the save.
+        if running.current_mode == "single" and level_index:
+            running.state.record_result(level_index, score, stars,
+                                        distance=int(self.distance))
+            if won:
+                running.state.unlock_up_to(level_index + 1)
+                running.audio.play_sfx("level_complete")
+            else:
+                running.audio.play_sfx("death")
+        else:
+            running.audio.play_sfx("level_complete" if won else "death")
+
+        # Decide whether a "Next Level" button is shown.
+        next_index = (level_index + 1) if (level_index and level_index < levels.TOTAL_LEVELS) else None
+        if won and next_index is not None:
+            def go_next():
+                running.start_level(next_index)
+            on_next = go_next
+        else:
+            on_next = None
+
+        level_label = "World {} - {}".format(
+            level_cfg["world"], levels.get_world(level_cfg["world"])["name"]
+        ) if level_cfg else ""
+        if level_cfg:
+            level_label += "    Level {}".format(level_cfg["world_index"])
+
+        def on_retry():
+            if level_index:
+                running.start_level(level_index)
+            else:
+                running.go("menu")
+
+        def on_menu():
+            running.go("menu")
+
+        dialog = ui.LevelResultDialog(
+            won=won, stars=stars, score=score, level_label=level_label,
+            on_next=on_next, on_retry=on_retry, on_menu=on_menu,
+        )
+        dialog.open()
 
     # --- weapon switching keyboard ---------------------------------------
 

@@ -137,10 +137,11 @@ class EnemySpawner:
         self._rng = random.Random(seed)
         self.timer = 0.0
         self.interval = self.DEFAULT_INTERVAL
-        # Visual + behaviour defaults (M9 will scale these per-level).
+        # Visual + behaviour defaults; level config (M9) overwrites these on level entry.
         self.enemy_w = 44.0
         self.enemy_h = 44.0
         self.enemy_speed = 220.0          # px/sec straight down
+        self.enemy_hp = 1                 # HP per enemy; M9 raises this per level
         self.chase_strength_min = 30.0    # weak chasers
         self.chase_strength_max = 90.0    # strong chasers (still subtler than the hero)
         self.frame_name = "enemy_red"
@@ -174,7 +175,7 @@ class EnemySpawner:
         chase = rng.uniform(self.chase_strength_min, self.chase_strength_max)
         return self.controller.spawn(
             x, y, self.enemy_w, self.enemy_h, self.frame_name,
-            hp=1, speed=self.enemy_speed, chase=chase,
+            hp=self.enemy_hp, speed=self.enemy_speed, chase=chase,
         )
 
 

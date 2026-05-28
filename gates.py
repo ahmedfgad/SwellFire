@@ -105,6 +105,10 @@ class GateSpawner:
     GATE_GAP_PX = 24.0           # gap between the two gates in a pair
     LATERAL_MARGIN = 18.0        # gap between outer gate edge and rail
 
+    # Default allowed ops + weapons — game.GameScreen overrides per level (M9).
+    DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_WEAPON]
+    DEFAULT_WEAPONS = ["rifle", "shotgun", "sniper"]
+
     def __init__(self, controller: "GateController", seed: int | None = None):
         self.controller = controller
         self._rng = random.Random(seed)
@@ -112,6 +116,8 @@ class GateSpawner:
         # Skip the first 400 px so the player isn't slammed with a gate
         # immediately on level start.
         self._next_distance = 400.0
+        self.allowed_ops: list[str] = list(self.DEFAULT_OPS)
+        self.allowed_weapons: list[str] = list(self.DEFAULT_WEAPONS)
 
     def tick(self, distance: float, x_min: float, x_max: float, y_top: float) -> bool:
         """Spawn a pair when the run has advanced past the next interval.
@@ -138,17 +144,24 @@ class GateSpawner:
 
     def _pick_op(self, exclude_op: str | None):
         """Pick an op + value + display label. Avoids a pair with two
-        identical ops, which would be a non-choice for the player."""
-        choices = [
-            (OP_MUL,    [2, 3],                   lambda v: "x{}".format(v)),
-            (OP_ADD,    [5, 10, 15],              lambda v: "+{}".format(v)),
-            (OP_SUB,    [3, 5],                   lambda v: "-{}".format(v)),
-            (OP_WEAPON, ["rifle", "shotgun", "sniper"],
-                                                   lambda v: v.upper()),
-        ]
-        if exclude_op is not None:
-            choices = [c for c in choices if c[0] != exclude_op]
-        op, values, fmt = self._rng.choice(choices)
+        identical ops, which would be a non-choice for the player.
+
+        Respects `allowed_ops` (which ops the level allows) and
+        `allowed_weapons` (which weapons appear in WEAPON gates).
+        """
+        # Op pool table — values + label function are level-independent.
+        op_table = {
+            OP_MUL:    ([2, 3],            lambda v: "x{}".format(v)),
+            OP_ADD:    ([5, 10, 15],       lambda v: "+{}".format(v)),
+            OP_SUB:    ([3, 5],            lambda v: "-{}".format(v)),
+            OP_WEAPON: (self.allowed_weapons or self.DEFAULT_WEAPONS,
+                        lambda v: v.upper()),
+        }
+        allowed = [op for op in self.allowed_ops if op != exclude_op and op in op_table]
+        if not allowed:
+            allowed = [op for op in self.DEFAULT_OPS if op != exclude_op]
+        op = self._rng.choice(allowed)
+        values, fmt = op_table[op]
         value = self._rng.choice(values)
         return op, value, fmt(value)
 

@@ -179,6 +179,90 @@ class StyledScreen(Screen):
         pass
 
 
+class StarRow(Widget):
+    """Three-star row drawn with graphics.draw_star — used by LevelResultDialog."""
+
+    stars = NumericProperty(0)
+
+    def __init__(self, stars: int = 0, **kwargs):
+        super().__init__(**kwargs)
+        self.stars = stars
+        self.bind(pos=self._redraw, size=self._redraw, stars=self._redraw)
+        self._redraw()
+
+    def _redraw(self, *_):
+        self.canvas.clear()
+        if self.width <= 1 or self.height <= 1:
+            return
+        x, y = self.pos
+        w, h = self.size
+        slot = w / 3
+        outer = min(slot, h) * 0.42
+        cy = y + h * 0.5
+        with self.canvas:
+            for i in range(3):
+                cx = x + slot * (i + 0.5)
+                color = (1.0, 0.85, 0.20, 1.0) if i < self.stars else (1.0, 1.0, 1.0, 0.22)
+                graphics.draw_star(cx, cy, outer, color)
+
+
+class LevelResultDialog(ModalView):
+    """Modal shown at level end: title, stars (if won), score, action buttons."""
+
+    def __init__(self, won: bool, stars: int, score: int, level_label: str,
+                 *, on_next=None, on_retry, on_menu, **kwargs):
+        super().__init__(size_hint=(0.74, 0.62), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(12))
+        with box.canvas.before:
+            Color(0.10, 0.12, 0.18, 0.98)
+            self._bg = RoundedRectangle(radius=[dp(16)])
+        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
+                 size=lambda *a: setattr(self._bg, "size", box.size))
+
+        title = "Level Complete!" if won else "Level Failed"
+        title_color = (1.0, 0.85, 0.20, 1.0) if won else (0.95, 0.50, 0.45, 1.0)
+        box.add_widget(Label(text=title, font_size=sp(36), bold=True,
+                             color=title_color, size_hint_y=0.22))
+
+        box.add_widget(Label(text=level_label, font_size=sp(18), bold=False,
+                             color=(1, 1, 1, 0.85), size_hint_y=0.10))
+
+        if won:
+            star_holder = BoxLayout(orientation="horizontal", size_hint_y=0.22,
+                                    padding=(dp(40), 0, dp(40), 0))
+            star_holder.add_widget(StarRow(stars=stars, size_hint=(1, 1)))
+            box.add_widget(star_holder)
+        else:
+            box.add_widget(Label(
+                text="Your squad fell to the swarm. Try a steadier path through the gates.",
+                font_size=sp(15), color=(1, 1, 1, 0.85),
+                halign="center", valign="middle", size_hint_y=0.22,
+            ))
+
+        box.add_widget(Label(text="Score   {}".format(score),
+                             font_size=sp(22), bold=True, color=(1, 1, 1, 1),
+                             size_hint_y=0.14))
+
+        button_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=0.28)
+        if won and on_next is not None:
+            next_btn = StyledButton(text="Next Level", bg=[0.2, 0.7, 0.4, 1])
+            next_btn.bind(on_release=lambda *_: self._fire(on_next))
+            button_row.add_widget(next_btn)
+        retry_btn = StyledButton(text="Retry", bg=[0.25, 0.5, 0.9, 1])
+        retry_btn.bind(on_release=lambda *_: self._fire(on_retry))
+        button_row.add_widget(retry_btn)
+        menu_btn = StyledButton(text="Menu", bg=[0.45, 0.45, 0.5, 1])
+        menu_btn.bind(on_release=lambda *_: self._fire(on_menu))
+        button_row.add_widget(menu_btn)
+        box.add_widget(button_row)
+        self.add_widget(box)
+
+    def _fire(self, callback) -> None:
+        self.dismiss()
+        if callback is not None:
+            callback()
+
+
 class LevelButton(StyledButton):
     """Level tile: label on top, a 3-star rating drawn at the bottom."""
     stars = NumericProperty(0)
