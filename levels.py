@@ -173,13 +173,16 @@ def build_levels() -> dict[int, dict[str, Any]]:
             level_seconds = distance_goal / SCROLL_SPEED_PX_PER_SEC
             kill_target = int(round(level_seconds * (1.0 / enemy_spawn_interval) * 0.55))
 
-            allowed_ops = ["mul", "add"]
+            allowed_ops = ["mul", "add", "sub"]   # SUB now available from W1
             if world >= 2:
                 allowed_ops.append("grenade")     # bonus pickup gates from W2
             if world >= 3:
                 allowed_ops.append("weapon")
-            if world >= 5:
-                allowed_ops.append("sub")
+                allowed_ops.append("div")         # divide-squad gates from W3
+            # Note: SUB used to be W5+. The W1 introduction of SUB gives the
+            # player real choices on every pair (often "+5 vs -2"). DIV
+            # joins at W3 because by then the player has enough squad that
+            # ÷2 isn't always fatal.
             # Grenade scarcity: W1 has none (excluded from allowed_ops above);
             # W2-W3 get 1 max per level, W4+ get 2 max. Boss levels keep their
             # own cap (set in game.py).

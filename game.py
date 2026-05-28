@@ -51,6 +51,8 @@ STRIPE_LENGTH = 36.0                # px
 ENEMY_POOL_CAPACITY = 200           # M5: 50 typical, stress to 200
 PROJECTILE_POOL_CAPACITY = 500      # M8: squad of 100 at high fire rate
 PARTICLE_POOL_CAPACITY = 500        # M8: kills + gate pickups + attrition bursts
+PICKUP_POOL_CAPACITY = 40           # in-level coin + double-coin spawns
+PICKUP_COLLECT_RADIUS = 56.0        # px; hero auto-collects pickups within this
 # Sub-linear firepower cap: above this many active shooters in the squad,
 # only a rotating subset fires each shot. Keeps a 100-runner squad from
 # trivializing late-world levels at 700 bullets/sec while still letting
@@ -68,18 +70,22 @@ ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad
 MAX_GRENADES = 9                    # in-run cap; HUD shows current count
 GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within this
                                     # (sized to cover the full stage in front of the hero)
-# Coin rewards per archetype kill — tank kills are worth more (high-effort).
-# Grunt / swarmer = 1, bomber / splitter = 2, tank = 3.
-COIN_REWARD_BY_TYPE = {
-    entities.TYPE_GRUNT:    1,
-    entities.TYPE_SWARMER:  1,
-    entities.TYPE_BOMBER:   2,
-    entities.TYPE_SPLITTER: 2,
-    entities.TYPE_TANK:     3,
+# Fractional coin rewards per archetype kill — accumulated via a remainder
+# counter so common grunts contribute meaningfully over many kills without
+# trivializing the shop. A run of ~70 grunt kills now pays ~21 coins
+# (was 70). Tank kills still feel valuable.
+COIN_PARTIAL_REWARD = {
+    entities.TYPE_GRUNT:    0.30,
+    entities.TYPE_SWARMER:  0.30,
+    entities.TYPE_BOMBER:   0.70,
+    entities.TYPE_SPLITTER: 0.60,
+    entities.TYPE_TANK:     1.50,
 }
-# Bonus coins paid at level end.
-COIN_BONUS_LEVEL_COMPLETE = 50
-COIN_BONUS_PER_STAR = 30
+# Gate pickup + level-end bonuses also reduced — coins now come primarily
+# from in-level pickups (see pickup_controller).
+COIN_REWARD_GATE = 1
+COIN_BONUS_LEVEL_COMPLETE = 20
+COIN_BONUS_PER_STAR = 10
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -133,6 +139,11 @@ class GameScreen(ui.StyledScreen):
         self.particle_pool: graphics.EntityPool | None = None
         self.particle_controller: entities.ParticleController | None = None
         self.particle_renderer: graphics.BatchedRenderer | None = None
+        # In-level pickup system (coins + double-coin power-up).
+        self.pickup_pool: graphics.EntityPool | None = None
+        self.pickup_controller: entities.PickupController | None = None
+        self.pickup_spawner: entities.PickupSpawner | None = None
+        self.pickup_renderer: graphics.BatchedRenderer | None = None
         self.grid = entities.SpatialGrid(GRID_CELL_PX)
         self.current_weapon_id = DEFAULT_WEAPON_ID
         self._fire_cooldown = 0.0
@@ -323,6 +334,17 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.particle_renderer)
 
+        # Pickups (coins + double-coin) — own pool so they draw between
+        # projectiles and gates, and so the renderer stays simple.
+        if self.pickup_pool is None:
+            self.pickup_pool = graphics.EntityPool(PICKUP_POOL_CAPACITY, self._atlas)
+            self.pickup_controller = entities.PickupController(self.pickup_pool)
+            self.pickup_spawner = entities.PickupSpawner(self.pickup_controller)
+            self.pickup_renderer = graphics.BatchedRenderer(
+                self.pickup_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.pickup_renderer)
+
         # Gate layer lives under the hero so the hero appears "passing through".
         if self.gate_layer is None:
             self.gate_layer = Widget(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
@@ -375,10 +397,12 @@ class GameScreen(ui.StyledScreen):
             self.shield_count = 0
         self.shield_active_until = 0.0
         self._run_time = 0.0
-        # Coins earned during the run (per-kill + gate-pickup). Persisted
-        # to state.coins_balance in _end_level so a partial run still pays
-        # the player for whatever they killed before dying.
+        # Coins earned during the run (kill remainder + gate pickup + in-level
+        # coin pickups). Persisted to state.coins_balance in _end_level so a
+        # partial run still pays the player for whatever they collected.
         self._coins_earned = 0
+        self._coin_remainder = 0.0      # fractional remainder for kill rewards
+        self.double_coin_until = 0.0    # in-run timer; coin rewards 2× while active
         if self.squad_controller is not None:
             self.squad_controller.sync_to_count(0)   # hero alone at level start
         if self.gate_controller is not None:
@@ -386,6 +410,8 @@ class GameScreen(ui.StyledScreen):
         if self.gate_spawner is not None:
             # Reset the spawner so a fresh level starts past its first interval.
             self.gate_spawner._next_distance = 200.0  # noqa: SLF001 — first-spawn distance
+        if self.pickup_spawner is not None:
+            self.pickup_spawner.reset_per_level()
         self.lane_centers = []
 
         # Apply the per-level config now that pools + spawners exist.
@@ -403,7 +429,8 @@ class GameScreen(ui.StyledScreen):
             Window.unbind(on_key_down=self._key_handler)
             self._key_handler = None
         for renderer in (self.enemy_renderer, self.projectile_renderer,
-                         self.particle_renderer, self.squad_renderer):
+                         self.particle_renderer, self.squad_renderer,
+                         self.pickup_renderer):
             if renderer is not None and renderer.parent:
                 renderer.parent.remove_widget(renderer)
         if self.gate_controller is not None:
@@ -423,6 +450,10 @@ class GameScreen(ui.StyledScreen):
         self.particle_pool = None
         self.particle_controller = None
         self.particle_renderer = None
+        self.pickup_pool = None
+        self.pickup_controller = None
+        self.pickup_spawner = None
+        self.pickup_renderer = None
         self.squad_pool = None
         self.squad_controller = None
         self.squad_renderer = None
@@ -695,6 +726,36 @@ class GameScreen(ui.StyledScreen):
         if self.squad_count <= 0:
             self._end_level(won=False)
 
+    def _on_pickup_collect(self, ptype: int, x: float, y: float) -> None:
+        """Hero touched a coin or double-coin pickup. Coins go straight to
+        the run total (with 2× active if the double-coin timer is up);
+        the double-coin pickup starts/refreshes that timer."""
+        if ptype == entities.PICKUP_COIN:
+            coins = entities.PickupController.COIN_PER_PICKUP
+            if self.double_coin_until > self._run_time:
+                coins *= 2
+            self._coins_earned += coins
+            if self.particle_controller is not None:
+                self.particle_controller.burst(
+                    x, y, count=10, speed=320.0, ttl=0.40,
+                    size=10.0, frame="particle", rng=self._fire_rng,
+                )
+            ui.app().audio.play_sfx("coin")
+        else:    # PICKUP_DOUBLE_COIN
+            duration = entities.PickupController.DOUBLE_COIN_DURATION_SEC
+            self.double_coin_until = self._run_time + duration
+            if self.particle_controller is not None:
+                self.particle_controller.burst(
+                    x, y, count=20, speed=400.0, ttl=0.55,
+                    size=14.0, frame="particle", rng=self._fire_rng,
+                )
+                self.particle_controller.burst(
+                    x, y, count=12, speed=240.0, ttl=0.70,
+                    size=18.0, frame="projectile", rng=self._fire_rng,
+                )
+            ui.app().audio.play_sfx("gate_pickup")
+            self._add_shake(2.0)
+
     def _splitter_split(self, x: float, y: float) -> None:
         """Splitter on-death: spawn 3 grunts at the kill location with
         outward velocity. Punishes overkill — if a wave of splitters all
@@ -792,6 +853,25 @@ class GameScreen(ui.StyledScreen):
             self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
             self.enemy_controller.update(dt, self.hero.center_x,
                                          x_min, y_min, x_max, y_max)
+
+        # 3a. Pickups: spawner drops coin / double-coin items; controller
+        # scrolls them with the world. Hero auto-collects on overlap.
+        if (self.pickup_controller is not None
+                and self.pickup_spawner is not None
+                and self.hero is not None
+                and self.level_config is not None
+                and not self.level_config.get("boss")):
+            self.pickup_spawner.tick(
+                self.distance, x_min, x_max, y_max,
+                SCROLL_SPEED_PX_PER_SEC,
+            )
+            self.pickup_controller.update(dt, y_min)
+            entities.resolve_pickup_collection(
+                self.pickup_controller,
+                self.hero.center_x, self.hero.center_y,
+                PICKUP_COLLECT_RADIUS,
+                self._on_pickup_collect,
+            )
 
         # 3b. Gates: spawner emits a new pair when distance passes the next
         # interval; controller scrolls all gates + checks pass-through.
@@ -899,11 +979,16 @@ class GameScreen(ui.StyledScreen):
             def _on_kill(hit_x, hit_y, enemy_type, _self=self):
                 _self._spawn_death_polish(hit_x, hit_y)
                 _self._add_shake(0.35)
-                # Coin reward per kill, varies by archetype:
-                #   grunt / swarmer = 1, bomber / splitter = 2, tank = 3.
-                # Persisted at level end (we accumulate in self._coins_earned
-                # so a missed save isn't lossy).
-                _self._coins_earned += COIN_REWARD_BY_TYPE.get(enemy_type, 1)
+                # Fractional coin reward — accumulated in a remainder, with
+                # the integer portion paid on each frame the accumulator
+                # exceeds 1. Doubles when the 2× pickup is active.
+                reward = COIN_PARTIAL_REWARD.get(enemy_type, 0.30)
+                if _self.double_coin_until > _self._run_time:
+                    reward *= 2.0
+                _self._coin_remainder += reward
+                while _self._coin_remainder >= 1.0:
+                    _self._coins_earned += 1
+                    _self._coin_remainder -= 1.0
                 if enemy_type == entities.TYPE_BOMBER:
                     _self._bomber_explode(hit_x, hit_y)
                 elif enemy_type == entities.TYPE_SPLITTER:
@@ -997,6 +1082,8 @@ class GameScreen(ui.StyledScreen):
             self.particle_renderer.rebuild()
         if self.squad_renderer is not None:
             self.squad_renderer.rebuild()
+        if self.pickup_renderer is not None:
+            self.pickup_renderer.rebuild()
         # 6b. Boss widget + HP bar follow the underlying data each frame.
         if self.boss_widget is not None:
             self.boss_widget.update_from_boss()
@@ -1043,9 +1130,15 @@ class GameScreen(ui.StyledScreen):
                     [0.50, 0.85, 1.00, 1] if self.shield_count > 0
                     else [0.30, 0.30, 0.35, 1]
                 )
+        # Double-coin pickup timer chip in the HUD if active.
+        if self.double_coin_until > self._run_time:
+            remaining = self.double_coin_until - self._run_time
+            dc_chip = "  [2× COINS {:.1f}s]".format(remaining)
+        else:
+            dc_chip = ""
         self.hud_label.text = ("Distance {}     Squad {}     "
-                               "Weapon: {}     Kills {}").format(
-            progress, self.squad_count, weapon_name, self.kills_total,
+                               "Weapon: {}     Kills {}{}").format(
+            progress, self.squad_count, weapon_name, self.kills_total, dc_chip,
         )
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
@@ -1076,10 +1169,14 @@ class GameScreen(ui.StyledScreen):
         """Apply a passed gate's effect: mutate squad_count or swap weapon."""
         if self._level_ended:
             return
-        # Player picked a gate → reset the pity-counter, earn small coin reward.
+        # Player picked a gate → reset the pity-counter, earn small coin reward
+        # (with 2× when the pickup is active).
         if self.gate_spawner is not None:
             self.gate_spawner.consecutive_misses = 0
-        self._coins_earned += 3
+        gate_reward = COIN_REWARD_GATE
+        if self.double_coin_until > self._run_time:
+            gate_reward *= 2
+        self._coins_earned += gate_reward
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
@@ -1087,6 +1184,11 @@ class GameScreen(ui.StyledScreen):
         elif gate.op == gates.OP_SUB:
             # SUB can take the squad to zero — game over if that happens.
             self.squad_count = max(0, self.squad_count - int(gate.value))
+        elif gate.op == gates.OP_DIV:
+            # Divide squad by value (integer floor). At squad=1 ÷2 → 0 = death,
+            # so DIV gates only appear from W3 where the player has grown.
+            divisor = max(1, int(gate.value))
+            self.squad_count = max(0, self.squad_count // divisor)
         elif gate.op == gates.OP_WEAPON:
             if gate.value in weapons.WEAPONS:
                 self.current_weapon_id = gate.value
@@ -1130,7 +1232,9 @@ class GameScreen(ui.StyledScreen):
         level_cfg = self.level_config or levels.get_level(level_index) or levels.get_level(1)
         stars = levels.stars_for(level_cfg, won, final_squad)
 
-        # End-of-level coin bonus: 50 for completing + 30 per star.
+        # End-of-level coin bonus: 20 for completing + 10 per star (was 50/30
+        # before — kills + gates now contribute less so the shop progresses
+        # at the right rate when combined with in-level coin pickups).
         if won:
             self._coins_earned += COIN_BONUS_LEVEL_COMPLETE + COIN_BONUS_PER_STAR * stars
 

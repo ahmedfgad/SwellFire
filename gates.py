@@ -41,6 +41,7 @@ from kivy.uix.widget import Widget
 OP_MUL = "mul"
 OP_ADD = "add"
 OP_SUB = "sub"
+OP_DIV = "div"          # divide squad by N (÷2, ÷4) — devastating at low squad
 OP_WEAPON = "weapon"
 OP_GRENADE = "grenade"
 
@@ -50,6 +51,7 @@ OP_COLORS: dict[str, tuple[float, float, float, float]] = {
     OP_MUL:     (0.18, 0.78, 0.40, 0.78),    # green
     OP_ADD:     (0.20, 0.55, 0.95, 0.78),    # blue
     OP_SUB:     (0.85, 0.30, 0.30, 0.78),    # red
+    OP_DIV:     (0.85, 0.30, 0.65, 0.82),    # magenta — distinguishes from SUB
     OP_WEAPON:  (1.00, 0.74, 0.20, 0.82),    # yellow
     OP_GRENADE: (0.20, 0.85, 0.92, 0.80),    # cyan — feels distinct from the squad/weapon ops
 }
@@ -146,7 +148,7 @@ class GateSpawner:
     LATERAL_MARGIN = 18.0        # gap between outer gate edge and rail
 
     # Default allowed ops + weapons — game.GameScreen overrides per level (M9).
-    DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_WEAPON, OP_GRENADE]
+    DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_DIV, OP_WEAPON, OP_GRENADE]
     DEFAULT_WEAPONS = ["rifle", "shotgun", "sniper"]
     # "Pity gate" floor — after this many consecutive misses, the spawner
     # forces the next pair to contain at least one MUL or ADD (safe choice).
@@ -237,7 +239,8 @@ class GateSpawner:
         op_table = {
             OP_MUL:     ([2],              lambda v: "x{}".format(v)),
             OP_ADD:     ([3, 5, 7],        lambda v: "+{}".format(v)),
-            OP_SUB:     ([4, 7],           lambda v: "-{}".format(v)),
+            OP_SUB:     ([2, 3, 5, 7],     lambda v: "-{}".format(v)),
+            OP_DIV:     ([2, 4],           lambda v: "/{}".format(v)),
             OP_WEAPON:  (self.allowed_weapons or self.DEFAULT_WEAPONS,
                          lambda v: v.upper()),
             OP_GRENADE: ([1],              lambda v: "GRENADE x{}".format(v)),

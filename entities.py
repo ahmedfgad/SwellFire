@@ -648,6 +648,132 @@ def fire_from_positions(positions, target_x: float, target_y: float,
     return spawned
 
 
+# --- in-level pickups (coins + power-ups) --------------------------------
+
+PICKUP_COIN = 0
+PICKUP_DOUBLE_COIN = 1
+
+
+class PickupController:
+    """Pooled in-level pickup items that scroll down with the world.
+
+    Two types:
+      PICKUP_COIN          common (gold sphere) — adds COIN_PER_PICKUP coins
+                           when the hero touches it.
+      PICKUP_DOUBLE_COIN   rare (white particle) — activates a 2× coin
+                           multiplier on every coin source for
+                           DOUBLE_COIN_DURATION_SEC.
+    """
+
+    COIN_PER_PICKUP = 5
+    DOUBLE_COIN_DURATION_SEC = 12.0
+    DESPAWN_BELOW_Y_MARGIN = 60.0
+
+    def __init__(self, pool: graphics.EntityPool):
+        self.pool = pool
+        cap = pool.capacity
+        self.type = bytearray(cap)       # PICKUP_*
+        self.spawned_total = 0
+        self.collected_total = 0
+
+    def spawn(self, x: float, y: float, vy: float, size: float,
+              frame_name: str, pickup_type: int) -> int:
+        idx = self.pool.spawn(x, y, 0.0, vy, size, size, frame_name)
+        if idx >= 0:
+            self.type[idx] = pickup_type
+            self.spawned_total += 1
+        return idx
+
+    def update(self, dt: float, y_min: float) -> None:
+        """Scroll pickups down with the world; despawn off-bottom."""
+        pool = self.pool
+        active = pool.active
+        cx = pool.cx
+        cy = pool.cy
+        vx = pool.vx
+        vy = pool.vy
+        despawn = y_min - self.DESPAWN_BELOW_Y_MARGIN
+        for i in range(pool.capacity):
+            if not active[i]:
+                continue
+            cx[i] += vx[i] * dt
+            cy[i] += vy[i] * dt
+            if cy[i] < despawn:
+                pool.release(i)
+
+
+class PickupSpawner:
+    """Periodically drops coin + double-coin pickups in non-boss levels."""
+
+    INTERVAL_PX_MIN = 300.0
+    INTERVAL_PX_MAX = 500.0
+    DOUBLE_COIN_CHANCE = 0.08    # 8 % of pickups are the rare double-coin
+    COIN_SIZE = 26.0
+    DOUBLE_SIZE = 34.0
+
+    def __init__(self, controller: PickupController,
+                 seed: int | None = None):
+        self.controller = controller
+        self._rng = random.Random(seed)
+        self._next_distance = 250.0   # first pickup ~0.7 s into the level
+
+    def reset_per_level(self) -> None:
+        self._next_distance = 250.0
+
+    def tick(self, distance: float, x_min: float, x_max: float,
+             y_top: float, scroll_speed: float) -> bool:
+        if distance < self._next_distance:
+            return False
+        # Random interval to next pickup so spacing isn't predictable.
+        self._next_distance += self._rng.uniform(
+            self.INTERVAL_PX_MIN, self.INTERVAL_PX_MAX,
+        )
+        # Lateral X (keep margin from rails).
+        x = self._rng.uniform(x_min + 60.0, x_max - 60.0)
+        # Pick type — rare double-coin chance.
+        if self._rng.random() < self.DOUBLE_COIN_CHANCE:
+            ptype = PICKUP_DOUBLE_COIN
+            frame = "particle"
+            size = self.DOUBLE_SIZE
+        else:
+            ptype = PICKUP_COIN
+            frame = "projectile"
+            size = self.COIN_SIZE
+        self.controller.spawn(x, y_top, -scroll_speed, size, frame, ptype)
+        return True
+
+
+def resolve_pickup_collection(
+    pickup_controller: PickupController,
+    hero_cx: float, hero_cy: float,
+    radius: float,
+    on_collect,
+) -> int:
+    """Detect hero overlap with pickups; on hit, fire `on_collect(ptype, x, y)`
+    and recycle the pickup. Returns number collected this tick."""
+    pool = pickup_controller.pool
+    active = pool.active
+    cx = pool.cx
+    cy = pool.cy
+    types = pickup_controller.type
+    r2 = radius * radius
+    collected = 0
+    for i in range(pool.capacity):
+        if not active[i]:
+            continue
+        dx = cx[i] - hero_cx
+        dy = cy[i] - hero_cy
+        if dx * dx + dy * dy <= r2:
+            ptype = int(types[i])
+            cx_i = cx[i]
+            cy_i = cy[i]
+            pool.release(i)
+            pickup_controller.collected_total += 1
+            on_collect(ptype, cx_i, cy_i)
+            collected += 1
+    return collected
+
+
 def resolve_squad_attrition(
     enemy_controller: EnemyController,
     hero_cx: float, hero_cy: float,
