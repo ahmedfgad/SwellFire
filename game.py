@@ -29,6 +29,7 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import boss as boss_module
+import boosters
 import entities
 import gates
 import graphics
@@ -57,6 +58,9 @@ DEFAULT_WEAPON_ID = "pistol"
 MAX_SQUAD = 100                     # cap for squad_count; squad pool sized to MAX_SQUAD-1
 ATTRITION_ZONE_HALF_W = 170.0       # half-width of the squad-contact zone (px)
 ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad's "front line" sits
+MAX_GRENADES = 9                    # in-run cap; HUD shows current count
+GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within this
+                                    # (sized to cover the full stage in front of the hero)
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -133,6 +137,12 @@ class GameScreen(ui.StyledScreen):
         self.boss_controller: boss_module.BossController | None = None
         self.boss_widget: boss_module.BossWidget | None = None
         self.boss_hp_bar: boss_module.BossHPBar | None = None
+        # Booster inventory (M11.5). HUD-visible counters; keyboard shortcuts:
+        #   G  — throw a grenade (clears nearby enemies, damages boss)
+        #   S  — activate a shield (brief attrition immunity)
+        self.grenade_count = 0
+        self.shield_count = 0
+        self.shield_active_until = 0.0     # game-time seconds; <= now = inactive
         # Screen shake (M11). The shake offset is applied to root_layout.pos
         # so the whole gameplay frame (stage + HUD) judders together.
         self.shake_intensity = 0.0
@@ -230,7 +240,11 @@ class GameScreen(ui.StyledScreen):
             world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
             theme = levels.get_world(world)
             self.bg.set_theme(theme)
-            running.audio.play_level_music(world)
+            cfg_preview = levels.get_level(running.current_level)
+            if cfg_preview and cfg_preview.get("boss"):
+                running.audio.play_boss_music()
+            else:
+                running.audio.play_level_music(world)
             self.title_label.text = "World {} - {}     Level {}".format(
                 world, theme["name"], running.current_level)
         else:
@@ -303,13 +317,24 @@ class GameScreen(ui.StyledScreen):
         self.squad_count = 1
         self.attrition_total = 0
         self._level_ended = False
+        # Carry over the per-save booster balances into the run; level-end
+        # writes back what's left so they persist between runs.
+        running_app = ui.app()
+        if running_app and running_app.state:
+            self.grenade_count = running_app.state.get_booster_balance("grenade")
+            self.shield_count = running_app.state.get_booster_balance("shield")
+        else:
+            self.grenade_count = 0
+            self.shield_count = 0
+        self.shield_active_until = 0.0
+        self._run_time = 0.0
         if self.squad_controller is not None:
             self.squad_controller.sync_to_count(0)   # hero alone at level start
         if self.gate_controller is not None:
             self.gate_controller.clear()
         if self.gate_spawner is not None:
             # Reset the spawner so a fresh level starts past its first interval.
-            self.gate_spawner._next_distance = 400.0  # noqa: SLF001 — first-spawn distance
+            self.gate_spawner._next_distance = 200.0  # noqa: SLF001 — first-spawn distance
         self.lane_centers = []
 
         # Apply the per-level config now that pools + spawners exist.
@@ -448,6 +473,7 @@ class GameScreen(ui.StyledScreen):
         # Controller after widgets so an opening volley can render this frame.
         self.boss_controller = boss_module.BossController(
             self.boss, self.enemy_controller,
+            minion_hp=int(cfg.get("boss_minion_hp", 1)),
         )
         # Fire one volley now so the player sees an immediate threat.
         self.boss_controller.opening_volley(
@@ -524,6 +550,7 @@ class GameScreen(ui.StyledScreen):
             return
         # Shake first so the offset applies to everything else this frame.
         self._step_shake(dt)
+        self._run_time += dt
         self.distance += SCROLL_SPEED_PX_PER_SEC * dt
 
         sx, sy = self.stage.pos
@@ -558,11 +585,30 @@ class GameScreen(ui.StyledScreen):
             bob = math.sin(self.distance / 22.0) * 5.0
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
-        # 3. Enemies: spawner ticks → enemies updated.
+        # 3. Enemies: spawner interval can be modulated by level type
+        #    (static / hybrid / dynamic), then spawner ticks + enemies update.
         x_min = sx
         y_min = sy
         x_max = sx + sw
         y_max = sy + sh
+        if (self.enemy_controller is not None
+                and self.enemy_spawner is not None
+                and self.hero is not None
+                and self.level_config is not None
+                and not self.level_config.get("boss")):
+            base_interval = self.level_config["enemy_spawn_interval"]
+            lvl_type = self.level_config.get("type", "static")
+            if lvl_type == "static":
+                self.enemy_spawner.interval = base_interval * 1.10
+            elif lvl_type == "hybrid":
+                # Alternating spikes every ~3 s — half the level the spawn
+                # pressure ratchets up so the player can't autopilot.
+                phase = (self.distance / SCROLL_SPEED_PX_PER_SEC) / 3.0
+                spike = (int(phase) % 2 == 1)
+                self.enemy_spawner.interval = base_interval * (0.70 if spike else 1.0)
+            else:   # dynamic
+                self.enemy_spawner.interval = base_interval * 0.65
+
         if (self.enemy_controller is not None
                 and self.enemy_spawner is not None
                 and self.hero is not None):
@@ -682,15 +728,38 @@ class GameScreen(ui.StyledScreen):
             def _on_loss(hit_x, hit_y, _self=self, _rng=self._fire_rng):
                 if _self._level_ended or _self.squad_count <= 0:
                     return
+                # Shield blocks attrition. The enemy is still killed (it
+                # bounced off the shield) — feels like deflection, not a freebie.
+                if _self.shield_active_until > _self._run_time:
+                    if _self.particle_controller is not None:
+                        _self.particle_controller.burst(
+                            hit_x, hit_y, count=8, speed=300.0, ttl=0.30,
+                            size=12.0, frame="particle", rng=_rng,
+                        )
+                    _self._add_shake(0.6)
+                    return
                 _self.squad_count -= 1
                 _self.attrition_total += 1
                 if _self.particle_controller is not None:
+                    # Yellow sparks (impact).
                     _self.particle_controller.burst(
-                        hit_x, hit_y, count=8, speed=220.0, ttl=0.4,
+                        hit_x, hit_y, count=6, speed=240.0, ttl=0.4,
                         size=10.0, frame="particle", rng=_rng,
                     )
+                    # Red splatter (body fragments) so attrition reads
+                    # unambiguously as a hit on the squad.
+                    _self.particle_controller.burst(
+                        hit_x, hit_y, count=6, speed=180.0, ttl=0.55,
+                        size=14.0, frame="enemy_red", rng=_rng,
+                    )
+                # Hero flashes red so the player can't miss the hit.
+                if _self.hero is not None:
+                    _self.hero.flash(
+                        duration=0.30,
+                        color=(1.0, 0.25, 0.25, 0.78),
+                    )
                 # M11: medium shake on attrition; bigger if it was the final hit.
-                _self._add_shake(2.0 if _self.squad_count > 0 else 8.0)
+                _self._add_shake(2.5 if _self.squad_count > 0 else 9.0)
                 running = ui.app()
                 running.audio.play_sfx("damage")
                 if _self.squad_count <= 0:
@@ -719,6 +788,9 @@ class GameScreen(ui.StyledScreen):
             self.boss_widget.update_from_boss()
         if self.boss_hp_bar is not None:
             self.boss_hp_bar.update_from_boss()
+        # 6c. Hero hit-flash decay.
+        if self.hero is not None:
+            self.hero.tick_flash(dt)
 
         # 6c. Distance goal reached → level complete (skipped on boss levels —
         #     boss death drives the win condition there).
@@ -736,9 +808,19 @@ class GameScreen(ui.StyledScreen):
         weapon_name = weapons.get(self.current_weapon_id).name
         progress = "{:.0f} / {:.0f}".format(self.distance, self.distance_goal) \
             if self.distance_goal > 0 else "{:.0f}".format(self.distance)
+        booster_bits = []
+        if self.grenade_count > 0:
+            booster_bits.append("[G]{}".format(self.grenade_count))
+        if self.shield_count > 0 or self.shield_active_until > self._run_time:
+            shield_label = "[S]{}".format(self.shield_count)
+            if self.shield_active_until > self._run_time:
+                shield_label += "*{:.1f}s".format(self.shield_active_until - self._run_time)
+            booster_bits.append(shield_label)
+        booster_hud = ("   " + "  ".join(booster_bits)) if booster_bits else ""
         self.hud_label.text = ("Distance {}     Squad {}     "
-                               "Weapon: {}     Kills {}").format(
+                               "Weapon: {}     Kills {}{}").format(
             progress, self.squad_count, weapon_name, self.kills_total,
+            booster_hud,
         )
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
@@ -770,6 +852,9 @@ class GameScreen(ui.StyledScreen):
             if gate.value in weapons.WEAPONS:
                 self.current_weapon_id = gate.value
                 self._fire_cooldown = 0.0
+        elif gate.op == gates.OP_GRENADE:
+            self.grenade_count = min(MAX_GRENADES,
+                                     self.grenade_count + int(gate.value))
         # Audio + particle burst at the hero so the pickup reads.
         running = ui.app()
         running.audio.play_sfx("gate_pickup")
@@ -783,7 +868,13 @@ class GameScreen(ui.StyledScreen):
             self._end_level(won=False)
 
     def _end_level(self, won: bool) -> None:
-        """Cancel the update loop, persist progress, show the result dialog."""
+        """Cancel the update loop, persist progress, then show banner + dialog.
+
+        The dialog used to open the instant the win/lose condition fired,
+        which felt abrupt. M11.5 splits the flow: persist + show a centered
+        banner immediately, then open the existing LevelResultDialog after
+        a short fade so the moment of resolution reads.
+        """
         if self._level_ended:
             return
         self._level_ended = True
@@ -804,6 +895,14 @@ class GameScreen(ui.StyledScreen):
         if running.current_mode == "single" and level_index:
             running.state.record_result(level_index, score, stars,
                                         distance=int(self.distance))
+            # Persist leftover booster balances. Compare run total to saved
+            # to compute delta — works whether the player gained or spent.
+            g_delta = self.grenade_count - running.state.get_booster_balance("grenade")
+            if g_delta != 0:
+                running.state.add_booster("grenade", g_delta)
+            s_delta = self.shield_count - running.state.get_booster_balance("shield")
+            if s_delta != 0:
+                running.state.add_booster("shield", s_delta)
             if won:
                 running.state.unlock_up_to(level_index + 1)
                 running.audio.play_sfx("level_complete")
@@ -812,8 +911,39 @@ class GameScreen(ui.StyledScreen):
         else:
             running.audio.play_sfx("level_complete" if won else "death")
 
-        # Decide whether a "Next Level" button is shown.
-        next_index = (level_index + 1) if (level_index and level_index < levels.TOTAL_LEVELS) else None
+        # Show the banner immediately; dialog opens after a short pause.
+        self._show_end_banner(won)
+        Clock.schedule_once(
+            lambda dt: self._open_result_dialog(won, stars, score, level_cfg, level_index),
+            1.0,
+        )
+
+    def _show_end_banner(self, won: bool) -> None:
+        """Centered, fading-in banner shown the moment the level ends."""
+        from kivy.animation import Animation
+        text = "VICTORY!" if won else "DEFEATED"
+        color = (1.0, 0.88, 0.2, 0.0) if won else (0.95, 0.40, 0.40, 0.0)
+        banner = Label(
+            text=text, font_size=sp(64), bold=True, color=color,
+            size_hint=(0.9, 0.3),
+            pos_hint={"center_x": 0.5, "center_y": 0.55},
+        )
+        self.root_layout.add_widget(banner)
+        self._end_banner = banner
+        target = (color[0], color[1], color[2], 1.0)
+        Animation(color=target, duration=0.45, t="out_quad").start(banner)
+
+    def _open_result_dialog(self, won: bool, stars: int, score: int,
+                            level_cfg, level_index) -> None:
+        # Dismiss the banner before the modal opens so we don't stack.
+        if hasattr(self, "_end_banner") and self._end_banner is not None:
+            if self._end_banner.parent is not None:
+                self._end_banner.parent.remove_widget(self._end_banner)
+            self._end_banner = None
+
+        running = ui.app()
+        next_index = (level_index + 1) if (
+            level_index and level_index < levels.TOTAL_LEVELS) else None
         if won and next_index is not None:
             def go_next():
                 running.start_level(next_index)
@@ -821,11 +951,13 @@ class GameScreen(ui.StyledScreen):
         else:
             on_next = None
 
-        level_label = "World {} - {}".format(
-            level_cfg["world"], levels.get_world(level_cfg["world"])["name"]
-        ) if level_cfg else ""
+        level_label = ""
         if level_cfg:
-            level_label += "    Level {}".format(level_cfg["world_index"])
+            level_label = "World {} - {}    Level {}".format(
+                level_cfg["world"],
+                levels.get_world(level_cfg["world"])["name"],
+                level_cfg["world_index"],
+            )
 
         def on_retry():
             if level_index:
@@ -842,7 +974,7 @@ class GameScreen(ui.StyledScreen):
         )
         dialog.open()
 
-    # --- weapon switching keyboard ---------------------------------------
+    # --- weapon + grenade keyboard ----------------------------------------
 
     def _on_key(self, _window, _key, _scancode, codepoint, _modifier):
         if not codepoint:
@@ -857,7 +989,79 @@ class GameScreen(ui.StyledScreen):
                 self.current_weapon_id = new_id
                 self._fire_cooldown = 0.0
                 return True
+        if codepoint == "g":
+            self._detonate_grenade()
+            return True
+        if codepoint == "s":
+            self._activate_shield()
+            return True
         return False
+
+    def _activate_shield(self) -> None:
+        if self.shield_count <= 0 or self._level_ended:
+            return
+        # Don't waste a shield if one is already up.
+        if self.shield_active_until > self._run_time:
+            return
+        self.shield_count -= 1
+        self.shield_active_until = self._run_time + boosters.SHIELD_DURATION_SEC
+        ui.app().audio.play_sfx("gate_pickup")
+        if self.hero is not None:
+            # Tint the hero blue for the shield duration via the AtlasSprite flash.
+            self.hero.flash(
+                duration=boosters.SHIELD_DURATION_SEC,
+                color=(0.30, 0.70, 1.0, 0.55),
+            )
+        self._add_shake(1.5)
+
+    def _detonate_grenade(self) -> None:
+        """Burn one grenade: kill every enemy within GRENADE_RADIUS of the hero."""
+        if self.grenade_count <= 0 or self.hero is None or self.enemy_controller is None:
+            return
+        self.grenade_count -= 1
+        hero_cx = self.hero.center_x
+        hero_cy = self.hero.center_y
+        r2 = GRENADE_RADIUS * GRENADE_RADIUS
+        ep = self.enemy_pool
+        active = ep.active
+        cx = ep.cx
+        cy = ep.cy
+        kills = 0
+        for i in range(ep.capacity):
+            if not active[i]:
+                continue
+            dx = cx[i] - hero_cx
+            dy = cy[i] - hero_cy
+            if dx * dx + dy * dy <= r2:
+                # Lift the existing death polish so the explosion reads consistent
+                # with regular projectile kills, plus an outer ring.
+                self._spawn_death_polish(cx[i], cy[i])
+                ep.release(i)
+                self.enemy_controller.recycled_total += 1
+                kills += 1
+        # Boss takes one grenade's worth of damage if it's within radius.
+        if self.boss_controller is not None and self.boss is not None and self.boss.alive:
+            dx = self.boss.cx - hero_cx
+            dy = self.boss.cy - hero_cy
+            if dx * dx + dy * dy <= r2 * 1.6 * 1.6:
+                died = self.boss_controller.take_damage(20)
+                if died and not self._level_ended:
+                    self._end_level(won=True)
+        # Big visual + audio.
+        self.kills_total += kills
+        if self.particle_controller is not None:
+            self.particle_controller.burst(
+                hero_cx, hero_cy + dp(20),
+                count=24, speed=440.0, ttl=0.55,
+                size=14.0, frame="particle", rng=self._fire_rng,
+            )
+            self.particle_controller.burst(
+                hero_cx, hero_cy + dp(20),
+                count=14, speed=280.0, ttl=0.70,
+                size=18.0, frame="enemy_red", rng=self._fire_rng,
+            )
+        self._add_shake(8.0)
+        ui.app().audio.play_sfx("hit")
 
     # --- input ------------------------------------------------------------
 

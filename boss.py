@@ -71,17 +71,18 @@ class BossController:
     """Drives the boss's lateral motion + attack-pattern selection."""
 
     LATERAL_SPEED = 110.0            # px/sec drift
-    PATTERN_DURATION = 4.0           # seconds before switching pattern
-    TARGET_REPICK_EVERY = 3.5        # seconds between drift target re-picks
-    STREAM_INTERVAL = 0.20           # seconds between stream-pattern spawns
-    STREAM_COUNT = 8                 # how many enemies a stream wave emits
-    VOLLEY_COUNT = 8                 # how many enemies a single volley emits
+    PATTERN_DURATION = 3.0           # seconds before switching pattern (was 4.0)
+    TARGET_REPICK_EVERY = 3.0        # seconds between drift target re-picks
+    STREAM_INTERVAL = 0.15           # seconds between stream-pattern spawns (was 0.20)
+    STREAM_COUNT = 12                # enemies emitted per stream wave (was 8)
+    VOLLEY_COUNT = 11                # enemies emitted per volley (was 8)
     FLASH_DURATION = 0.12
 
     def __init__(self, boss: Boss, enemy_controller,
-                 seed: int | None = None):
+                 seed: int | None = None, minion_hp: int = 1):
         self.boss = boss
         self.enemy_controller = enemy_controller
+        self.minion_hp = max(1, int(minion_hp))
         self._rng = random.Random(seed)
         self._target_timer = 0.0
         # Start with a volley so the player sees what the boss does immediately.
@@ -158,7 +159,7 @@ class BossController:
             x = self._rng.uniform(x_min + 30.0, x_min + (self.boss.cx - x_min) * 2 - 30.0)
             self.enemy_controller.spawn(
                 x, y_max + 20.0, 44.0, 44.0, "enemy_red",
-                hp=1, speed=240.0, chase=self._rng.uniform(40.0, 110.0),
+                hp=self.minion_hp, speed=240.0, chase=self._rng.uniform(40.0, 110.0),
             )
 
     def _stream_one(self, hero_cx: float, x_min: float, x_max: float,
@@ -168,7 +169,7 @@ class BossController:
         x = max(x_min + 30.0, min(x_max - 30.0, self.boss.cx + offset))
         self.enemy_controller.spawn(
             x, self.boss.cy - self.boss.height * 0.5 - 20.0, 44.0, 44.0, "enemy_red",
-            hp=1, speed=300.0, chase=self._rng.uniform(110.0, 180.0),
+            hp=self.minion_hp, speed=300.0, chase=self._rng.uniform(110.0, 180.0),
         )
 
     # --- damage ---------------------------------------------------------

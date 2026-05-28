@@ -42,14 +42,16 @@ OP_MUL = "mul"
 OP_ADD = "add"
 OP_SUB = "sub"
 OP_WEAPON = "weapon"
+OP_GRENADE = "grenade"
 
 
 # Translucent op colors so the gate reads even against bright backgrounds.
 OP_COLORS: dict[str, tuple[float, float, float, float]] = {
-    OP_MUL:    (0.18, 0.78, 0.40, 0.78),     # green
-    OP_ADD:    (0.20, 0.55, 0.95, 0.78),     # blue
-    OP_SUB:    (0.85, 0.30, 0.30, 0.78),     # red
-    OP_WEAPON: (1.00, 0.74, 0.20, 0.82),     # yellow
+    OP_MUL:     (0.18, 0.78, 0.40, 0.78),    # green
+    OP_ADD:     (0.20, 0.55, 0.95, 0.78),    # blue
+    OP_SUB:     (0.85, 0.30, 0.30, 0.78),    # red
+    OP_WEAPON:  (1.00, 0.74, 0.20, 0.82),    # yellow
+    OP_GRENADE: (0.20, 0.85, 0.92, 0.80),    # cyan — feels distinct from the squad/weapon ops
 }
 
 
@@ -106,16 +108,18 @@ class GateSpawner:
     LATERAL_MARGIN = 18.0        # gap between outer gate edge and rail
 
     # Default allowed ops + weapons — game.GameScreen overrides per level (M9).
-    DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_WEAPON]
+    DEFAULT_OPS = [OP_MUL, OP_ADD, OP_SUB, OP_WEAPON, OP_GRENADE]
     DEFAULT_WEAPONS = ["rifle", "shotgun", "sniper"]
 
     def __init__(self, controller: "GateController", seed: int | None = None):
         self.controller = controller
         self._rng = random.Random(seed)
         self.interval_px = self.INTERVAL_PX
-        # Skip the first 400 px so the player isn't slammed with a gate
-        # immediately on level start.
-        self._next_distance = 400.0
+        # First gate should arrive before the first wave of enemies reaches
+        # the squad — otherwise late-world levels are unplayable at squad=1.
+        # 200 px = ~0.55 s of scroll; gate then takes ~1.3 s to travel to the
+        # hero, so it lands at ~1.85 s — just under the first attrition.
+        self._next_distance = 200.0
         self.allowed_ops: list[str] = list(self.DEFAULT_OPS)
         self.allowed_weapons: list[str] = list(self.DEFAULT_WEAPONS)
 
@@ -151,11 +155,12 @@ class GateSpawner:
         """
         # Op pool table — values + label function are level-independent.
         op_table = {
-            OP_MUL:    ([2, 3],            lambda v: "x{}".format(v)),
-            OP_ADD:    ([5, 10, 15],       lambda v: "+{}".format(v)),
-            OP_SUB:    ([3, 5],            lambda v: "-{}".format(v)),
-            OP_WEAPON: (self.allowed_weapons or self.DEFAULT_WEAPONS,
-                        lambda v: v.upper()),
+            OP_MUL:     ([2, 3],           lambda v: "x{}".format(v)),
+            OP_ADD:     ([5, 10, 15],      lambda v: "+{}".format(v)),
+            OP_SUB:     ([3, 5],           lambda v: "-{}".format(v)),
+            OP_WEAPON:  (self.allowed_weapons or self.DEFAULT_WEAPONS,
+                         lambda v: v.upper()),
+            OP_GRENADE: ([1, 2, 3],        lambda v: "GRENADE x{}".format(v)),
         }
         allowed = [op for op in self.allowed_ops if op != exclude_op and op in op_table]
         if not allowed:

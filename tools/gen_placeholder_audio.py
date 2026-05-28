@@ -216,44 +216,188 @@ def menu_music() -> list[float]:
 
 
 def world_music(world: int) -> list[float]:
-    """~4-second pulse loop. Bass note + pulsing 4-beat melody.
+    """Per-world ~4-second loop. Each world has a distinct voice:
 
-    The world index varies tempo + key so each world feels distinct without
-    asking for real composed music at M2.
+        W1 Meadow    — slow sine triads (gentle, pastoral)
+        W2 Desert    — minor key, triangle melody, swung rhythm
+        W3 Industrial— square-wave riff, fast tempo, mechanical pulse
+        W4 Snowfield — bell-like sine arpeggio, sparse, high pitch
+        W5 Volcano   — sub-bass thump + driving square stab
+        W6 Cosmos    — glitchy low+high overlay, slow chord pad
     """
-    tempo_bpm = 90 + world * 8                # 98, 106, ..., 138
-    root_hz = 196.0 * (2 ** ((world - 1) / 12))   # G3 up a semitone per world
-    beat = 60.0 / tempo_bpm
-    bar_n = int(4 * beat * SAMPLE_RATE)
+    if world == 1:
+        return _world_meadow()
+    if world == 2:
+        return _world_desert()
+    if world == 3:
+        return _world_industrial()
+    if world == 4:
+        return _world_snowfield()
+    if world == 5:
+        return _world_volcano()
+    return _world_cosmos()
 
-    # bass: low fifth held for the bar
-    bass = []
-    env = _envelope(bar_n, attack=0.02, release=0.05)
-    for i in range(bar_n):
-        t = i / SAMPLE_RATE
-        bass.append(math.sin(2 * math.pi * (root_hz / 2) * t) * 0.30 * env[i])
 
-    # melody: arpeggiated triad on each beat
-    intervals = [1.0, 1.25, 1.5, 1.25]   # root, third, fifth, third
-    melody = []
-    for k in range(4):
-        n_beat = int(beat * SAMPLE_RATE)
-        env_b = _envelope(n_beat, attack=0.005, release=0.06)
-        freq = root_hz * intervals[k] * 2  # one octave up
-        chunk = []
-        for i in range(n_beat):
+# Tempo + style helpers — each world has its own arrangement so the
+# placeholders read as distinct even before real music drops in.
+
+def _bar_seconds(bpm: float, beats: int = 4) -> float:
+    return 60.0 / bpm * beats
+
+
+def _world_meadow() -> list[float]:
+    bpm = 92.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # I - vi - IV - V (C - Am - F - G) sustained sine triads, soft + airy.
+    chords = [
+        (261.63, 329.63, 392.00),    # C
+        (220.00, 261.63, 329.63),    # Am
+        (174.61, 220.00, 261.63),    # F
+        (196.00, 246.94, 293.66),    # G
+    ]
+    out: list[float] = []
+    per_chord = bar_n // 4
+    for c in chords:
+        env = _envelope(per_chord, attack=0.08, release=0.15)
+        for i in range(per_chord):
             t = i / SAMPLE_RATE
-            value = math.sin(2 * math.pi * freq * t)
-            value = math.copysign(min(0.7, abs(value)), value)  # soft clip
-            chunk.append(value * 0.28 * env_b[i])
-        melody.extend(chunk)
+            s = (math.sin(2 * math.pi * c[0] * t)
+                 + 0.7 * math.sin(2 * math.pi * c[1] * t)
+                 + 0.5 * math.sin(2 * math.pi * c[2] * t)) / 3.0
+            out.append(s * 0.32 * env[i])
+    return out
 
-    # pad bar lengths
-    while len(melody) < bar_n:
-        melody.append(0.0)
-    melody = melody[:bar_n]
 
-    return _mix(bass, melody)
+def _world_desert() -> list[float]:
+    bpm = 108.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # Em - D - C - B7 — minor-key, triangle-wave melody syncopated 6-8.
+    roots = (164.81, 146.83, 130.81, 123.47)
+    fifths = (246.94, 220.00, 196.00, 185.00)
+    out: list[float] = []
+    per_chord = bar_n // 4
+    for r, f in zip(roots, fifths):
+        env = _envelope(per_chord, attack=0.02, release=0.08)
+        for i in range(per_chord):
+            t = i / SAMPLE_RATE
+            # Triangle root
+            tri = 2 / math.pi * math.asin(math.sin(2 * math.pi * r * t))
+            # Sine fifth
+            sin = math.sin(2 * math.pi * f * t)
+            # 6/8 syncopation: drop in/out 3 times per bar
+            mod = 1.0 if int(t * 6) % 2 == 0 else 0.4
+            out.append((tri * 0.4 + sin * 0.4) * 0.30 * env[i] * mod)
+    return out
+
+
+def _world_industrial() -> list[float]:
+    bpm = 132.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # Driving 4/4 square-wave riff: F5 power chord pulse.
+    base = 174.61   # F3
+    out: list[float] = []
+    beat_n = bar_n // 8
+    for k in range(8):
+        env = _envelope(beat_n, attack=0.003, release=0.03)
+        for i in range(beat_n):
+            t = i / SAMPLE_RATE
+            # Off-beats accent
+            accent = 0.95 if k % 2 == 0 else 0.55
+            # Power chord: root + fifth, square wave
+            sq1 = 1.0 if math.sin(2 * math.pi * base * t) >= 0 else -1.0
+            sq2 = 1.0 if math.sin(2 * math.pi * base * 1.5 * t) >= 0 else -1.0
+            out.append((sq1 * 0.5 + sq2 * 0.3) * 0.22 * env[i] * accent)
+    return out
+
+
+def _world_snowfield() -> list[float]:
+    bpm = 78.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # Sparse bell arpeggio in E major, high pitches with long decays.
+    notes = (659.26, 783.99, 987.77, 783.99,    # E5 G5 B5 G5
+             739.99, 880.00, 1108.73, 880.00)   # F#5 A5 C#6 A5
+    out: list[float] = []
+    per_note = bar_n // 8
+    for f in notes:
+        env = _envelope(per_note, attack=0.005, release=0.40)
+        for i in range(per_note):
+            t = i / SAMPLE_RATE
+            # Bell = fundamental + sparkly partials
+            s = (math.sin(2 * math.pi * f * t)
+                 + 0.3 * math.sin(2 * math.pi * f * 2 * t)
+                 + 0.12 * math.sin(2 * math.pi * f * 3 * t))
+            out.append(s * 0.22 * env[i])
+    return out
+
+
+def _world_volcano() -> list[float]:
+    bpm = 124.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # Sub-bass thump + driving root-5 square stabs in C minor.
+    base = 130.81    # C3
+    out: list[float] = []
+    beat_n = bar_n // 8
+    for k in range(8):
+        env = _envelope(beat_n, attack=0.002, release=0.04)
+        for i in range(beat_n):
+            t = i / SAMPLE_RATE
+            # Sub-bass pulse on every beat
+            sub = math.sin(2 * math.pi * base * 0.5 * t)
+            # Square stab on accent beats
+            stab = (1.0 if math.sin(2 * math.pi * base * t) >= 0 else -1.0) \
+                * (1.0 if k % 2 == 0 else 0.0)
+            out.append((sub * 0.4 + stab * 0.4) * 0.28 * env[i])
+    return out
+
+
+def _world_cosmos() -> list[float]:
+    bpm = 70.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    # Slow chord pad (D-A-Bm-G) with a high glitchy sine overlay.
+    roots = (146.83, 220.00, 246.94, 196.00)
+    out: list[float] = []
+    per_chord = bar_n // 4
+    for k, r in enumerate(roots):
+        env = _envelope(per_chord, attack=0.15, release=0.20)
+        for i in range(per_chord):
+            t = i / SAMPLE_RATE
+            # Pad: root + fifth + octave
+            pad = (math.sin(2 * math.pi * r * t)
+                   + 0.6 * math.sin(2 * math.pi * r * 1.5 * t)
+                   + 0.3 * math.sin(2 * math.pi * r * 2 * t)) / 3.0
+            # Glitch overlay: very high sine with random amplitude bursts
+            glitch = math.sin(2 * math.pi * 2400.0 * t) \
+                * (1.0 if int(t * 16) % 7 == 0 else 0.0) * 0.15
+            out.append((pad * 0.30 + glitch) * env[i])
+    return out
+
+
+def boss_music() -> list[float]:
+    """High-tension boss track: driving sub-bass + minor stabs + alarm pulse.
+
+    Used by audio.AudioManager for every world's level-10 boss fight.
+    """
+    bpm = 138.0
+    bar_n = int(_bar_seconds(bpm) * SAMPLE_RATE)
+    base = 110.00    # A2 — low and ominous
+    out: list[float] = []
+    beat_n = bar_n // 16
+    for k in range(16):
+        env = _envelope(beat_n, attack=0.001, release=0.03)
+        for i in range(beat_n):
+            t = i / SAMPLE_RATE
+            # Sub-bass on every 4th 16th
+            sub = math.sin(2 * math.pi * base * t) if k % 4 == 0 else 0.0
+            # Minor-third square stab on off-beats
+            stab_freq = base * (2 ** (3 / 12))    # minor third up
+            stab = (1.0 if math.sin(2 * math.pi * stab_freq * 2 * t) >= 0 else -1.0)
+            stab = stab if k % 2 == 1 else 0.0
+            # Alarm pulse: rising siren-like sine on every 8th
+            alarm = math.sin(2 * math.pi * (440 + 200 * math.sin(t * 8)) * t)
+            alarm = alarm if k % 8 == 7 else 0.0
+            out.append((sub * 0.55 + stab * 0.30 + alarm * 0.20)
+                       * 0.30 * env[i])
+    return out
 
 
 # --- driver ---------------------------------------------------------------
@@ -281,13 +425,16 @@ def main() -> None:
     music_dir = os.path.join(args.out, "music")
     sfx_dir = os.path.join(args.out, "sfx")
 
-    # Music: menu + 6 world tracks.
+    # Music: menu + 6 world tracks + boss track.
     _write_wav(os.path.join(music_dir, "bg_music_menu.wav"), menu_music())
     print("wrote", os.path.join(music_dir, "bg_music_menu.wav"))
     for world in range(1, 7):
         path = os.path.join(music_dir, "bg_music_world{}.wav".format(world))
         _write_wav(path, world_music(world))
         print("wrote", path)
+    boss_path = os.path.join(music_dir, "bg_music_boss.wav")
+    _write_wav(boss_path, boss_music())
+    print("wrote", boss_path)
 
     # SFX bank.
     for filename, builder in SFX_BANK.items():

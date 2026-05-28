@@ -51,6 +51,11 @@ class GameState:
             "stars": {},                          # best stars per level, e.g. {"7": 2}
             "best_distance": {},                  # best distance per level (used for the score tie-break)
             "coins_balance": 0,                   # meta-currency for the shop
+            # Booster balances (per the boosters registry). New boosters can be
+            # added without bumping the save version — `_load` fills missing
+            # keys from defaults.
+            "grenade_balance": 0,
+            "shield_balance": 0,
             "weapon_unlocks": dict(DEFAULT_WEAPON_UNLOCKS),
             "settings": dict(DEFAULT_SETTINGS),
         }
@@ -138,6 +143,23 @@ class GameState:
 
     def add_coins(self, amount):
         self.data["coins_balance"] = max(0, self.data["coins_balance"] + int(amount))
+        self.save()
+
+    @property
+    def grenade_balance(self):
+        return int(self.data.get("grenade_balance", 0))
+
+    def add_grenades(self, amount):
+        self.data["grenade_balance"] = max(0, self.grenade_balance + int(amount))
+        self.save()
+
+    def get_booster_balance(self, booster_id: str) -> int:
+        return int(self.data.get(f"{booster_id}_balance", 0))
+
+    def add_booster(self, booster_id: str, amount: int) -> None:
+        key = f"{booster_id}_balance"
+        current = int(self.data.get(key, 0))
+        self.data[key] = max(0, current + int(amount))
         self.save()
 
     def is_weapon_unlocked(self, weapon_id):

@@ -19,6 +19,7 @@ import levels
 
 
 MENU_MUSIC = "bg_music_menu.wav"
+BOSS_MUSIC = "bg_music_boss.wav"
 
 
 def world_music_name(world):
@@ -47,9 +48,10 @@ class AudioManager:
         self._sfx_dir = os.path.join(asset_dir, "sfx") if asset_dir else ""
         self._state = None
         self._menu = None
-        self._world = {}      # world number -> Sound
+        self._boss = None       # boss-specific track (M11.5)
+        self._world = {}        # world number -> Sound
         self._sfx = {}
-        self._current = None  # ("menu",) or ("world", N)
+        self._current = None    # ("menu",) | ("world", N) | ("boss",)
         self._load()
 
     # --- one-time load -----------------------------------------------------
@@ -67,6 +69,7 @@ class AudioManager:
 
     def _load(self):
         self._menu = self._load_sound(self._music_dir, MENU_MUSIC, loop=True)
+        self._boss = self._load_sound(self._music_dir, BOSS_MUSIC, loop=True)
         for world in range(1, levels.NUM_WORLDS + 1):
             self._world[world] = self._load_sound(
                 self._music_dir, world_music_name(world), loop=True)
@@ -97,16 +100,22 @@ class AudioManager:
             return None
         if key[0] == "menu":
             return self._menu
+        if key[0] == "boss":
+            return self._boss
         return self._world.get(key[1])
 
     def _all_music(self):
-        return [self._menu] + list(self._world.values())
+        return [self._menu, self._boss] + list(self._world.values())
 
     def play_menu_music(self):
         self._switch(("menu",))
 
     def play_level_music(self, world):
         self._switch(("world", int(world)))
+
+    def play_boss_music(self):
+        """Swap in the boss track. Used by GameScreen on boss-level entry."""
+        self._switch(("boss",))
 
     def _switch(self, key):
         if self._current == key:

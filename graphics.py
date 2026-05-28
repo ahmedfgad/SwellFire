@@ -274,6 +274,10 @@ class AtlasSprite(Widget):
     Use this for low-count widgets that need detail and interaction (hero,
     boss, gate panel art). Pooled gameplay swarms go through `BatchedRenderer`
     instead — that's where the per-draw-call cost actually matters.
+
+    Includes a `flash()` method for the M11 danger-feedback layer: an
+    overlay rectangle is drawn on top with a tint color whose alpha decays
+    over `duration` seconds. Call `tick_flash(dt)` from the game loop.
     """
 
     def __init__(self, atlas: "SpriteAtlas", frame_name: str, **kwargs):
@@ -286,16 +290,41 @@ class AtlasSprite(Widget):
                 texture=atlas.texture,
                 tex_coords=(u0, v0, u1, v0, u1, v1, u0, v1),
             )
+            self._flash_color = Color(1.0, 0.30, 0.30, 0.0)
+            self._flash_rect = Rectangle()
         self.bind(pos=self._sync, size=self._sync)
         self._sync()
+        self._flash_remaining = 0.0
+        self._flash_max = 0.0
+        self._flash_peak_alpha = 0.0
 
     def _sync(self, *_):
         self._rect.pos = self.pos
         self._rect.size = self.size
+        self._flash_rect.pos = self.pos
+        self._flash_rect.size = self.size
 
     def set_frame(self, frame_name: str) -> None:
         u0, v0, u1, v1 = self._atlas.frame(frame_name)
         self._rect.tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
+
+    def flash(self, duration: float = 0.28,
+              color: tuple[float, float, float, float] = (1.0, 0.25, 0.25, 0.78)) -> None:
+        self._flash_color.rgba = color
+        self._flash_peak_alpha = color[3]
+        self._flash_remaining = duration
+        self._flash_max = duration
+
+    def tick_flash(self, dt: float) -> None:
+        if self._flash_remaining <= 0.0:
+            return
+        self._flash_remaining = max(0.0, self._flash_remaining - dt)
+        if self._flash_remaining <= 0.0:
+            self._flash_color.a = 0.0
+        else:
+            self._flash_color.a = self._flash_peak_alpha * (
+                self._flash_remaining / max(self._flash_max, 0.001)
+            )
 
 
 # Atlas-discovery helper for the runtime: lets gameplay code ask for an

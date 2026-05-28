@@ -32,6 +32,23 @@ NUM_WORLDS = 6
 LEVELS_PER_WORLD = 10
 TOTAL_LEVELS = NUM_WORLDS * LEVELS_PER_WORLD
 
+# Auto-scroll speed in px/sec; used to convert "minimum level duration in
+# seconds" to a minimum distance_goal.
+SCROLL_SPEED_PX_PER_SEC = 360.0
+
+# Level "type" tags describe how spawn intensity responds to the player.
+#   static  — fixed spawn script; missed gates are forgivable since later
+#             gates compensate. Easy / forgiving feel.
+#   hybrid  — static baseline + periodic dynamic spike windows where spawn
+#             interval halves for a few seconds.
+#   dynamic — spawn interval scales inversely with current squad firepower.
+#             Missing a x2 gate punishes hard: the spawner ramps up to
+#             match the squad you should have had.
+TYPE_STATIC = "static"
+TYPE_HYBRID = "hybrid"
+TYPE_DYNAMIC = "dynamic"
+TYPE_BOSS = "boss"
+
 # World themes (used by ui.WorldMap + ui.LevelSelect for the gradient background).
 WORLDS = [
     {"id": 1, "name": "Meadow",     "top": (0.32, 0.62, 0.36), "bottom": (0.16, 0.34, 0.20), "accent": (0.95, 0.85, 0.30)},
@@ -63,11 +80,16 @@ def build_levels() -> dict[int, dict[str, Any]]:
     """
     levels: dict[int, dict[str, Any]] = {}
     for world in range(1, NUM_WORLDS + 1):
+        # Minimum level duration ramps from 10s (W1) to 20s (W6). Levels
+        # later than the world's start nudge higher within the world.
+        world_min_duration_floor = 8.0 + 2.0 * world
         for in_world in range(1, LEVELS_PER_WORLD + 1):
             index = (world - 1) * LEVELS_PER_WORLD + in_world
             t = (index - 1) / max(1, TOTAL_LEVELS - 1)
 
-            distance_goal = _lerp(2400.0, 7200.0, t)        # px
+            min_duration = world_min_duration_floor + (in_world - 1) * 0.4
+            distance_goal = max(_lerp(2400.0, 7200.0, t),
+                                min_duration * SCROLL_SPEED_PX_PER_SEC)
             enemy_spawn_interval = _lerp(0.18, 0.05, t)     # ~5/s → ~20/s
             enemy_speed = _lerp(180.0, 290.0, t)            # px/sec downward
             if t < 0.40:
@@ -80,7 +102,25 @@ def build_levels() -> dict[int, dict[str, Any]]:
             enemy_chase_max = _lerp(80.0, 170.0, t)
             gate_interval_px = _lerp(720.0, 420.0, t)
 
+            # Per-level type. Boss levels override.
+            if in_world == LEVELS_PER_WORLD:
+                level_type = TYPE_BOSS
+            elif t < 0.18:
+                level_type = TYPE_STATIC
+            elif t < 0.55:
+                level_type = TYPE_HYBRID
+            else:
+                level_type = TYPE_DYNAMIC
+
+            # Kill target — how many enemies the player should expect to put
+            # down. Roughly (level_seconds * spawns_per_sec * 0.55), capped
+            # so the player isn't punished for over-shooting.
+            level_seconds = distance_goal / SCROLL_SPEED_PX_PER_SEC
+            kill_target = int(round(level_seconds * (1.0 / enemy_spawn_interval) * 0.55))
+
             allowed_ops = ["mul", "add"]
+            if world >= 2:
+                allowed_ops.append("grenade")     # bonus pickup gates from W2
             if world >= 3:
                 allowed_ops.append("weapon")
             if world >= 5:
@@ -99,10 +139,17 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # overrides the distance-goal win condition with "deplete boss
             # HP", disables gates (the player can't pivot mid-fight) and
             # gives the player a head-start squad + a world-appropriate weapon
-            # so the fight isn't starting from pistol+1.
+            # so the fight isn't starting from pistol+1 — but the head start
+            # is small enough that *passive* play loses.
             is_boss = (in_world == LEVELS_PER_WORLD)
-            boss_hp = int(round(_lerp(60.0, 320.0, t))) if is_boss else 0
-            starting_squad = int(round(_lerp(8.0, 45.0, world / NUM_WORLDS))) if is_boss else 1
+            # Boss HP is high enough that a passive squad of `starting_squad`
+            # cannot grind it down before the boss's volleys overwhelm the
+            # squad. Sim-tuned in the difficulty regression script.
+            boss_hp = int(round(_lerp(350.0, 1100.0, t))) if is_boss else 0
+            starting_squad = int(round(_lerp(3.0, 12.0, world / NUM_WORLDS))) if is_boss else 1
+            # Per-world minion HP for boss-spawned enemies. Worlds 1-3 → 1,
+            # 4-5 → 2, 6 → 3, so the squad can't just hose the wave.
+            boss_minion_hp = 1 if world < 4 else (2 if world < 6 else 3)
             if not is_boss:
                 starting_weapon = "pistol"
             elif world >= 4:
@@ -129,8 +176,12 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 "squad_target_3_star": squad_target_3,
                 "boss": is_boss,
                 "boss_hp": boss_hp,
+                "boss_minion_hp": boss_minion_hp,
                 "starting_squad": starting_squad,
                 "starting_weapon": starting_weapon,
+                "type": level_type,
+                "min_duration_sec": min_duration,
+                "kill_target": kill_target,
             }
     return levels
 
