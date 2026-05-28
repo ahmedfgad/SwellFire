@@ -29,6 +29,7 @@ from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import autoplay
 import boss as boss_module
 import boosters
 import entities
@@ -180,6 +181,12 @@ class GameScreen(ui.StyledScreen):
         # update loop returns early when self.paused is True; the pause
         # button opens a ConfirmDialog with Quit + Resume choices.
         self.paused = False
+        # Auto-play (M12). When ``auto_mode`` is True the AutoPlayer
+        # daemon thread drives ``_hero_target_x`` and the touch handlers
+        # ignore drag input so the GA can play without interference.
+        self.auto_mode = False
+        self.auto: autoplay.AutoPlayer | None = None
+        self.auto_btn = None
         # Boss systems (M10).
         self.boss: boss_module.Boss | None = None
         self.boss_controller: boss_module.BossController | None = None
@@ -297,6 +304,14 @@ class GameScreen(ui.StyledScreen):
         )
         self.pause_btn.bind(on_release=lambda *_: self._open_pause())
         self.root_layout.add_widget(self.pause_btn)
+
+        # Auto-play toggle (top-left). When green the GA is driving.
+        self.auto_btn = ui.StyledButton(
+            text="Auto: Off", bg=[0.45, 0.45, 0.5, 1], font_size=sp(14), bold=True,
+            size_hint=(0.14, 0.08), pos_hint={"x": 0.02, "top": 0.99},
+        )
+        self.auto_btn.bind(on_release=lambda *_: self._toggle_auto())
+        self.root_layout.add_widget(self.auto_btn)
 
         # Back button (bottom right)
         self.back_btn = ui.StyledButton(
@@ -554,6 +569,13 @@ class GameScreen(ui.StyledScreen):
             self._hero_target_x = hero_cx
         if self._update_event is None:
             self._update_event = Clock.schedule_interval(self._update, 1 / 60.0)
+        # If auto-play was on for the previous level, keep it on for this
+        # one — restart the GA daemon now that the world is reset.
+        self._refresh_auto_button()
+        if self.auto_mode:
+            if self.auto is None:
+                self.auto = autoplay.AutoPlayer(self)
+            self.auto.start()
 
     def _apply_level_config(self) -> None:
         """Look up the per-level config and push it to the spawners.
@@ -1303,6 +1325,11 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
+        # Stop the GA but keep auto_mode True — the player wants to keep
+        # watching it play. The next level will restart the daemon in
+        # _reset() if auto_mode is still on.
+        if self.auto is not None:
+            self.auto.stop()
 
         running = ui.app()
         final_squad = max(0, self.squad_count)
@@ -1519,6 +1546,11 @@ class GameScreen(ui.StyledScreen):
         # Drag starts when the touch lands in the stage and a hero exists.
         if self.hero is None or not self.stage.collide_point(*touch.pos):
             return False
+        # Auto-play locks out manual drag — the GA is steering. Tapping
+        # the stage with auto on does nothing (use the Auto button to
+        # take back control).
+        if self.auto_mode:
+            return False
         self._dragging = True
         self._drag_origin_touch_x = touch.x
         self._drag_origin_hero_x = self.hero.center_x
@@ -1529,7 +1561,7 @@ class GameScreen(ui.StyledScreen):
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
-        if not self._dragging or self.hero is None:
+        if not self._dragging or self.hero is None or self.auto_mode:
             return False
         delta = touch.x - self._drag_origin_touch_x
         self._hero_target_x = self._drag_origin_hero_x + delta
@@ -1545,6 +1577,10 @@ class GameScreen(ui.StyledScreen):
     # --- exit -------------------------------------------------------------
 
     def _exit(self):
+        # Cut the GA loose if we're leaving the level — it'll re-start on
+        # the next _reset if auto_mode is still on.
+        if self.auto is not None:
+            self.auto.stop()
         running = ui.app()
         if running.mp_net is not None:
             try:
@@ -1559,6 +1595,34 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- auto-play toggle (M12) ------------------------------------------
+
+    def _toggle_auto(self) -> None:
+        """Flip auto mode on/off. Same shape as CoinTex's _toggle_auto:
+        flip the flag, refresh the button, then start or stop the GA
+        daemon. The thread stays dormant when the game isn't active so
+        it's safe to call this between levels."""
+        self.auto_mode = not self.auto_mode
+        self._refresh_auto_button()
+        if self.auto_mode:
+            if self.auto is None:
+                self.auto = autoplay.AutoPlayer(self)
+            if not self._level_ended and not self.paused:
+                self.auto.start()
+        else:
+            if self.auto is not None:
+                self.auto.stop()
+
+    def _refresh_auto_button(self) -> None:
+        if self.auto_btn is None:
+            return
+        if self.auto_mode:
+            self.auto_btn.text = "Auto: On"
+            self.auto_btn.bg = [0.20, 0.70, 0.40, 1]
+        else:
+            self.auto_btn.text = "Auto: Off"
+            self.auto_btn.bg = [0.45, 0.45, 0.5, 1]
 
     # --- 2× coins power-up indicator -------------------------------------
 
