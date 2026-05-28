@@ -25,6 +25,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.boxlayout import BoxLayout
 from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -114,6 +115,62 @@ def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
 
 # --- the gameplay screen --------------------------------------------------
 
+class _StatChip(FloatLayout):
+    """One stat readout: small uppercase title + big bold value, on a
+    translucent dark pill with an accent-coloured side stripe.
+
+    Used in the gameplay HUD chip row so each stat (squad, weapon,
+    kills, coins) reads at a glance even on a small screen. The accent
+    stripe keeps each chip recognisable without needing icon art.
+    """
+
+    def __init__(self, title: str, value: str,
+                 accent: tuple[float, float, float, float], **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            self._bg_color = Color(0.06, 0.08, 0.14, 0.85)
+            self._bg_rect = RoundedRectangle(radius=[dp(10)])
+            self._accent_color = Color(*accent)
+            self._accent_rect = RoundedRectangle(radius=[dp(10)])
+        self.bind(pos=lambda *_: self._sync(),
+                  size=lambda *_: self._sync())
+        self._title_label = Label(
+            text=title, font_size=sp(10), bold=True,
+            color=(1, 1, 1, 0.62),
+            halign="center", valign="middle",
+            size_hint=(1.0, 0.40), pos_hint={"x": 0, "top": 1.0},
+        )
+        self._title_label.bind(
+            size=lambda l, *_: setattr(l, "text_size", l.size),
+        )
+        self._value_label = Label(
+            text=value, font_size=sp(18), bold=True, color=accent,
+            halign="center", valign="middle",
+            size_hint=(1.0, 0.60), pos_hint={"x": 0, "y": 0},
+        )
+        self._value_label.bind(
+            size=lambda l, *_: setattr(l, "text_size", l.size),
+        )
+        self.add_widget(self._title_label)
+        self.add_widget(self._value_label)
+
+    def _sync(self):
+        # Whole-chip pill.
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
+        # 3-px accent stripe along the bottom edge — subtle visual cue
+        # without competing with the value for attention.
+        x, y = self.pos
+        w, h = self.size
+        stripe_h = max(2.0, h * 0.06)
+        self._accent_rect.pos = (x, y)
+        self._accent_rect.size = (w, stripe_h)
+
+    def set_value(self, value: str) -> None:
+        if self._value_label.text != value:
+            self._value_label.text = value
+
+
 class GameScreen(ui.StyledScreen):
     """Auto-scrolling level screen."""
 
@@ -173,6 +230,18 @@ class GameScreen(ui.StyledScreen):
         self.shield_btn = None
         self.pause_btn = None
         self.coins_label = None
+        # HUD chip-row widgets. Built in build(); None-initialised so the
+        # per-frame updater can skip cleanly before the screen is built.
+        self.squad_chip = None
+        self.weapon_chip = None
+        self.kills_chip = None
+        self.coins_chip = None
+        self.top_bar = None
+        self.dist_bar_holder = None
+        self._top_bar_rect = None
+        self._dist_bg_rect = None
+        self._dist_fill_rect = None
+        self._dist_progress = 0.0
         # Double-coin power-up indicator widgets. Built in build().
         self.dc_panel = None
         self.dc_label = None
@@ -210,10 +279,13 @@ class GameScreen(ui.StyledScreen):
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
-        # The "stage" is the road surface area the hero runs in. It's narrower
-        # than the screen so left/right margins read as background scenery.
+        # The "stage" is the road surface area the hero runs in. Was 66 %
+        # wide with green scenery on the sides; that wastes ~1/3 of the
+        # screen on phones in portrait, so we now fill the full width.
+        # The road's rails + dashed centerline still provide the framing,
+        # and HUD widgets float over the stage as semi-transparent chips.
         self.stage = Widget(
-            size_hint=(0.66, 1.0),
+            size_hint=(1.0, 1.0),
             pos_hint={"center_x": 0.5, "y": 0},
         )
         self.root_layout.add_widget(self.stage)
@@ -234,40 +306,85 @@ class GameScreen(ui.StyledScreen):
 
         self.stage.bind(pos=self._layout_stage, size=self._layout_stage)
 
-        # Title strip at top
+        # Top bar — a thin translucent strip spanning the full width that
+        # holds the level title (left of center), the distance progress
+        # bar (centered, prominent), and leaves room for the Auto/Pause
+        # corner buttons. The strip's own bg makes the HUD readable on
+        # any backdrop now that the stage extends edge-to-edge.
+        self.top_bar = FloatLayout(
+            size_hint=(1.0, 0.08),
+            pos_hint={"x": 0.0, "top": 1.0},
+        )
+        with self.top_bar.canvas.before:
+            Color(0.04, 0.05, 0.10, 0.78)
+            self._top_bar_rect = Rectangle()
+        self.top_bar.bind(
+            pos=lambda *_: self._sync_top_bar(),
+            size=lambda *_: self._sync_top_bar(),
+        )
+        self.root_layout.add_widget(self.top_bar)
+
+        # Title — smaller now that it shares the bar.
         self.title_label = Label(
-            text="", font_size=sp(18), bold=True, color=(1, 0.88, 0.2, 1),
+            text="", font_size=sp(14), bold=True, color=(1, 0.88, 0.2, 1),
             halign="center", valign="middle",
-            size_hint=(0.6, 0.06), pos_hint={"center_x": 0.5, "top": 0.99},
+            size_hint=(0.55, 1.0),
+            pos_hint={"center_x": 0.5, "center_y": 0.72},
         )
         self.title_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.root_layout.add_widget(self.title_label)
+        self.top_bar.add_widget(self.title_label)
 
-        # HUD (distance + hero X)
-        self.hud_label = Label(
-            text="", font_size=sp(15), bold=True, color=(1, 1, 1, 0.92),
-            halign="left", valign="middle", markup=False,
-            size_hint=(0.45, 0.06), pos_hint={"x": 0.02, "top": 0.92},
+        # Distance progress bar — thin line under the title. Visual cue
+        # for "how far through this level am I", much easier to scan
+        # than "Distance 216 / 12960" buried in a text row.
+        self.dist_bar_holder = FloatLayout(
+            size_hint=(0.55, 0.20),
+            pos_hint={"center_x": 0.5, "center_y": 0.28},
         )
-        self.hud_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.root_layout.add_widget(self.hud_label)
+        with self.dist_bar_holder.canvas.before:
+            Color(1, 1, 1, 0.14)
+            self._dist_bg_rect = RoundedRectangle(radius=[dp(3)])
+            Color(0.40, 0.85, 0.45, 0.95)
+            self._dist_fill_rect = RoundedRectangle(radius=[dp(3)])
+        self.dist_bar_holder.bind(
+            pos=lambda *_: self._sync_dist_bar(),
+            size=lambda *_: self._sync_dist_bar(),
+        )
+        self._dist_progress = 0.0
+        self.top_bar.add_widget(self.dist_bar_holder)
 
-        # Debug overlay (FPS + frame time)
+        # Stat chip row — Squad / Weapon / Kills / Coins. Each chip has
+        # a small uppercase label on top and a big bold value below,
+        # rendered against a translucent dark pill so it reads on any
+        # backdrop.
+        self.chip_row = BoxLayout(
+            orientation="horizontal", spacing=dp(8),
+            size_hint=(0.86, 0.10),
+            pos_hint={"center_x": 0.5, "top": 0.91},
+            padding=(dp(4), 0, dp(4), 0),
+        )
+        self.squad_chip = _StatChip("SQUAD", "1",
+                                    accent=(0.65, 0.85, 1.0, 1.0))
+        self.weapon_chip = _StatChip("WEAPON", "Rifle",
+                                     accent=(1.0, 0.75, 0.45, 1.0))
+        self.kills_chip = _StatChip("KILLS", "0",
+                                    accent=(0.95, 0.50, 0.45, 1.0))
+        self.coins_chip = _StatChip("COINS", "+0+0",
+                                    accent=(1.0, 0.92, 0.40, 1.0))
+        for c in (self.squad_chip, self.weapon_chip, self.kills_chip, self.coins_chip):
+            self.chip_row.add_widget(c)
+        self.root_layout.add_widget(self.chip_row)
+        # The old single-line HUD is gone; aliases kept = None so any
+        # stray reference (e.g. debug code) fails loud rather than silent.
+        self.hud_label = None
+        self.coins_label = None
+
+        # Debug overlay (FPS + frame time) — moved down so it sits under
+        # the chip row instead of inside it.
         self.debug = graphics.DebugOverlay(
-            size_hint=(0.4, 0.05), pos_hint={"x": 0.02, "top": 0.86},
+            size_hint=(0.4, 0.05), pos_hint={"x": 0.02, "top": 0.79},
         )
         self.root_layout.add_widget(self.debug)
-
-        # In-level coins counter — separate from the persistent shop balance.
-        # Shows the coins earned during THIS run only.
-        self.coins_label = Label(
-            text="Coins +0", font_size=sp(16), bold=True,
-            color=(1.0, 0.92, 0.40, 1.0),
-            halign="right", valign="middle", markup=False,
-            size_hint=(0.20, 0.05), pos_hint={"right": 0.98, "top": 0.92},
-        )
-        self.coins_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.root_layout.add_widget(self.coins_label)
 
         # 2× COINS power-up timer. Pill at top-center with a depleting
         # fill bar so the player can see, at a glance, how long the
@@ -1249,18 +1366,21 @@ class GameScreen(ui.StyledScreen):
                 )
         # Update the standalone 2× COINS power-up indicator (top-center).
         self._update_dc_panel()
-        self.hud_label.text = ("Distance {}     Squad {}     "
-                               "Weapon: {}     Kills {}").format(
-            progress, self.squad_count, weapon_name, self.kills_total,
-        )
-        # In-level coins counter (top-right). This is only the coins earned
-        # during this run — distinct from the persistent shop balance shown
-        # on the main menu.
-        if self.coins_label is not None:
+        # Top-bar distance progress (0..1).
+        if self.distance_goal > 0:
+            self._dist_progress = min(1.0, self.distance / self.distance_goal)
+        else:
+            self._dist_progress = 0.0
+        self._sync_dist_bar()
+        # Stat chips.
+        if self.squad_chip is not None:
+            self.squad_chip.set_value(str(self.squad_count))
+            self.weapon_chip.set_value(weapon_name)
+            self.kills_chip.set_value(str(self.kills_total))
             other = self._coins_earned - self._coins_pickups
-            self.coins_label.text = "Coins +{}+{}".format(
+            self.coins_chip.set_value("+{}+{}".format(
                 self._coins_pickups, other,
-            )
+            ))
         if self.squad_count > self._squad_peak:
             self._squad_peak = self.squad_count
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
@@ -1615,6 +1735,30 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- HUD sync helpers ------------------------------------------------
+
+    def _sync_top_bar(self) -> None:
+        if self._top_bar_rect is None:
+            return
+        self._top_bar_rect.pos = self.top_bar.pos
+        self._top_bar_rect.size = self.top_bar.size
+
+    def _sync_dist_bar(self) -> None:
+        """Position the distance progress bar within the top bar.
+
+        Called when the bar holder is resized OR when the progress
+        value advances (so the fill rectangle grows in place).
+        """
+        if self._dist_bg_rect is None:
+            return
+        x, y = self.dist_bar_holder.pos
+        w, h = self.dist_bar_holder.size
+        self._dist_bg_rect.pos = (x, y)
+        self._dist_bg_rect.size = (w, h)
+        progress = max(0.0, min(1.0, self._dist_progress))
+        self._dist_fill_rect.pos = (x, y)
+        self._dist_fill_rect.size = (w * progress, h)
 
     # --- auto-play toggle (M12) ------------------------------------------
 
