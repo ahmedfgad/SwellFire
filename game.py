@@ -165,6 +165,12 @@ class GameScreen(ui.StyledScreen):
         # Touch-HUD buttons (M11.5 follow-up). Initialized in build().
         self.grenade_btn = None
         self.shield_btn = None
+        self.pause_btn = None
+        self.coins_label = None
+        # Pause / resume — ported from CoinTex's GameScreen pattern. The
+        # update loop returns early when self.paused is True; the pause
+        # button opens a ConfirmDialog with Quit + Resume choices.
+        self.paused = False
         # Boss systems (M10).
         self.boss: boss_module.Boss | None = None
         self.boss_controller: boss_module.BossController | None = None
@@ -231,6 +237,25 @@ class GameScreen(ui.StyledScreen):
             size_hint=(0.4, 0.05), pos_hint={"x": 0.02, "top": 0.86},
         )
         self.root_layout.add_widget(self.debug)
+
+        # In-level coins counter — separate from the persistent shop balance.
+        # Shows the coins earned during THIS run only.
+        self.coins_label = Label(
+            text="Coins +0", font_size=sp(16), bold=True,
+            color=(1.0, 0.92, 0.40, 1.0),
+            halign="right", valign="middle", markup=False,
+            size_hint=(0.20, 0.05), pos_hint={"right": 0.98, "top": 0.92},
+        )
+        self.coins_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+        self.root_layout.add_widget(self.coins_label)
+
+        # Pause button — top-right. CoinTex pattern: "II" double-bar glyph.
+        self.pause_btn = ui.StyledButton(
+            text="II", bg=[0.30, 0.30, 0.40, 0.95], font_size=sp(20), bold=True,
+            size_hint=(0.07, 0.08), pos_hint={"right": 0.98, "top": 0.99},
+        )
+        self.pause_btn.bind(on_release=lambda *_: self._open_pause())
+        self.root_layout.add_widget(self.pause_btn)
 
         # Back button (bottom right)
         self.back_btn = ui.StyledButton(
@@ -378,6 +403,9 @@ class GameScreen(ui.StyledScreen):
         self._fire_cooldown = 0.0
         self.kills_total = 0
         self.squad_count = 1
+        # Highest squad size reached this run — shown in the end-of-level
+        # summary so the player sees their crowd peaked at e.g. 47.
+        self._squad_peak = 1
         self.attrition_total = 0
         self._level_ended = False
         # Carry over the per-save booster balances into the run; level-end
@@ -401,6 +429,11 @@ class GameScreen(ui.StyledScreen):
         # coin pickups). Persisted to state.coins_balance in _end_level so a
         # partial run still pays the player for whatever they collected.
         self._coins_earned = 0
+        # Split tracking: pickups (coins thrown into the level + the coin
+        # rain from the double-coin power-up) vs everything else (kill
+        # rewards, gate rewards, completion bonus). The in-level HUD shows
+        # them as "Coins +X+Y" so the player can see what worked.
+        self._coins_pickups = 0
         self._coin_remainder = 0.0      # fractional remainder for kill rewards
         self.double_coin_until = 0.0    # in-run timer; coin rewards 2× while active
         if self.squad_controller is not None:
@@ -735,6 +768,7 @@ class GameScreen(ui.StyledScreen):
             if self.double_coin_until > self._run_time:
                 coins *= 2
             self._coins_earned += coins
+            self._coins_pickups += coins
             if self.particle_controller is not None:
                 self.particle_controller.burst(
                     x, y, count=10, speed=320.0, ttl=0.40,
@@ -774,7 +808,7 @@ class GameScreen(ui.StyledScreen):
             )
 
     def _update(self, dt):
-        if self._level_ended:
+        if self._level_ended or self.paused:
             return
         # Shake first so the offset applies to everything else this frame.
         self._step_shake(dt)
@@ -1140,6 +1174,16 @@ class GameScreen(ui.StyledScreen):
                                "Weapon: {}     Kills {}{}").format(
             progress, self.squad_count, weapon_name, self.kills_total, dc_chip,
         )
+        # In-level coins counter (top-right). This is only the coins earned
+        # during this run — distinct from the persistent shop balance shown
+        # on the main menu.
+        if self.coins_label is not None:
+            other = self._coins_earned - self._coins_pickups
+            self.coins_label.text = "Coins +{}+{}".format(
+                self._coins_pickups, other,
+            )
+        if self.squad_count > self._squad_peak:
+            self._squad_peak = self.squad_count
         gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
         proj_active = self.projectile_pool.active_count if self.projectile_pool else 0
@@ -1318,9 +1362,25 @@ class GameScreen(ui.StyledScreen):
         def on_menu():
             running.go("menu")
 
+        gates_hit = self.gate_controller.applied_total if self.gate_controller else 0
+        gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
+        squad_end = max(0, self.squad_count)
+        squad_peak = max(squad_end, getattr(self, "_squad_peak", squad_end))
+        stats = {
+            "coins_total": self._coins_earned,
+            "coins_pickup": self._coins_pickups,
+            "kills": self.kills_total,
+            "gates_hit": gates_hit,
+            "gates_missed": gates_missed,
+            "squad_end": squad_end,
+            "squad_peak": squad_peak,
+            "distance": int(self.distance),
+            "time": self._run_time,
+        }
         dialog = ui.LevelResultDialog(
             won=won, stars=stars, score=score, level_label=level_label,
             on_next=on_next, on_retry=on_retry, on_menu=on_menu,
+            stats=stats,
         )
         dialog.open()
 
@@ -1462,3 +1522,50 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- pause / resume (port of CoinTex GameScreen pattern) -------------
+
+    def _open_pause(self) -> None:
+        """Open the pause modal. Update loop respects self.paused so the
+        world freezes; ConfirmDialog asks Quit vs Resume."""
+        if self._level_ended or self.paused:
+            return
+        self.paused = True
+        running = ui.app()
+        # Silence music while paused (CoinTex pattern).
+        try:
+            running.audio.stop_music()
+        except Exception:
+            pass
+
+        def quit_to_menu():
+            self.paused = False
+            self._level_ended = True
+            if self._update_event is not None:
+                self._update_event.cancel()
+                self._update_event = None
+            self._exit()
+
+        ui.ConfirmDialog(
+            "Quit to the level menu?\nThis level's progress is lost.",
+            quit_to_menu,
+            yes_text="Quit", no_text="Resume",
+            on_no=self._resume,
+        ).open()
+
+    def _resume(self) -> None:
+        """Resume from pause: restart the level music and unblock _update."""
+        if self._level_ended:
+            return
+        self.paused = False
+        running = ui.app()
+        # Re-pick the right track for the current level.
+        if running.current_mode == "single" and running.current_level:
+            level_cfg = levels.get_level(running.current_level)
+            if level_cfg and level_cfg.get("boss"):
+                running.audio.play_boss_music()
+            else:
+                world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+                running.audio.play_level_music(world)
+        else:
+            running.audio.play_level_music(1)

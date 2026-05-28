@@ -274,16 +274,21 @@ class StyledButton(ButtonBehavior, Label):
 
 
 class ConfirmDialog(ModalView):
-    def __init__(self, message, on_yes, yes_text="Yes", no_text="No", on_no=None, **kwargs):
-        super().__init__(size_hint=(0.75, 0.45), auto_dismiss=False, **kwargs)
+    def __init__(self, message, on_yes, yes_text="Yes", no_text="No",
+                 on_no=None, *, markup: bool = False, **kwargs):
+        super().__init__(size_hint=(0.78, 0.52), auto_dismiss=False, **kwargs)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(16))
         with box.canvas.before:
             Color(0.12, 0.14, 0.22, 0.98)
             self._bg = RoundedRectangle(radius=[dp(16)])
         box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
                  size=lambda *a: setattr(self._bg, "size", box.size))
-        box.add_widget(Label(text=message, font_size=sp(20), halign="center",
-                             valign="middle", color=[1, 1, 1, 1]))
+        msg_label = Label(
+            text=message, font_size=sp(18), halign="center",
+            valign="middle", color=[1, 1, 1, 1], markup=markup,
+        )
+        msg_label.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        box.add_widget(msg_label)
         row = BoxLayout(orientation="horizontal", spacing=dp(16), size_hint_y=0.4)
         no_btn = StyledButton(text=no_text, bg=[0.45, 0.45, 0.5, 1])
         yes_btn = StyledButton(text=yes_text, bg=[0.85, 0.3, 0.3, 1])
@@ -378,13 +383,34 @@ class StarRow(Widget):
                 graphics.draw_star(cx, cy, outer, color)
 
 
+def _format_time(seconds: float) -> str:
+    s = int(round(seconds))
+    return "{}:{:02d}".format(s // 60, s % 60)
+
+
+def _add_stat_row(grid, label_text: str, value_text: str, *,
+                  value_color=(1, 1, 1, 1)) -> None:
+    """Helper to keep the two-column stat layout consistent."""
+    grid.add_widget(Label(
+        text=label_text, font_size=sp(15), color=(1, 1, 1, 0.78),
+        halign="right", valign="middle", size_hint_x=0.45,
+        text_size=(None, None),
+    ))
+    grid.add_widget(Label(
+        text=value_text, font_size=sp(15), color=value_color,
+        halign="left", valign="middle", size_hint_x=0.55,
+        markup=True, text_size=(None, None),
+    ))
+
+
 class LevelResultDialog(ModalView):
     """Modal shown at level end: title, stars (if won), score, action buttons."""
 
     def __init__(self, won: bool, stars: int, score: int, level_label: str,
-                 *, on_next=None, on_retry, on_menu, **kwargs):
-        super().__init__(size_hint=(0.74, 0.62), auto_dismiss=False, **kwargs)
-        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(12))
+                 *, on_next=None, on_retry, on_menu, stats=None, **kwargs):
+        # Slightly taller now to fit the stats block.
+        super().__init__(size_hint=(0.80, 0.78), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         with box.canvas.before:
             Color(0.10, 0.12, 0.18, 0.98)
             self._bg = RoundedRectangle(radius=[dp(16)])
@@ -393,29 +419,64 @@ class LevelResultDialog(ModalView):
 
         title = "Level Complete!" if won else "Level Failed"
         title_color = (1.0, 0.85, 0.20, 1.0) if won else (0.95, 0.50, 0.45, 1.0)
-        box.add_widget(Label(text=title, font_size=sp(36), bold=True,
-                             color=title_color, size_hint_y=0.22))
+        box.add_widget(Label(text=title, font_size=sp(32), bold=True,
+                             color=title_color, size_hint_y=0.14))
 
-        box.add_widget(Label(text=level_label, font_size=sp(18), bold=False,
-                             color=(1, 1, 1, 0.85), size_hint_y=0.10))
+        box.add_widget(Label(text=level_label, font_size=sp(16), bold=False,
+                             color=(1, 1, 1, 0.85), size_hint_y=0.07))
 
         if won:
-            star_holder = BoxLayout(orientation="horizontal", size_hint_y=0.22,
+            star_holder = BoxLayout(orientation="horizontal", size_hint_y=0.16,
                                     padding=(dp(40), 0, dp(40), 0))
             star_holder.add_widget(StarRow(stars=stars, size_hint=(1, 1)))
             box.add_widget(star_holder)
         else:
             box.add_widget(Label(
                 text="Your squad fell to the swarm. Try a steadier path through the gates.",
-                font_size=sp(15), color=(1, 1, 1, 0.85),
-                halign="center", valign="middle", size_hint_y=0.22,
+                font_size=sp(14), color=(1, 1, 1, 0.85),
+                halign="center", valign="middle", size_hint_y=0.16,
             ))
 
         box.add_widget(Label(text="Score   {}".format(score),
-                             font_size=sp(22), bold=True, color=(1, 1, 1, 1),
-                             size_hint_y=0.14))
+                             font_size=sp(20), bold=True, color=(1, 1, 1, 1),
+                             size_hint_y=0.09))
 
-        button_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=0.28)
+        # --- stats block: pairs of [icon-ish label : value] in a grid -----
+        # Visible feedback for *what* the player did during the level, not
+        # just whether they passed. Children especially want to see numbers
+        # tick up — "I killed 47 of them" is a story they can retell.
+        if stats:
+            grid = GridLayout(cols=2, spacing=(dp(8), dp(4)),
+                              size_hint_y=0.30,
+                              padding=(dp(16), 0, dp(16), 0))
+            # First the headline row: total coins broken out as X + Y.
+            coin_total = stats.get("coins_total", 0)
+            coin_pickup = stats.get("coins_pickup", 0)
+            coin_other = coin_total - coin_pickup
+            coin_value = "[b]{}[/b]   ({} pickups + {} progress)".format(
+                coin_total, coin_pickup, coin_other,
+            )
+            _add_stat_row(grid, "Coins earned", coin_value,
+                          value_color=(1.0, 0.92, 0.40, 1.0))
+            _add_stat_row(grid, "Enemies killed",
+                          "[b]{}[/b]".format(stats.get("kills", 0)))
+            _add_stat_row(grid, "Gates passed",
+                          "[b]{}[/b] hit  /  [b]{}[/b] missed".format(
+                              stats.get("gates_hit", 0),
+                              stats.get("gates_missed", 0),
+                          ))
+            _add_stat_row(grid, "Squad survived",
+                          "[b]{}[/b] of {} runners".format(
+                              stats.get("squad_end", 0),
+                              stats.get("squad_peak", 0),
+                          ))
+            _add_stat_row(grid, "Distance",
+                          "[b]{}[/b] m".format(stats.get("distance", 0)))
+            _add_stat_row(grid, "Time",
+                          "[b]{}[/b]".format(_format_time(stats.get("time", 0.0))))
+            box.add_widget(grid)
+
+        button_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=0.18)
         if won and on_next is not None:
             next_btn = StyledButton(text="Next Level", bg=[0.2, 0.7, 0.4, 1])
             next_btn.bind(on_release=lambda *_: self._fire(on_next))
@@ -629,38 +690,172 @@ class ShopScreen(StyledScreen):
         )
         return card
 
-    def _buy(self, item: shop.ShopItem) -> None:
-        """Card-click handler. For weapons:
-          * if not equipped → equip it.
-          * if equipped and a higher tier is available + affordable → upgrade.
-          * otherwise → ignored (negative SFX).
-        For other categories: regular purchase.
+    def _buy(self, item: shop.ShopItem, card=None) -> None:
+        """Card-click handler. Shows a confirmation modal first; the actual
+        purchase + success animation runs on confirm. Children especially
+        need that "are you sure?" step before spending hard-earned coins.
         """
         state = app().state
-        success = False
         if item.category == "weapon":
             wid = item.weapon_id
             current_tier = state.get_weapon_tier(wid)
             next_price = shop.next_tier_price(wid, current_tier)
             is_equipped = (state.starting_weapon == wid)
             if not is_equipped:
-                state.equip_weapon(wid)
-                success = True
-            elif next_price is not None and state.can_afford(next_price):
-                success = state.upgrade_weapon_tier(wid, current_tier + 1, next_price)
-            else:
-                success = False
+                # Equip costs nothing — confirm just to make the choice deliberate.
+                msg = (
+                    "Equip [b]{}[/b]?\n\n"
+                    "This will become your starting weapon for every "
+                    "non-boss level."
+                ).format(item.label)
+                self._confirm(msg, "Equip", lambda: self._do_equip_weapon(wid, item, card))
+                return
+            if next_price is None:
+                # Already MAX — nothing to do.
+                app().audio.play_sfx("hit")
+                return
+            if not state.can_afford(next_price):
+                app().audio.play_sfx("hit")
+                return
+            msg = (
+                "Upgrade [b]{}[/b] to [b]Lv {}[/b]?\n\n"
+                "Cost: [b]{} coins[/b]\n"
+                "You have: {} coins"
+            ).format(item.label, current_tier + 1, next_price, state.coins_balance)
+            self._confirm(msg, "Upgrade",
+                          lambda: self._do_upgrade_weapon(wid, current_tier + 1,
+                                                          next_price, item, card))
         elif item.category == "booster":
-            success = state.purchase_booster(
-                item.booster_id, item.booster_qty, item.price,
-            )
+            already = state.get_booster_balance(item.booster_id)
+            msg = (
+                "Buy [b]{}[/b]?\n\n"
+                "Cost: [b]{} coins[/b]\n"
+                "You have: {} coins\n\n"
+                "You currently own [b]{}[/b] of these."
+            ).format(item.label, item.price, state.coins_balance, already)
+            self._confirm(msg, "Buy", lambda: self._do_buy_booster(item, card))
         elif item.category == "squad":
-            success = state.purchase_squad_bonus(item.squad_target, item.price)
-        if success:
+            msg = (
+                "Buy [b]{}[/b]?\n\n"
+                "Cost: [b]{} coins[/b]\n"
+                "You have: {} coins\n\n"
+                "Every non-boss level starts with this many extra squad members."
+            ).format(item.label, item.price, state.coins_balance)
+            self._confirm(msg, "Buy", lambda: self._do_buy_squad(item, card))
+
+    def _confirm(self, message: str, yes_text: str, on_confirm) -> None:
+        """Open a ConfirmDialog with markup-enabled bold text.
+
+        Kept as a method so all shop confirmations share the same wording
+        pattern and the same Cancel/confirm UX.
+        """
+        ConfirmDialog(message, on_confirm,
+                      yes_text=yes_text, no_text="Cancel",
+                      markup=True).open()
+
+    # --- actual purchase actions + animation -----------------------------
+
+    def _do_equip_weapon(self, weapon_id: str, item, card) -> None:
+        state = app().state
+        state.equip_weapon(weapon_id)
+        app().audio.play_sfx("gate_pickup")
+        self._render()
+        self._float_text_from_card(card, "EQUIPPED!", (1.0, 0.85, 0.20, 1.0))
+
+    def _do_upgrade_weapon(self, weapon_id: str, target_tier: int, price: int,
+                           item, card) -> None:
+        state = app().state
+        if state.upgrade_weapon_tier(weapon_id, target_tier, price):
             app().audio.play_sfx("gate_pickup")
+            self._pulse_balance(price)
+            self._render()
+            self._float_text_from_card(card, "Lv {}!".format(target_tier),
+                                       (0.55, 0.95, 0.55, 1.0))
         else:
             app().audio.play_sfx("hit")
-        self._render()
+
+    def _do_buy_booster(self, item, card) -> None:
+        state = app().state
+        if state.purchase_booster(item.booster_id, item.booster_qty, item.price):
+            app().audio.play_sfx("gate_pickup")
+            self._pulse_balance(item.price)
+            self._render()
+            label = "+{} {}".format(item.booster_qty,
+                                    item.booster_id.upper())
+            self._float_text_from_card(card, label, (0.55, 0.95, 0.55, 1.0))
+        else:
+            app().audio.play_sfx("hit")
+
+    def _do_buy_squad(self, item, card) -> None:
+        state = app().state
+        if state.purchase_squad_bonus(item.squad_target, item.price):
+            app().audio.play_sfx("gate_pickup")
+            self._pulse_balance(item.price)
+            self._render()
+            self._float_text_from_card(card,
+                                       "+{} SQUAD".format(item.squad_target),
+                                       (0.55, 0.95, 0.55, 1.0))
+        else:
+            app().audio.play_sfx("hit")
+
+    def _pulse_balance(self, price: int) -> None:
+        """Brief red-flash + scale-up on the coins balance label so the
+        deduction is visible even to a child not reading the text."""
+        from kivy.animation import Animation
+        lbl = self.balance_label
+        # Show a brief "-N" overlay above the balance.
+        flash = Label(
+            text="[b]-{}[/b]".format(price), font_size=sp(22),
+            color=(1.0, 0.35, 0.30, 1.0), markup=True,
+            halign="center", valign="middle",
+            size_hint=(None, None), size=(dp(120), dp(36)),
+        )
+        flash.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        # Position centred over the balance label.
+        flash.center = lbl.center
+        self.root_layout.add_widget(flash)
+        anim = Animation(y=flash.y + dp(40), opacity=0, duration=0.8, t="out_quad")
+        anim.bind(on_complete=lambda *_, _w=flash: (
+            _w.parent.remove_widget(_w) if _w.parent else None
+        ))
+        anim.start(flash)
+
+    def _float_text_from_card(self, card, text: str,
+                              color: tuple[float, float, float, float]) -> None:
+        """Rising + fading text label that gives visual confirmation of
+        what was just purchased. Big, bold, color-coded — readable at a
+        glance even by a younger player."""
+        if card is None:
+            return
+        from kivy.animation import Animation
+        floating = Label(
+            text="[b]{}[/b]".format(text), font_size=sp(28),
+            color=color, markup=True, bold=True,
+            halign="center", valign="middle",
+            size_hint=(None, None), size=(dp(280), dp(56)),
+        )
+        floating.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        floating.center = card.center
+        self.root_layout.add_widget(floating)
+        # Rise + fade-out over 1.1 s with an ease-out so the start is snappy.
+        anim = Animation(
+            y=floating.y + dp(120),
+            opacity=0,
+            duration=1.1,
+            t="out_quad",
+        )
+        anim.bind(on_complete=lambda *_, _w=floating: (
+            _w.parent.remove_widget(_w) if _w.parent else None
+        ))
+        anim.start(floating)
+        # Briefly enlarge the card's border to draw the eye.
+        try:
+            from kivy.animation import Animation as _Anim
+            original_rgba = card._border_color.rgba
+            card._border_color.rgba = (color[0], color[1], color[2], 1.0)
+            _Anim(rgba=original_rgba, duration=0.7, t="out_quad").start(card._border_color)
+        except Exception:
+            pass
 
 
 class ShopItemCard(ButtonBehavior, BoxLayout):
@@ -897,7 +1092,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         # upgrade if equipped and affordable). The on_buy handler in
         # ShopScreen disambiguates.
         if self.item.category == "weapon":
-            self._on_buy(self.item)
+            self._on_buy(self.item, self)
             return
         if not self.can_buy:
             running = app()
@@ -908,7 +1103,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
             Animation(rgba=(1.0, 1.0, 1.0, 0.18),
                       duration=0.5, t="out_quad").start(self._border_color)
             return
-        self._on_buy(self.item)
+        self._on_buy(self.item, self)
 
 
 class WorldMapScreen(StyledScreen):
