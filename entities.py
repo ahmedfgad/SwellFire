@@ -411,6 +411,141 @@ def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,
     return spawned
 
 
+# --- squad (M8) ----------------------------------------------------------
+
+class SquadController:
+    """Mesh-batched squad of follower runners trailing behind the hero.
+
+    The pool size mirrors `squad_count - 1` (the hero is its own widget;
+    everything in the pool is a follower). The formation is a tight grid
+    centered horizontally on the hero, growing backward (lower Y) one row
+    per `SPACING_Y`. Columns ramp roughly as `sqrt(count) * 1.2` so the
+    blob reads as wider-than-deep, which looks right for a Stickman-style
+    crowd from a top-down view.
+    """
+
+    FRAME_NAME = "runner_blue"
+    RUNNER_W = 32.0
+    RUNNER_H = 40.0
+    SPACING_X = 34.0
+    SPACING_Y = 28.0
+    MAX_COLS = 10
+    MUZZLE_OFFSET_Y = RUNNER_H * 0.45
+
+    def __init__(self, pool: graphics.EntityPool):
+        self.pool = pool
+
+    def sync_to_count(self, follower_count: int) -> None:
+        follower_count = max(0, min(self.pool.capacity, int(follower_count)))
+        pool = self.pool
+        # Spawn slots up to target.
+        while pool.active_count < follower_count:
+            idx = pool.spawn(0.0, 0.0, 0.0, 0.0,
+                             self.RUNNER_W, self.RUNNER_H, self.FRAME_NAME)
+            if idx < 0:
+                break
+        # Release surplus slots, from highest index down so we don't keep
+        # re-scanning the same range.
+        if pool.active_count > follower_count:
+            need_to_release = pool.active_count - follower_count
+            for i in range(pool.capacity - 1, -1, -1):
+                if need_to_release <= 0:
+                    break
+                if pool.active[i]:
+                    pool.release(i)
+                    need_to_release -= 1
+
+    def update_formation(self, hero_cx: float, hero_cy: float) -> None:
+        """Lay active follower slots out in a grid trailing behind hero."""
+        pool = self.pool
+        active = pool.active
+        n = pool.active_count
+        if n == 0:
+            return
+        cols = min(self.MAX_COLS, max(1, int(math.sqrt(n) * 1.2 + 0.5)))
+        row_width = (cols - 1) * self.SPACING_X
+        spacing_x = self.SPACING_X
+        spacing_y = self.SPACING_Y
+        cx = pool.cx
+        cy = pool.cy
+        slot = 0
+        for i in range(pool.capacity):
+            if not active[i]:
+                continue
+            col = slot % cols
+            row = slot // cols
+            cx[i] = hero_cx + col * spacing_x - row_width * 0.5
+            cy[i] = hero_cy - (row + 1) * spacing_y
+            slot += 1
+
+
+def fire_from_positions(positions, target_x: float, target_y: float,
+                        weapon, projectile_controller: ProjectileController,
+                        rng: random.Random) -> int:
+    """Spawn one projectile per shooter position, all aimed at one target.
+
+    Shooter positions are `(x, y)` tuples — typically the hero's muzzle plus
+    every active squad-runner's muzzle. Weapon spread applies per-shot so the
+    swarm doesn't read as a single laser. Returns number actually spawned
+    (the projectile pool may be saturated).
+    """
+    speed = weapon.projectile_speed
+    size = weapon.projectile_size
+    spread = math.radians(weapon.spread_deg)
+    spawned = 0
+    for (sx, sy) in positions:
+        dx = target_x - sx
+        dy = target_y - sy
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist <= 0.0:
+            aim_x, aim_y = 0.0, 1.0
+        else:
+            aim_x = dx / dist
+            aim_y = dy / dist
+        a = rng.uniform(-spread, spread)
+        cos_a = math.cos(a)
+        sin_a = math.sin(a)
+        vx = (aim_x * cos_a - aim_y * sin_a) * speed
+        vy = (aim_x * sin_a + aim_y * cos_a) * speed
+        idx = projectile_controller.spawn(
+            sx, sy, vx, vy, size, size,
+            weapon.frame, weapon.damage, weapon.ttl,
+        )
+        if idx >= 0:
+            spawned += 1
+        else:
+            break       # pool saturated; stop trying
+    return spawned
+
+
+def resolve_squad_attrition(
+    enemy_controller: EnemyController,
+    hero_cx: float, hero_cy: float,
+    zone_half_w: float, front_y: float,
+    on_loss,
+) -> int:
+    """Detect enemies that reach the squad front line; one squad member lost per hit.
+
+    `on_loss(hit_x, hit_y)` is called once per attrition event so the
+    caller can spawn a particle burst and decrement `squad_count`. The
+    offending enemy is recycled by this function.
+    """
+    pool = enemy_controller.pool
+    active = pool.active
+    cx = pool.cx
+    cy = pool.cy
+    losses = 0
+    for i in range(pool.capacity):
+        if not active[i]:
+            continue
+        if cy[i] < front_y and abs(cx[i] - hero_cx) < zone_half_w:
+            on_loss(cx[i], cy[i])
+            pool.release(i)
+            enemy_controller.recycled_total += 1
+            losses += 1
+    return losses
+
+
 def resolve_projectile_collisions(
     projectile_controller: ProjectileController,
     enemy_controller: EnemyController,

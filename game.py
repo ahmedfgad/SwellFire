@@ -47,13 +47,15 @@ LANE_GRAVITY_RADIUS_PX = 80.0       # only engages within this distance of a lan
 N_STRIPES = 14                      # dashed centerline stripes
 STRIPE_LENGTH = 36.0                # px
 ENEMY_POOL_CAPACITY = 200           # M5: 50 typical, stress to 200
-PROJECTILE_POOL_CAPACITY = 120      # rifle * shotgun headroom
-PARTICLE_POOL_CAPACITY = 300        # ~6 particles per kill, ~30 kills concurrent
+PROJECTILE_POOL_CAPACITY = 500      # M8: squad of 100 at high fire rate
+PARTICLE_POOL_CAPACITY = 500        # M8: kills + gate pickups + attrition bursts
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 HERO_FRAME_NAME = "runner_blue"
 DEFAULT_WEAPON_ID = "pistol"
-MAX_SQUAD = 100                     # cap for M7 squad_count; M8 renders up to this
+MAX_SQUAD = 100                     # cap for squad_count; squad pool sized to MAX_SQUAD-1
+ATTRITION_ZONE_HALF_W = 170.0       # half-width of the squad-contact zone (px)
+ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad's "front line" sits
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -112,11 +114,15 @@ class GameScreen(ui.StyledScreen):
         self._fire_cooldown = 0.0
         self._fire_rng = random.Random()
         self.kills_total = 0
-        # Gates + squad (M7).
+        # Gates + squad (M7 + M8).
         self.gate_layer: Widget | None = None
         self.gate_controller: gates.GateController | None = None
         self.gate_spawner: gates.GateSpawner | None = None
         self.squad_count = 1
+        self.squad_pool: graphics.EntityPool | None = None
+        self.squad_controller: entities.SquadController | None = None
+        self.squad_renderer: graphics.BatchedRenderer | None = None
+        self.attrition_total = 0
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
@@ -254,6 +260,15 @@ class GameScreen(ui.StyledScreen):
             self.gate_controller = gates.GateController(self.gate_layer)
             self.gate_spawner = gates.GateSpawner(self.gate_controller)
 
+        # Squad follower pool (M8). Capacity = MAX_SQUAD - 1 since the hero is its own widget.
+        if self.squad_pool is None:
+            self.squad_pool = graphics.EntityPool(MAX_SQUAD - 1, self._atlas)
+            self.squad_controller = entities.SquadController(self.squad_pool)
+            self.squad_renderer = graphics.BatchedRenderer(
+                self.squad_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.squad_renderer)
+
         if self.hero is None:
             self.hero = graphics.AtlasSprite(
                 self._atlas, HERO_FRAME_NAME,
@@ -271,6 +286,9 @@ class GameScreen(ui.StyledScreen):
         self._fire_cooldown = 0.0
         self.kills_total = 0
         self.squad_count = 1
+        self.attrition_total = 0
+        if self.squad_controller is not None:
+            self.squad_controller.sync_to_count(0)   # hero alone at level start
         if self.gate_controller is not None:
             self.gate_controller.clear()
         if self.gate_spawner is not None:
@@ -290,7 +308,7 @@ class GameScreen(ui.StyledScreen):
             Window.unbind(on_key_down=self._key_handler)
             self._key_handler = None
         for renderer in (self.enemy_renderer, self.projectile_renderer,
-                         self.particle_renderer):
+                         self.particle_renderer, self.squad_renderer):
             if renderer is not None and renderer.parent:
                 renderer.parent.remove_widget(renderer)
         if self.gate_controller is not None:
@@ -309,6 +327,9 @@ class GameScreen(ui.StyledScreen):
         self.particle_pool = None
         self.particle_controller = None
         self.particle_renderer = None
+        self.squad_pool = None
+        self.squad_controller = None
+        self.squad_renderer = None
         self.gate_layer = None
         self.gate_controller = None
         self.gate_spawner = None
@@ -393,30 +414,46 @@ class GameScreen(ui.StyledScreen):
                 self.hero.center_y,
             )
 
-        # 4. Auto-fire: cooldown → fire_weapon → projectile update → collision → particles.
+        # 4. Squad: sync pool to squad_count, position followers in formation.
+        if (self.squad_controller is not None
+                and self.hero is not None):
+            self.squad_controller.sync_to_count(self.squad_count - 1)
+            self.squad_controller.update_formation(
+                self.hero.center_x, self.hero.center_y,
+            )
+
+        # 5. Auto-fire: cooldown → fire_from_positions(hero + squad) → collision → particles.
         if (self.hero is not None
                 and self.projectile_controller is not None
                 and self.particle_controller is not None
-                and self.enemy_controller is not None):
+                and self.enemy_controller is not None
+                and self.squad_pool is not None):
             weapon = weapons.get(self.current_weapon_id)
             self._fire_cooldown -= dt
             if self._fire_cooldown <= 0.0:
-                # Only fire if there's a target; otherwise leave the cooldown at
-                # 0 so we shoot the instant an enemy appears.
                 target = entities.find_nearest_enemy(
                     self.hero.center_x, self.hero.center_y, self.enemy_controller,
                 )
                 if target >= 0:
-                    entities.fire_weapon(
-                        self.hero.center_x, self.hero.center_y, MUZZLE_OFFSET_Y,
-                        weapon, self.projectile_controller, self.enemy_controller,
-                        self._fire_rng,
+                    ep = self.enemy_pool
+                    target_x = ep.cx[target]
+                    target_y = ep.cy[target]
+                    # Shooter positions: hero muzzle + every active follower's muzzle.
+                    positions = [(self.hero.center_x, self.hero.center_y + MUZZLE_OFFSET_Y)]
+                    sp = self.squad_pool
+                    sc = self.squad_controller
+                    for i in range(sp.capacity):
+                        if sp.active[i]:
+                            positions.append((sp.cx[i], sp.cy[i] + sc.MUZZLE_OFFSET_Y))
+                    entities.fire_from_positions(
+                        positions, target_x, target_y, weapon,
+                        self.projectile_controller, self._fire_rng,
                     )
                     self._fire_cooldown = 1.0 / weapon.fire_rate
 
             self.projectile_controller.update(dt, x_min, y_min, x_max, y_max)
 
-            # Collision: projectile vs enemy via spatial grid; each kill bursts particles.
+            # Projectile vs enemy collisions; each kill bursts particles.
             def _on_kill(hit_x, hit_y, _pc=self.particle_controller, _rng=self._fire_rng):
                 _pc.burst(hit_x, hit_y, count=6, speed=240.0, ttl=0.35,
                           size=10.0, frame="particle", rng=_rng)
@@ -425,17 +462,38 @@ class GameScreen(ui.StyledScreen):
             )
             self.kills_total += kills
 
+            # Squad attrition: enemies that pierce the squad's front line cost one runner each.
+            def _on_loss(hit_x, hit_y, _self=self, _rng=self._fire_rng):
+                _self.squad_count = max(1, _self.squad_count - 1)
+                _self.attrition_total += 1
+                if _self.particle_controller is not None:
+                    _self.particle_controller.burst(
+                        hit_x, hit_y, count=8, speed=220.0, ttl=0.4,
+                        size=10.0, frame="particle", rng=_rng,
+                    )
+                running = ui.app()
+                running.audio.play_sfx("damage")
+            entities.resolve_squad_attrition(
+                self.enemy_controller,
+                self.hero.center_x, self.hero.center_y,
+                ATTRITION_ZONE_HALF_W,
+                self.hero.center_y + ATTRITION_FRONT_OFFSET,
+                _on_loss,
+            )
+
             self.particle_controller.update(dt)
 
-        # 5. Mesh rebuilds (one canvas write per renderer per frame).
+        # 6. Mesh rebuilds (one canvas write per renderer per frame).
         if self.enemy_renderer is not None:
             self.enemy_renderer.rebuild()
         if self.projectile_renderer is not None:
             self.projectile_renderer.rebuild()
         if self.particle_renderer is not None:
             self.particle_renderer.rebuild()
+        if self.squad_renderer is not None:
+            self.squad_renderer.rebuild()
 
-        # 6. HUD + debug overlay.
+        # 7. HUD + debug overlay.
         hero_cx = self.hero.center_x if self.hero is not None else 0.0
         enemy_count = self.enemy_pool.active_count if self.enemy_pool is not None else 0
         weapon_name = weapons.get(self.current_weapon_id).name
@@ -447,10 +505,12 @@ class GameScreen(ui.StyledScreen):
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
         proj_active = self.projectile_pool.active_count if self.projectile_pool else 0
         part_active = self.particle_pool.active_count if self.particle_pool else 0
+        squad_active = self.squad_pool.active_count if self.squad_pool else 0
         self.debug.report_counts(
             dist=int(self.distance),
             enemies=enemy_count, kills=self.kills_total,
             gates=gates_passed, missed=gates_missed,
+            squad=squad_active + 1, lost=self.attrition_total,
             projectiles=proj_active, particles=part_active,
         )
 
