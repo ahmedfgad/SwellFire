@@ -306,13 +306,15 @@ class GameScreen(ui.StyledScreen):
 
         self.stage.bind(pos=self._layout_stage, size=self._layout_stage)
 
-        # Top bar — a thin translucent strip spanning the full width that
-        # holds the level title (left of center), the distance progress
-        # bar (centered, prominent), and leaves room for the Auto/Pause
-        # corner buttons. The strip's own bg makes the HUD readable on
-        # any backdrop now that the stage extends edge-to-edge.
+        # Top bar — a translucent strip spanning the full width that
+        # holds ALL the HUD: title, distance progress, stat chips, and
+        # the Auto/Pause corner buttons. Originally 8 % tall with the
+        # chip row floating below it; that put the chips at 81-91 % of
+        # screen height, which is exactly where the boss and incoming
+        # enemies render. The bar is now tall enough (16 %) to contain
+        # the chips inside it, so the play area below is fully clear.
         self.top_bar = FloatLayout(
-            size_hint=(1.0, 0.08),
+            size_hint=(1.0, 0.16),
             pos_hint={"x": 0.0, "top": 1.0},
         )
         with self.top_bar.canvas.before:
@@ -324,22 +326,23 @@ class GameScreen(ui.StyledScreen):
         )
         self.root_layout.add_widget(self.top_bar)
 
-        # Title — smaller now that it shares the bar.
+        # Title — sits in the top portion of the bar. Coordinates are
+        # relative to the top_bar's own size (which is now 16 % of
+        # screen), so center_y=0.84 keeps the title near the top edge.
         self.title_label = Label(
             text="", font_size=sp(14), bold=True, color=(1, 0.88, 0.2, 1),
             halign="center", valign="middle",
-            size_hint=(0.55, 1.0),
-            pos_hint={"center_x": 0.5, "center_y": 0.72},
+            size_hint=(0.55, 0.30),
+            pos_hint={"center_x": 0.5, "center_y": 0.84},
         )
         self.title_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
         self.top_bar.add_widget(self.title_label)
 
-        # Distance progress bar — thin line under the title. Visual cue
-        # for "how far through this level am I", much easier to scan
-        # than "Distance 216 / 12960" buried in a text row.
+        # Distance progress bar — sits in the middle band of the top
+        # bar, between the title and the chip row.
         self.dist_bar_holder = FloatLayout(
-            size_hint=(0.55, 0.20),
-            pos_hint={"center_x": 0.5, "center_y": 0.28},
+            size_hint=(0.55, 0.10),
+            pos_hint={"center_x": 0.5, "center_y": 0.57},
         )
         with self.dist_bar_holder.canvas.before:
             Color(1, 1, 1, 0.14)
@@ -353,13 +356,14 @@ class GameScreen(ui.StyledScreen):
         self._dist_progress = 0.0
         self.top_bar.add_widget(self.dist_bar_holder)
 
-        # Stat chip row — Squad / Weapon / Kills / Coins. Each chip has
-        # a small uppercase label on top and a big bold value below,
-        # rendered against a translucent dark pill so it reads on any
-        # backdrop.
+        # Stat chip row — Squad / Weapon / Kills / Coins. Lives at the
+        # bottom of the top bar (top=0.91 → covers 0.84-0.91), which is
+        # *inside* the bar's vertical range (0.84-1.0). This keeps the
+        # gameplay zone below 0.84 fully unobstructed: the boss, gates,
+        # and incoming enemies are no longer hidden by stat labels.
         self.chip_row = BoxLayout(
             orientation="horizontal", spacing=dp(8),
-            size_hint=(0.86, 0.10),
+            size_hint=(0.94, 0.07),
             pos_hint={"center_x": 0.5, "top": 0.91},
             padding=(dp(4), 0, dp(4), 0),
         )
