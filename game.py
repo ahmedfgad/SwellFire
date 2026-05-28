@@ -283,6 +283,11 @@ class GameScreen(ui.StyledScreen):
         # uses the latest gun and gate effects are symmetric.
         self.opponent_weapon_id = DEFAULT_WEAPON_ID
         self.opponent_grenade_count = 0
+        # Opponent's independent 2× COINS power-up timer (mirrors
+        # double_coin_until). Lets opponent's coin rewards double for a
+        # span after collecting a DOUBLE_COIN pickup, separate from the
+        # local player's timer.
+        self.opponent_double_coin_until = 0.0
         # Tinted renderer used for the opponent's projectiles.
         self.opponent_projectile_renderer = None
         self._mp_tick = 0
@@ -732,6 +737,7 @@ class GameScreen(ui.StyledScreen):
         self.opponent_alive = True
         self.opponent_weapon_id = DEFAULT_WEAPON_ID
         self.opponent_grenade_count = 0
+        self.opponent_double_coin_until = 0.0
         self.enemy_pool = None
         self.enemy_controller = None
         self.enemy_spawner = None
@@ -1221,6 +1227,18 @@ class GameScreen(ui.StyledScreen):
                 PICKUP_COLLECT_RADIUS,
                 self._on_pickup_collect,
             )
+            # M13 — versus: opponent also picks up coins they cross.
+            # Credits go to opponent_coins (and trigger the double-coin
+            # for opponent only — tracked alongside the local timer).
+            if (self._mp_role() == "host"
+                    and self.opponent_hero is not None
+                    and self.opponent_alive):
+                entities.resolve_pickup_collection(
+                    self.pickup_controller,
+                    self.opponent_hero.center_x, self.opponent_hero.center_y,
+                    PICKUP_COLLECT_RADIUS,
+                    self._on_opponent_pickup_collect,
+                )
 
         # 3b. Gates: spawner emits a new pair when distance passes the next
         # interval; controller scrolls all gates + checks pass-through.
@@ -1990,6 +2008,20 @@ class GameScreen(ui.StyledScreen):
                         int(owner[i]),
                     ])
 
+        # Live coin / double-coin pickups. type_int chooses the frame
+        # on the client (gold ellipse vs white star).
+        pickups = []
+        if self.pickup_pool is not None:
+            pool = self.pickup_pool
+            ptype = self.pickup_controller.type
+            for i in range(pool.capacity):
+                if pool.active[i]:
+                    pickups.append([
+                        round((pool.cx[i] - sx) / sw, 4),
+                        round((pool.cy[i] - sy) / sh, 4),
+                        int(ptype[i]),
+                    ])
+
         running.mp_net.send({
             "t": "snap",
             "tick": self._mp_tick,
@@ -2011,6 +2043,7 @@ class GameScreen(ui.StyledScreen):
             "g":     gate_pairs,
             "e":     enemies,
             "pr":    projectiles,
+            "pk":    pickups,
             "ended": self._level_ended,
         })
 
@@ -2055,6 +2088,8 @@ class GameScreen(ui.StyledScreen):
                 self.projectile_renderer.rebuild()
             if self.opponent_projectile_renderer is not None:
                 self.opponent_projectile_renderer.rebuild()
+            if self.pickup_renderer is not None:
+                self.pickup_renderer.rebuild()
             if self.squad_renderer is not None:
                 self.squad_renderer.rebuild()
 
@@ -2149,6 +2184,9 @@ class GameScreen(ui.StyledScreen):
         # --- projectiles ---------------------------------------------
         if self.projectile_pool is not None:
             self._mp_apply_projectiles(snap.get("pr", []), sx, sy, sw, sh)
+        # --- pickups -------------------------------------------------
+        if self.pickup_pool is not None:
+            self._mp_apply_pickups(snap.get("pk", []), sx, sy, sw, sh)
 
     def _mp_rebuild_gates(self, pairs_snap: list, sx: float, sy: float,
                           sw: float, sh: float) -> None:
@@ -2252,6 +2290,38 @@ class GameScreen(ui.StyledScreen):
                              0.0, 0.0, 14.0, 22.0, "projectile")
             if idx >= 0:
                 ctrl.owner[idx] = owner_byte
+
+    def _mp_apply_pickups(self, pickups_snap: list,
+                          sx: float, sy: float,
+                          sw: float, sh: float) -> None:
+        """Replicate host pickup positions into the local pickup pool
+        so the BatchedRenderer draws coin items on the client. Frame
+        choice mirrors PickupController.spawn: COIN -> coin, DOUBLE_COIN
+        -> particle. Type byte preserved for visual consistency."""
+        pool = self.pickup_pool
+        ctrl = self.pickup_controller
+        for i in range(pool.capacity):
+            if pool.active[i]:
+                pool.active[i] = 0
+        pool.active_count = 0
+        for i, entry in enumerate(pickups_snap):
+            if i >= pool.capacity:
+                break
+            try:
+                x_frac, y_frac, ptype = entry[0], entry[1], int(entry[2])
+            except (ValueError, TypeError, IndexError):
+                continue
+            # Frame names mirror PickupSpawner: COIN uses "projectile"
+            # (a gold ellipse-ish frame), DOUBLE_COIN uses "particle".
+            frame = ("projectile" if ptype == entities.PICKUP_COIN
+                     else "particle")
+            size = (entities.PickupSpawner.COIN_SIZE
+                    if ptype == entities.PICKUP_COIN
+                    else entities.PickupSpawner.DOUBLE_SIZE)
+            idx = pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
+                             0.0, 0.0, size, size, frame)
+            if idx >= 0:
+                ctrl.type[idx] = ptype
 
     def _mp_broadcast_result(self, host_completed_won: bool) -> None:
         """Host side: compute scores for both players, declare the winner
@@ -2401,6 +2471,22 @@ class GameScreen(ui.StyledScreen):
             self.opponent_squad = max(0, self.opponent_squad // max(1, v))
         if self.opponent_squad <= 0:
             self.opponent_alive = False
+
+    # --- opponent pickup-collection handler (versus only) ----------------
+
+    def _on_opponent_pickup_collect(self, ptype: int,
+                                    x: float, y: float) -> None:
+        """Mirror of _on_pickup_collect for the opponent. COIN pickups
+        credit opponent_coins (doubled while opponent_double_coin_until
+        is in the future); DOUBLE_COIN pickups extend that timer."""
+        if ptype == entities.PICKUP_COIN:
+            coins = entities.PickupController.COIN_PER_PICKUP
+            if self.opponent_double_coin_until > self._run_time:
+                coins *= 2
+            self.opponent_coins += coins
+        else:    # PICKUP_DOUBLE_COIN
+            duration = entities.PickupController.DOUBLE_COIN_DURATION_SEC
+            self.opponent_double_coin_until = self._run_time + duration
 
     # --- opponent squad-loss handler (versus only, host side) ------------
 
