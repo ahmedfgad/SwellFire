@@ -364,6 +364,13 @@ class GameScreen(ui.StyledScreen):
         self.squad_pool: graphics.EntityPool | None = None
         self.squad_controller: entities.SquadController | None = None
         self.squad_renderer: graphics.BatchedRenderer | None = None
+        # Opponent's parallel squad — pool + controller + tinted renderer.
+        # Both pools render in the same stage but with different tints
+        # (blue default / red opponent) so each player sees their own
+        # crowd as blue and the other player's as red.
+        self.opponent_squad_pool: graphics.EntityPool | None = None
+        self.opponent_squad_controller: entities.SquadController | None = None
+        self.opponent_squad_renderer: graphics.BatchedRenderer | None = None
         self.attrition_total = 0
         # Level config + result handling (M9).
         self.level_config: dict | None = None
@@ -782,6 +789,25 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.squad_renderer)
 
+        # M13 — opponent's squad followers. Same pool size + the same
+        # SquadController formation, but the renderer carries a red
+        # tint so the player can tell their own squad from the other
+        # player's at a glance. Created only in versus mode.
+        if running.current_mode != "single":
+            if self.opponent_squad_pool is None:
+                self.opponent_squad_pool = graphics.EntityPool(
+                    MAX_SQUAD - 1, self._atlas,
+                )
+                self.opponent_squad_controller = entities.SquadController(
+                    self.opponent_squad_pool,
+                )
+                self.opponent_squad_renderer = graphics.BatchedRenderer(
+                    self.opponent_squad_pool,
+                    tint=(1.0, 0.55, 0.55, 1.0),
+                    size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+                )
+                self.stage.add_widget(self.opponent_squad_renderer)
+
         if self.hero is None:
             self.hero = graphics.AtlasSprite(
                 self._atlas, HERO_FRAME_NAME,
@@ -893,6 +919,7 @@ class GameScreen(ui.StyledScreen):
         for renderer in (self.enemy_renderer, self.projectile_renderer,
                          self.opponent_projectile_renderer,
                          self.particle_renderer, self.squad_renderer,
+                         self.opponent_squad_renderer,
                          self.pickup_renderer):
             if renderer is not None and renderer.parent:
                 renderer.parent.remove_widget(renderer)
@@ -943,6 +970,9 @@ class GameScreen(ui.StyledScreen):
         self.squad_pool = None
         self.squad_controller = None
         self.squad_renderer = None
+        self.opponent_squad_pool = None
+        self.opponent_squad_controller = None
+        self.opponent_squad_renderer = None
         self.gate_layer = None
         self.gate_controller = None
         self.gate_spawner = None
@@ -1484,6 +1514,18 @@ class GameScreen(ui.StyledScreen):
             self.squad_controller.update_formation(
                 self.hero.center_x, self.hero.center_y,
             )
+        # M13 — also drive opponent's squad on the host so the player can
+        # see the other crowd grow / shrink as the opponent picks gates.
+        if (role == "host"
+                and self.opponent_squad_controller is not None
+                and self.opponent_hero is not None
+                and self.opponent_alive):
+            self.opponent_squad_controller.sync_to_count(
+                max(0, self.opponent_squad - 1),
+            )
+            self.opponent_squad_controller.update_formation(
+                self.opponent_hero.center_x, self.opponent_hero.center_y,
+            )
 
         # 5. Auto-fire: cooldown → fire_from_positions(hero + squad) → collision → particles.
         if (self.hero is not None
@@ -1638,6 +1680,8 @@ class GameScreen(ui.StyledScreen):
             self.particle_renderer.rebuild()
         if self.squad_renderer is not None:
             self.squad_renderer.rebuild()
+        if self.opponent_squad_renderer is not None:
+            self.opponent_squad_renderer.rebuild()
         if self.pickup_renderer is not None:
             self.pickup_renderer.rebuild()
         # 6b. Boss widget + HP bar follow the underlying data each frame.
@@ -2237,6 +2281,30 @@ class GameScreen(ui.StyledScreen):
                         int(owner[i]),
                     ])
 
+        # Live squad followers for both heroes. Each player's view
+        # needs to see the OTHER player's crowd, and their own crowd
+        # gets driven from the (synced) squad counts. The host's
+        # SquadController already laid them out in formation — we just
+        # snapshot the positions.
+        sq_p1 = []
+        if self.squad_pool is not None:
+            pool = self.squad_pool
+            for i in range(pool.capacity):
+                if pool.active[i]:
+                    sq_p1.append([
+                        round((pool.cx[i] - sx) / sw, 4),
+                        round((pool.cy[i] - sy) / sh, 4),
+                    ])
+        sq_p2 = []
+        if self.opponent_squad_pool is not None:
+            pool = self.opponent_squad_pool
+            for i in range(pool.capacity):
+                if pool.active[i]:
+                    sq_p2.append([
+                        round((pool.cx[i] - sx) / sw, 4),
+                        round((pool.cy[i] - sy) / sh, 4),
+                    ])
+
         # Live coin / double-coin pickups, FILTERED to those the client
         # hasn't collected yet. Their own ``consumed_by_p2`` flag hides
         # collected pickups from their view while the host can still
@@ -2276,6 +2344,8 @@ class GameScreen(ui.StyledScreen):
             "e":     enemies,
             "pr":    projectiles,
             "pk":    pickups,
+            "sq1":   sq_p1,    # host's squad
+            "sq2":   sq_p2,    # client's squad
             "ended": self._level_ended,
         })
 
@@ -2324,6 +2394,8 @@ class GameScreen(ui.StyledScreen):
                 self.pickup_renderer.rebuild()
             if self.squad_renderer is not None:
                 self.squad_renderer.rebuild()
+            if self.opponent_squad_renderer is not None:
+                self.opponent_squad_renderer.rebuild()
 
         # Drive the local centerline-stripe scroll so the world feels
         # alive on the client too — host's distance is authoritative,
@@ -2445,6 +2517,17 @@ class GameScreen(ui.StyledScreen):
         # --- pickups -------------------------------------------------
         if self.pickup_pool is not None:
             self._mp_apply_pickups(snap.get("pk", []), sx, sy, sw, sh)
+        # --- squad followers ------------------------------------------
+        # On the client: own squad = sq_p2 (client controls p2),
+        # opponent squad = sq_p1 (host's hero). Each goes into its
+        # respective pool so the local renderer shows blue and the
+        # opponent renderer shows red.
+        if self.squad_pool is not None:
+            self._mp_apply_squad(self.squad_pool,
+                                 snap.get("sq2", []), sx, sy, sw, sh)
+        if self.opponent_squad_pool is not None:
+            self._mp_apply_squad(self.opponent_squad_pool,
+                                 snap.get("sq1", []), sx, sy, sw, sh)
 
     def _mp_rebuild_gates(self, pairs_snap: list, sx: float, sy: float,
                           sw: float, sh: float) -> None:
@@ -2553,6 +2636,30 @@ class GameScreen(ui.StyledScreen):
                              0.0, 0.0, 14.0, 22.0, "projectile")
             if idx >= 0:
                 ctrl.owner[idx] = owner_byte
+
+    def _mp_apply_squad(self, pool, positions_snap: list,
+                        sx: float, sy: float,
+                        sw: float, sh: float) -> None:
+        """Drop the host's squad-position list into the given pool. Used
+        for both ``self.squad_pool`` (local crowd) and
+        ``self.opponent_squad_pool`` (other player's crowd) on the
+        client side — each rendered with its own renderer/tint."""
+        for i in range(pool.capacity):
+            if pool.active[i]:
+                pool.active[i] = 0
+        pool.active_count = 0
+        for i, entry in enumerate(positions_snap):
+            if i >= pool.capacity:
+                break
+            try:
+                x_frac, y_frac = entry[0], entry[1]
+            except (ValueError, TypeError, IndexError):
+                continue
+            pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
+                       0.0, 0.0,
+                       entities.SquadController.RUNNER_W,
+                       entities.SquadController.RUNNER_H,
+                       entities.SquadController.FRAME_NAME)
 
     def _mp_apply_pickups(self, pickups_snap: list,
                           sx: float, sy: float,
