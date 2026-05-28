@@ -36,6 +36,7 @@ import boosters
 import entities
 import gates
 import graphics
+import net
 import levels
 import ui
 import weapons
@@ -260,6 +261,23 @@ class GameScreen(ui.StyledScreen):
         self.auto_mode = False
         self.auto: autoplay.AutoPlayer | None = None
         self.auto_btn = None
+        # Multiplayer state (M13). Used only when current_mode != "single".
+        #   self.hero is always THIS device's hero (the one local touch
+        #   controls). self.opponent_hero is the *other* player's hero,
+        #   positioned by client input (on host) or by snapshot (on client).
+        # The role helper `_mp_role()` returns "host", "client", or "single".
+        self.opponent_hero = None
+        self.opponent_target_x = 0.0
+        self.opponent_squad = 1
+        self.opponent_kills = 0
+        self.opponent_coins = 0
+        self.opponent_alive = True
+        self._mp_tick = 0
+        self._last_input_norm_x = None
+        # 20 Hz snapshot rate (every 3 ticks at 60 fps). Bandwidth-friendly
+        # and visually smooth enough — anything faster pushes JSON encoding
+        # and TCP send overhead up without obvious win.
+        self.SNAPSHOT_INTERVAL_TICKS = 3
         # Boss systems (M10).
         self.boss: boss_module.Boss | None = None
         self.boss_controller: boss_module.BossController | None = None
@@ -573,6 +591,22 @@ class GameScreen(ui.StyledScreen):
                 size_hint=(None, None), size=(HERO_W, HERO_H),
             )
             self.stage.add_widget(self.hero)
+
+        # M13 — Opponent hero, created once when versus mode is entered.
+        # Same sprite as the local hero, drawn at 0.7 opacity so it reads
+        # as "the other player" without needing a separate art asset.
+        if running.current_mode != "single" and self.opponent_hero is None:
+            self.opponent_hero = graphics.AtlasSprite(
+                self._atlas, HERO_FRAME_NAME,
+                size_hint=(None, None), size=(HERO_W, HERO_H),
+            )
+            self.opponent_hero.opacity = 0.70
+            self.stage.add_widget(self.opponent_hero)
+        elif running.current_mode == "single" and self.opponent_hero is not None:
+            # Going back to single after a versus match — remove the ghost.
+            if self.opponent_hero.parent:
+                self.opponent_hero.parent.remove_widget(self.opponent_hero)
+            self.opponent_hero = None
 
         # Keyboard input for weapon swap (1..4 select; W cycles).
         if self._key_handler is None:
@@ -998,6 +1032,16 @@ class GameScreen(ui.StyledScreen):
     def _update(self, dt):
         if self._level_ended or self.paused:
             return
+        # M13 — multiplayer role dispatch. Client runs no simulation,
+        # only mirrors host state and forwards input.
+        role = self._mp_role()
+        if role == "client":
+            self._mp_client_tick(dt)
+            return
+        if role == "host":
+            # Drain client input BEFORE the sim tick so opponent_target_x
+            # reflects the latest steering.
+            self._mp_drain_host_inbox()
         # Shake first so the offset applies to everything else this frame.
         self._step_shake(dt)
         self._run_time += dt
@@ -1050,6 +1094,22 @@ class GameScreen(ui.StyledScreen):
             # right even at varying frame rates).
             bob = math.sin(self.distance / 22.0) * 5.0
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
+
+            # M13 — Opponent hero. On the HOST this is driven by client
+            # input (already converted to pixel-space in
+            # _mp_drain_host_inbox). Moves at the same lateral speed cap
+            # as the autoplayer to keep traversal feeling like a player.
+            if self.opponent_hero is not None and role == "host":
+                ox = self.opponent_hero.center_x
+                desired_dx = self.opponent_target_x - ox
+                max_step = AUTO_HERO_MAX_SPEED * dt
+                if desired_dx > max_step:
+                    self.opponent_hero.center_x += max_step
+                elif desired_dx < -max_step:
+                    self.opponent_hero.center_x -= max_step
+                else:
+                    self.opponent_hero.center_x = self.opponent_target_x
+                self.opponent_hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
         # 3. Enemies: spawner interval can be modulated by level type
         #    (static / hybrid / dynamic), then spawner ticks + enemies update.
@@ -1367,6 +1427,14 @@ class GameScreen(ui.StyledScreen):
             projectiles=proj_active, particles=part_active,
         )
 
+        # M13 — host-only: push a snapshot to the client at 20 Hz (every
+        # SNAPSHOT_INTERVAL_TICKS frames). Runs at the very end of the
+        # tick so the snapshot reflects this frame's resolved state.
+        if role == "host":
+            self._mp_tick += 1
+            if self._mp_tick % self.SNAPSHOT_INTERVAL_TICKS == 0:
+                self._mp_send_snapshot()
+
     # --- gate effect application -----------------------------------------
 
     def _on_miss_gate(self) -> None:
@@ -1441,6 +1509,13 @@ class GameScreen(ui.StyledScreen):
         # _reset() if auto_mode is still on.
         if self.auto is not None:
             self.auto.stop()
+
+        # M13 — broadcast the final scoreboard to the client. The result
+        # message is per-recipient (each side gets local_won / local_score
+        # framed from their perspective) so the existing single-player
+        # LevelResultDialog can render it without role-aware logic.
+        if self._mp_role() == "host":
+            self._mp_broadcast_result(won)
 
         running = ui.app()
         final_squad = max(0, self.squad_count)
@@ -1706,6 +1781,213 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- multiplayer (M13) ----------------------------------------------
+
+    def _mp_role(self) -> str:
+        """Returns "host", "client", or "single" — drives the role-aware
+        branches in ``_update`` and decides who simulates the world.
+        """
+        running = ui.app()
+        if running.mp_net is None or running.current_mode == "single":
+            return "single"
+        return "host" if isinstance(running.mp_net, net.NetHost) else "client"
+
+    def _mp_drain_host_inbox(self) -> None:
+        """Host side: pull pending input messages from the client and
+        update ``opponent_target_x``. Also handle disconnect / leave.
+        """
+        running = ui.app()
+        if running.mp_net is None:
+            return
+        while True:
+            try:
+                msg = running.mp_net.inbox.get_nowait()
+            except Exception:
+                break
+            kind = msg.get("t")
+            if kind == "input":
+                # Client's input is a normalized lateral fraction; convert
+                # back to stage-pixel coordinates so it can drive
+                # opponent_hero directly.
+                tx = float(msg.get("tx", 0.5))
+                sx = self.stage.x
+                sw = self.stage.width
+                self.opponent_target_x = sx + max(0.0, min(1.0, tx)) * sw
+            elif kind in ("leave", "_disconnected"):
+                # Peer left — fall back to solo so the host can still finish
+                # the level. Same shape as _exit's mp_net cleanup.
+                running.mp_net.stop()
+                running.mp_net = None
+                running.current_mode = "single"
+                return
+
+    def _mp_send_snapshot(self) -> None:
+        """Host side: build + send the per-tick snapshot.
+
+        MVP schema — just hero positions + per-player stats + the host's
+        distance for end-of-level detection on the client. Entity sync
+        (enemies / gates / projectiles) is a follow-up: this turn proves
+        the wire works.
+        """
+        running = ui.app()
+        if running.mp_net is None or self.hero is None:
+            return
+        # Normalize hero X to 0-1 so the client doesn't need stage geometry.
+        sx = self.stage.x
+        sw = max(1.0, self.stage.width)
+        p1_norm_x = (self.hero.center_x - sx) / sw
+        if self.opponent_hero is not None:
+            p2_norm_x = (self.opponent_hero.center_x - sx) / sw
+        else:
+            p2_norm_x = 0.5
+        running.mp_net.send({
+            "t": "snap",
+            "tick": self._mp_tick,
+            "p1": {
+                "x":     round(p1_norm_x, 4),
+                "squad": self.squad_count,
+                "kills": self.kills_total,
+                "coins": self._coins_earned,
+                "alive": self.squad_count > 0 and not self._level_ended,
+            },
+            "p2": {
+                "x":     round(p2_norm_x, 4),
+                "squad": self.opponent_squad,
+                "kills": self.opponent_kills,
+                "coins": self.opponent_coins,
+                "alive": self.opponent_alive,
+            },
+            "dist":  round(self.distance, 1),
+            "ended": self._level_ended,
+        })
+
+    def _mp_client_tick(self, dt: float) -> None:
+        """Client side: drain snapshots, position both heroes from the
+        latest one, send local input to the host.
+
+        The local simulation is skipped entirely — controllers don't
+        tick, spawners don't fire, no attrition runs. The client is a
+        dumb viewport plus an input forwarder.
+        """
+        running = ui.app()
+        if running.mp_net is None:
+            return
+        latest = None
+        while True:
+            try:
+                msg = running.mp_net.inbox.get_nowait()
+            except Exception:
+                break
+            kind = msg.get("t")
+            if kind == "snap":
+                latest = msg
+            elif kind == "result":
+                # Host declared a winner — show the match-over dialog.
+                self._mp_show_result(msg)
+                return
+            elif kind in ("leave", "_disconnected"):
+                self._exit()
+                return
+
+        if latest is not None:
+            self._mp_apply_snapshot(latest)
+
+        # Forward local input to the host. Throttle to once per tick max
+        # and only on meaningful change — keeps the channel quiet.
+        if self.hero is not None and self.stage.width > 0:
+            sx = self.stage.x
+            sw = max(1.0, self.stage.width)
+            target_norm = (self._hero_target_x - sx) / sw
+            target_norm = max(0.0, min(1.0, target_norm))
+            if (self._last_input_norm_x is None
+                    or abs(target_norm - self._last_input_norm_x) > 0.002):
+                running.mp_net.send_input(target_norm, 0.0, False)
+                self._last_input_norm_x = target_norm
+
+    def _mp_apply_snapshot(self, snap: dict) -> None:
+        """Client side: position both heroes + replicate stats from the
+        host's snapshot. Host's hero is in snap["p1"]; this client's hero
+        (the one local touch represents) is in snap["p2"]."""
+        sx = self.stage.x
+        sw = max(1.0, self.stage.width)
+        # On the client, self.hero IS p2 (the local player). self.opponent_hero
+        # is p1 (the host).
+        p1 = snap.get("p1", {})
+        p2 = snap.get("p2", {})
+        if self.opponent_hero is not None:
+            self.opponent_hero.center_x = sx + float(p1.get("x", 0.5)) * sw
+        if self.hero is not None:
+            # Snapshot is authoritative for the local hero too — fixes
+            # any client-side mis-prediction from typed-out input.
+            self.hero.center_x = sx + float(p2.get("x", 0.5)) * sw
+        self.squad_count   = int(p2.get("squad", self.squad_count))
+        self.kills_total   = int(p2.get("kills", self.kills_total))
+        self._coins_earned = int(p2.get("coins", self._coins_earned))
+        self.opponent_squad = int(p1.get("squad", self.opponent_squad))
+        self.opponent_kills = int(p1.get("kills", self.opponent_kills))
+        self.opponent_coins = int(p1.get("coins", self.opponent_coins))
+        self.opponent_alive = bool(p1.get("alive", True))
+        self.distance = float(snap.get("dist", self.distance))
+
+    def _mp_broadcast_result(self, host_completed_won: bool) -> None:
+        """Host side: compute scores for both players, declare the winner
+        by higher score, and send each side its own framed result message.
+
+        Scoring for now reuses the single-player formula — kills + squad
+        survival + gates. p2 doesn't currently earn gates (no client-side
+        gate sim yet), so they score only on kills + squad. Replace this
+        with a fair shared formula once shared-world entity sync lands.
+        """
+        running = ui.app()
+        if running.mp_net is None:
+            return
+        p1_score = levels.score_for(
+            self.kills_total, max(0, self.squad_count),
+            self.gate_controller.applied_total if self.gate_controller else 0,
+            self.gate_controller.missed_total if self.gate_controller else 0,
+        )
+        p2_score = levels.score_for(
+            self.opponent_kills, max(0, self.opponent_squad), 0, 0,
+        )
+        # Send the client *their* perspective: local_won + local_score.
+        running.mp_net.send({
+            "t": "result",
+            "local_won":   p2_score > p1_score,
+            "local_score": p2_score,
+        })
+        # On the host's own screen, the existing LevelResultDialog still
+        # opens through _end_level → so just stash who actually won for
+        # downstream code that wants to know.
+        self._mp_local_won = p1_score >= p2_score
+
+    def _mp_show_result(self, msg: dict) -> None:
+        """Both sides: the host has declared the match over. Render the
+        existing LevelResultDialog with vs scores so the screen flow
+        matches single-player level end.
+        """
+        won = bool(msg.get("local_won", False))
+        score = int(msg.get("local_score", 0))
+        self._level_ended = True
+        if self._update_event is not None:
+            self._update_event.cancel()
+            self._update_event = None
+        # Reuse the single-player dialog — winner is already encoded
+        # per device in local_won.
+        dialog = ui.LevelResultDialog(
+            won=won, stars=0, score=score,
+            level_label="Versus  -  {}".format(
+                "You Win!" if won else "Opponent Wins"),
+            on_next=None, on_retry=None, on_menu=self._exit,
+            stats={"coins_total": self._coins_earned,
+                   "coins_pickup": self._coins_pickups,
+                   "kills":        self.kills_total,
+                   "gates_hit":    0, "gates_missed": 0,
+                   "squad_end":    max(0, self.squad_count),
+                   "squad_peak":   max(0, self._squad_peak),
+                   "distance":     int(self.distance), "time": self._run_time},
+        )
+        dialog.open()
 
     # --- squad-loss handler (shared by attrition and escape) -------------
 
