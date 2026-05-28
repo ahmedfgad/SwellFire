@@ -22,7 +22,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
-from kivy.graphics import Color, RoundedRectangle
+from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.metrics import sp, dp
 from kivy.clock import Clock
 from kivy.properties import ListProperty, NumericProperty
@@ -83,6 +83,138 @@ SUBTITLE_HEIGHT = dp(48)
 INFO_HEIGHT = dp(72)
 INPUT_HEIGHT = dp(52)
 ROW_SPACING = dp(12)
+
+
+class ShopIcon(Widget):
+    """Canvas-drawn icon per shop-item category, so each row visually
+    advertises what it is without needing atlas frames at this size."""
+
+    def __init__(self, kind: str, **kwargs):
+        super().__init__(**kwargs)
+        self.kind = kind
+        with self.canvas:
+            self._instructions = []
+        self.bind(pos=self._redraw, size=self._redraw)
+        self._redraw()
+
+    def _redraw(self, *_):
+        self.canvas.clear()
+        x, y = self.pos
+        w, h = self.size
+        size = min(w, h)
+        cx = x + w / 2
+        cy = y + h / 2
+        with self.canvas:
+            kind = self.kind
+            if kind.startswith("weapon_"):
+                weapon_id = kind.split("_", 1)[1]
+                self._draw_weapon(weapon_id, cx, cy, size)
+            elif kind == "grenade":
+                self._draw_grenade(cx, cy, size)
+            elif kind == "shield":
+                self._draw_shield(cx, cy, size)
+            elif kind == "squad":
+                self._draw_squad(cx, cy, size)
+            else:
+                Color(0.5, 0.5, 0.55, 0.6)
+                Ellipse(pos=(cx - size * 0.3, cy - size * 0.3),
+                        size=(size * 0.6, size * 0.6))
+
+    def _draw_weapon(self, weapon_id, cx, cy, size):
+        # Color-codes per weapon tier; shape suggests a barrel.
+        colors = {
+            "pistol":  (0.55, 0.55, 0.65, 1),   # grey
+            "rifle":   (0.30, 0.70, 0.40, 1),   # green
+            "shotgun": (0.95, 0.50, 0.20, 1),   # orange
+            "sniper":  (0.75, 0.35, 0.95, 1),   # purple
+        }
+        c = colors.get(weapon_id, (0.6, 0.6, 0.6, 1))
+        Color(*c)
+        # Body (rectangle)
+        RoundedRectangle(
+            pos=(cx - size * 0.36, cy - size * 0.10),
+            size=(size * 0.55, size * 0.22),
+            radius=[size * 0.05],
+        )
+        # Grip
+        RoundedRectangle(
+            pos=(cx - size * 0.28, cy - size * 0.34),
+            size=(size * 0.18, size * 0.30),
+            radius=[size * 0.04],
+        )
+        # Barrel
+        Color(0.20, 0.20, 0.24, 1)
+        Rectangle(
+            pos=(cx + size * 0.16, cy - size * 0.04),
+            size=(size * 0.22, size * 0.10),
+        )
+
+    def _draw_grenade(self, cx, cy, size):
+        # Round body in dark green, top fuse, accent stripe.
+        Color(0.18, 0.58, 0.30, 1)
+        Ellipse(
+            pos=(cx - size * 0.32, cy - size * 0.38),
+            size=(size * 0.64, size * 0.64),
+        )
+        Color(0.0, 0.0, 0.0, 0.50)
+        Rectangle(
+            pos=(cx - size * 0.28, cy + size * 0.06),
+            size=(size * 0.56, size * 0.05),
+        )
+        Color(0.45, 0.45, 0.48, 1)
+        Rectangle(
+            pos=(cx - size * 0.04, cy + size * 0.22),
+            size=(size * 0.08, size * 0.12),
+        )
+        Color(1.0, 0.85, 0.20, 1)
+        Ellipse(
+            pos=(cx - size * 0.06, cy + size * 0.30),
+            size=(size * 0.12, size * 0.10),
+        )
+
+    def _draw_shield(self, cx, cy, size):
+        # Shield silhouette in blue.
+        Color(0.30, 0.65, 1.0, 1)
+        # Shield body — wider at top, tapering at bottom.
+        from kivy.graphics import Triangle
+        # Use two triangles + ellipse to fake a shield shape.
+        Ellipse(
+            pos=(cx - size * 0.30, cy - size * 0.10),
+            size=(size * 0.60, size * 0.55),
+        )
+        Triangle(points=[
+            cx - size * 0.30, cy + size * 0.05,
+            cx + size * 0.30, cy + size * 0.05,
+            cx, cy - size * 0.42,
+        ])
+        # White cross detail.
+        Color(1, 1, 1, 0.9)
+        Rectangle(
+            pos=(cx - size * 0.04, cy - size * 0.20),
+            size=(size * 0.08, size * 0.35),
+        )
+        Rectangle(
+            pos=(cx - size * 0.18, cy + size * 0.02),
+            size=(size * 0.36, size * 0.08),
+        )
+
+    def _draw_squad(self, cx, cy, size):
+        # Stylized 3-runner grouping (small blue figures).
+        Color(0.25, 0.65, 0.95, 1)
+        for k, ofx in enumerate((-0.22, 0.0, 0.22)):
+            Ellipse(
+                pos=(cx + size * ofx - size * 0.10,
+                     cy - size * 0.05),
+                size=(size * 0.20, size * 0.32),
+            )
+            # Head
+            Color(1.0, 0.85, 0.65, 1)
+            Ellipse(
+                pos=(cx + size * ofx - size * 0.07,
+                     cy + size * 0.22),
+                size=(size * 0.14, size * 0.14),
+            )
+            Color(0.25, 0.65, 0.95, 1)
 
 
 def _scroll_panel(*, size_hint=(0.72, 0.94),
@@ -454,67 +586,33 @@ class ShopScreen(StyledScreen):
                 section.add_widget(self._make_item_widget(item, state))
 
     def _make_item_widget(self, item: shop.ShopItem, state) -> "BoxLayout":
-        # One row per shop item: title + price on top, description + button on bottom.
-        row = BoxLayout(orientation="vertical", spacing=dp(2),
-                        size_hint_y=None, height=dp(108),
-                        padding=(dp(4), dp(6)))
-        with row.canvas.before:
-            Color(0.10, 0.12, 0.18, 0.85)
-            bg_rect = RoundedRectangle(radius=[dp(10)])
-        row.bind(pos=lambda *a, _r=bg_rect, _rw=row: setattr(_r, "pos", _rw.pos),
-                 size=lambda *a, _r=bg_rect, _rw=row: setattr(_r, "size", _rw.size))
-
-        top = BoxLayout(orientation="horizontal", size_hint_y=None,
-                        height=dp(34))
-        top.add_widget(Label(
-            text=item.label, font_size=sp(17), bold=True, color=(1, 1, 1, 1),
-            halign="left", valign="middle", size_hint_x=0.7,
-        ))
-        # Right-aligned price.
+        """Each shop item is a single ButtonBehavior card — clicking
+        anywhere on the card triggers the purchase. Visual states make
+        owned / locked / can't-afford unambiguous.
+        """
         owned = shop.is_owned(item, state)
-        price_label = Label(
-            text=("OWNED" if owned else "{} c".format(item.price)),
-            font_size=sp(17), bold=True,
-            color=((0.55, 0.95, 0.55, 1) if owned else (1.0, 0.92, 0.40, 1.0)),
-            halign="right", valign="middle", size_hint_x=0.3,
-        )
-        price_label.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
-        top.add_widget(price_label)
-        # Let labels respect the text_size for halign.
-        top.children[-1].text_size = (top.children[-1].width, None)
-        for lbl in (top.children[-1], top.children[0]):
-            lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
-        row.add_widget(top)
-
-        bottom = BoxLayout(orientation="horizontal", spacing=dp(6),
-                           size_hint_y=None, height=dp(64))
-        desc = Label(
-            text=item.description, font_size=sp(13), color=(1, 1, 1, 0.85),
-            halign="left", valign="top", size_hint_x=0.70,
-        )
-        desc.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
-        bottom.add_widget(desc)
-
-        can_buy = (not owned) and state.can_afford(item.price)
+        can_afford = state.can_afford(item.price)
         # Squad bonuses must be bought in order (1 → 2 → 3).
+        squad_locked = False
         if item.category == "squad" and not owned:
             if state.squad_bonus < item.squad_target - 1:
-                can_buy = False
-        buy_label = (
-            "Buy" if can_buy
-            else ("OK" if owned else "Locked")
-        )
-        buy_bg = (
-            [0.20, 0.70, 0.40, 1] if can_buy
-            else [0.40, 0.40, 0.45, 1]
-        )
-        buy = StyledButton(text=buy_label, bg=buy_bg, font_size=sp(15),
-                           size_hint_x=0.30)
-        buy.disabled = not can_buy
-        buy.bind(on_release=lambda *_, _it=item: self._buy(_it))
-        bottom.add_widget(buy)
-        row.add_widget(bottom)
-        return row
+                squad_locked = True
+
+        # Currently-selected weapon = the player's highest-tier weapon
+        # that's also THIS item's weapon, so the gold-border treatment
+        # only appears on the active starting weapon.
+        is_selected = False
+        if item.category == "weapon" and owned:
+            wid = item.id.split("_", 1)[1]
+            is_selected = (state.starting_weapon == wid)
+
+        can_buy = (not owned) and can_afford and (not squad_locked)
+
+        card = ShopItemCard(item=item, can_buy=can_buy, owned=owned,
+                            squad_locked=squad_locked,
+                            is_selected=is_selected,
+                            on_buy=self._buy)
+        return card
 
     def _buy(self, item: shop.ShopItem) -> None:
         state = app().state
@@ -533,6 +631,170 @@ class ShopScreen(StyledScreen):
         else:
             app().audio.play_sfx("hit")
         self._render()
+
+
+class ShopItemCard(ButtonBehavior, BoxLayout):
+    """Full-row clickable shop item card.
+
+    Visual states:
+      owned          → green border + check overlay
+      is_selected    → gold border (currently-equipped starting weapon)
+      can_buy        → bright accent bg, normal text
+      squad_locked   → grey lock badge, prereq message
+      can't afford   → grey "Need N coins" tag, click does nothing
+    """
+
+    def __init__(self, *, item, can_buy: bool, owned: bool,
+                 squad_locked: bool, is_selected: bool, on_buy, **kwargs):
+        super().__init__(orientation="horizontal", spacing=dp(10),
+                         size_hint_y=None, height=dp(96),
+                         padding=(dp(10), dp(8)),
+                         **kwargs)
+        self.item = item
+        self.can_buy = can_buy
+        self.owned = owned
+        self.squad_locked = squad_locked
+        self.is_selected = is_selected
+        self._on_buy = on_buy
+
+        # Background card (color depends on state) + outer border.
+        with self.canvas.before:
+            if owned:
+                bg_color = (0.10, 0.22, 0.16, 0.95)  # green-tinted
+            elif squad_locked:
+                bg_color = (0.18, 0.18, 0.22, 0.85)
+            elif not can_buy:
+                bg_color = (0.16, 0.16, 0.20, 0.85)
+            else:
+                bg_color = (0.12, 0.18, 0.30, 0.95)
+            self._bg_color = Color(*bg_color)
+            self._bg = RoundedRectangle(radius=[dp(12)])
+            # Outer border.
+            if is_selected:
+                border_rgba = (1.0, 0.85, 0.20, 1.0)
+                border_width = 3.0
+            elif owned:
+                border_rgba = (0.30, 0.85, 0.45, 1.0)
+                border_width = 2.0
+            else:
+                border_rgba = (1.0, 1.0, 1.0, 0.18)
+                border_width = 1.5
+            self._border_color = Color(*border_rgba)
+            self._border = Line(rounded_rectangle=[0, 0, 0, 0, dp(12)],
+                                width=border_width)
+        self.bind(pos=self._sync_bg, size=self._sync_bg)
+
+        # Left: icon (square)
+        icon_kind = self._icon_kind_for(item)
+        icon = ShopIcon(kind=icon_kind, size_hint_x=None, width=dp(80))
+        self.add_widget(icon)
+
+        # Middle: title (top), description (bottom), state badge (bottom)
+        mid = BoxLayout(orientation="vertical", spacing=dp(2),
+                        size_hint_x=1.0)
+        title = Label(
+            text=item.label, font_size=sp(18), bold=True,
+            color=(1, 1, 1, 1), halign="left", valign="middle",
+            size_hint_y=None, height=dp(28),
+        )
+        title.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        mid.add_widget(title)
+        desc = Label(
+            text=item.description, font_size=sp(13),
+            color=(1, 1, 1, 0.80), halign="left", valign="top",
+        )
+        desc.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        mid.add_widget(desc)
+        self.add_widget(mid)
+
+        # Right: price / state stack
+        right = BoxLayout(orientation="vertical",
+                          size_hint_x=None, width=dp(112), spacing=dp(4))
+        # Top of right column = price OR owned check
+        if owned:
+            top_text = "[b]OWNED[/b]"
+            top_color = (0.55, 0.95, 0.55, 1)
+        elif squad_locked:
+            top_text = "[b]LOCKED[/b]"
+            top_color = (0.95, 0.55, 0.55, 1)
+        elif not can_buy:
+            top_text = "[b]{} c[/b]".format(item.price)
+            top_color = (0.95, 0.55, 0.55, 1)   # red — not affordable
+        else:
+            top_text = "[b]{} c[/b]".format(item.price)
+            top_color = (1.0, 0.92, 0.40, 1)
+        price_lbl = Label(
+            text=top_text, font_size=sp(18), color=top_color,
+            halign="center", valign="middle", markup=True,
+            size_hint_y=0.55,
+        )
+        price_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        right.add_widget(price_lbl)
+
+        # Bottom of right column = state line (Tap to buy / Need N coins / etc.)
+        if owned:
+            if is_selected:
+                state_text = "EQUIPPED"
+                state_color = (1.0, 0.85, 0.20, 1.0)
+            else:
+                state_text = "Tap to use" if item.category == "weapon" else ""
+                state_color = (1, 1, 1, 0.7)
+        elif squad_locked:
+            state_text = "Need +{}".format(item.squad_target - 1)
+            state_color = (1, 1, 1, 0.7)
+        elif not can_buy:
+            # show shortfall
+            shortfall = item.price - app().state.coins_balance
+            state_text = "Need +{} c".format(shortfall)
+            state_color = (0.95, 0.55, 0.55, 1)
+        else:
+            state_text = "Tap to buy"
+            state_color = (0.55, 0.95, 0.55, 1)
+        state_lbl = Label(
+            text=state_text, font_size=sp(13), bold=True,
+            color=state_color, halign="center", valign="middle",
+            size_hint_y=0.45,
+        )
+        state_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        right.add_widget(state_lbl)
+        self.add_widget(right)
+
+        # Initial bg/border sync
+        self._sync_bg()
+
+    def _icon_kind_for(self, item):
+        if item.category == "weapon":
+            wid = item.id.split("_", 1)[1]
+            return "weapon_" + wid
+        if item.category == "booster":
+            return item.booster_id   # "grenade" or "shield"
+        if item.category == "squad":
+            return "squad"
+        return ""
+
+    def _sync_bg(self, *_):
+        self._bg.pos = self.pos
+        self._bg.size = self.size
+        self._border.rounded_rectangle = [
+            self.x, self.y, self.width, self.height, dp(12),
+        ]
+
+    def on_release(self):
+        if not self.can_buy:
+            # Brief negative feedback when the player taps a card they can't buy.
+            running = app()
+            if running is not None and getattr(running, "audio", None):
+                running.audio.play_sfx("hit")
+            # Flash the border red briefly.
+            from kivy.animation import Animation
+            self._border_color.rgba = (1.0, 0.30, 0.30, 1.0)
+            Animation(rgba=(1.0, 1.0, 1.0, 0.18),
+                      duration=0.5, t="out_quad").start(self._border_color)
+            return
+        # Already-owned weapon: switch starting weapon (cosmetic — same effect
+        # as buying the highest tier the player owns, but feels right).
+        # For non-weapon owned items there's nothing to do.
+        self._on_buy(self.item)
 
 
 class WorldMapScreen(StyledScreen):
