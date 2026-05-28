@@ -1012,11 +1012,17 @@ class GameScreen(ui.StyledScreen):
         head-start squad/weapon so the fight isn't pistol+1.
         """
         running = ui.app()
-        cfg = levels.get_level(running.current_level) if running.current_level else None
-        # Multiplayer (versus) doesn't go through the level table; use a
-        # gentle baseline so the screen still runs end-to-end.
-        if cfg is None:
-            cfg = levels.get_level(1)
+        # Multiplayer (versus) gets its own dedicated config — fixed
+        # 60-second duration regardless of which single-player level was
+        # last played. Without this override the MP screen would inherit
+        # the last single-player level's distance_goal (20 s on L1,
+        # 138 s on L60) which is unpredictable for matchmaking.
+        if running.current_mode != "single":
+            cfg = levels.build_mp_level()
+        else:
+            cfg = levels.get_level(running.current_level) if running.current_level else None
+            if cfg is None:
+                cfg = levels.get_level(1)
         self.level_config = cfg
         self.distance_goal = float(cfg["distance_goal"])
         is_boss = bool(cfg.get("boss"))

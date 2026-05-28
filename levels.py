@@ -100,6 +100,26 @@ WORLDS = [
 
 # Static seeded arena used by the 2-player versus mode (M13).
 MP_LEVEL = "mp"
+# Versus matches are short, fixed-length sprints. 60 seconds is long
+# enough for both players to grow their squad through several gates
+# but short enough that a full match fits a casual "one more round".
+MP_LEVEL_DURATION_SEC = 60.0
+
+
+def build_mp_level() -> dict[str, Any]:
+    """Construct the versus-mode level config.
+
+    Uses L1's spawn / enemy parameters as the gameplay baseline (gentle
+    intro pressure, all gate ops unlocked via L1's allowed_ops) but
+    overrides ``distance_goal`` / ``level_seconds`` to MP_LEVEL_DURATION_SEC
+    so a versus run takes 60 s regardless of which single-player level
+    was last played.
+    """
+    base = dict(LEVELS[1])
+    base["distance_goal"] = MP_LEVEL_DURATION_SEC * SCROLL_SPEED_PX_PER_SEC
+    base["level_seconds"] = MP_LEVEL_DURATION_SEC
+    base["name"] = "Versus Arena"
+    return base
 
 
 def get_world(world: int) -> dict:
