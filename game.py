@@ -23,7 +23,8 @@ import random
 
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle, Line
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
+from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -167,6 +168,14 @@ class GameScreen(ui.StyledScreen):
         self.shield_btn = None
         self.pause_btn = None
         self.coins_label = None
+        # Double-coin power-up indicator widgets. Built in build().
+        self.dc_panel = None
+        self.dc_label = None
+        self._dc_bg_color = None
+        self._dc_bg_rect = None
+        self._dc_fill_color = None
+        self._dc_fill_rect = None
+        self._dc_flash_color = None
         # Pause / resume — ported from CoinTex's GameScreen pattern. The
         # update loop returns early when self.paused is True; the pause
         # button opens a ConfirmDialog with Quit + Resume choices.
@@ -248,6 +257,38 @@ class GameScreen(ui.StyledScreen):
         )
         self.coins_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
         self.root_layout.add_widget(self.coins_label)
+
+        # 2× COINS power-up timer. Pill at top-center with a depleting
+        # fill bar so the player can see, at a glance, how long the
+        # bonus has left. Hidden when the bonus isn't active.
+        self.dc_panel = FloatLayout(
+            size_hint=(0.34, 0.07),
+            pos_hint={"center_x": 0.5, "top": 0.99},
+            opacity=0,
+        )
+        with self.dc_panel.canvas.before:
+            # Outer pill — dim gold so the bright fill stands out.
+            self._dc_bg_color = Color(0.40, 0.30, 0.08, 0.92)
+            self._dc_bg_rect = RoundedRectangle(radius=[dp(18)])
+            # Inner fill — bright gold that shrinks as time runs out.
+            self._dc_fill_color = Color(1.0, 0.82, 0.18, 1.0)
+            self._dc_fill_rect = RoundedRectangle(radius=[dp(18)])
+            # Flash overlay used to pulse the pill in the final seconds.
+            self._dc_flash_color = Color(1.0, 1.0, 1.0, 0.0)
+            self._dc_flash_rect = RoundedRectangle(radius=[dp(18)])
+        self.dc_panel.bind(
+            pos=lambda *_: self._redraw_dc_panel(),
+            size=lambda *_: self._redraw_dc_panel(),
+        )
+        self.dc_label = Label(
+            text="", font_size=sp(17), bold=True, markup=True,
+            color=(0.14, 0.08, 0.0, 1.0),
+            halign="center", valign="middle",
+            size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+        )
+        self.dc_label.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        self.dc_panel.add_widget(self.dc_label)
+        self.root_layout.add_widget(self.dc_panel)
 
         # Pause button — top-right. CoinTex pattern: "II" double-bar glyph.
         self.pause_btn = ui.StyledButton(
@@ -1164,15 +1205,11 @@ class GameScreen(ui.StyledScreen):
                     [0.50, 0.85, 1.00, 1] if self.shield_count > 0
                     else [0.30, 0.30, 0.35, 1]
                 )
-        # Double-coin pickup timer chip in the HUD if active.
-        if self.double_coin_until > self._run_time:
-            remaining = self.double_coin_until - self._run_time
-            dc_chip = "  [2× COINS {:.1f}s]".format(remaining)
-        else:
-            dc_chip = ""
+        # Update the standalone 2× COINS power-up indicator (top-center).
+        self._update_dc_panel()
         self.hud_label.text = ("Distance {}     Squad {}     "
-                               "Weapon: {}     Kills {}{}").format(
-            progress, self.squad_count, weapon_name, self.kills_total, dc_chip,
+                               "Weapon: {}     Kills {}").format(
+            progress, self.squad_count, weapon_name, self.kills_total,
         )
         # In-level coins counter (top-right). This is only the coins earned
         # during this run — distinct from the persistent shop balance shown
@@ -1522,6 +1559,58 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- 2× coins power-up indicator -------------------------------------
+
+    def _update_dc_panel(self) -> None:
+        """Show / hide and refresh the 2× COINS pill at top-center.
+
+        Layout: a dim outer pill + a bright gold fill whose width tracks
+        the time remaining. In the last 3 seconds the pill pulses white
+        so the player gets a "hurry up!" cue before the bonus expires.
+        """
+        panel = self.dc_panel
+        if panel is None:
+            return
+        if self.double_coin_until <= self._run_time:
+            if panel.opacity != 0:
+                panel.opacity = 0
+            return
+        remaining = self.double_coin_until - self._run_time
+        total = entities.PickupController.DOUBLE_COIN_DURATION_SEC
+        progress = max(0.0, min(1.0, remaining / total))
+        panel.opacity = 1
+        self.dc_label.text = "[b]2× COINS  {:.1f}s[/b]".format(remaining)
+        # Update fill width from the new progress value.
+        self._redraw_dc_panel(progress=progress)
+        # Pulse white in the last 3 seconds — sin-wave alpha so it
+        # pumps smoothly rather than blinking.
+        if remaining < 3.0:
+            pulse = 0.35 + 0.30 * abs(math.sin(self._run_time * 8.0))
+            self._dc_flash_color.rgba = (1.0, 1.0, 1.0, pulse * (3.0 - remaining) / 3.0)
+        else:
+            self._dc_flash_color.rgba = (1.0, 1.0, 1.0, 0.0)
+
+    def _redraw_dc_panel(self, *, progress: float | None = None) -> None:
+        """Reposition the pill's canvas rectangles whenever the widget
+        is resized OR whenever the fill progress changes.
+
+        ``progress`` is the share of duration remaining in [0, 1]. When
+        not passed we reuse the current value so a layout pass doesn't
+        suddenly redraw an empty fill.
+        """
+        if self.dc_panel is None or self._dc_bg_rect is None:
+            return
+        x, y = self.dc_panel.pos
+        w, h = self.dc_panel.size
+        self._dc_bg_rect.pos = (x, y)
+        self._dc_bg_rect.size = (w, h)
+        if progress is None:
+            progress = self._dc_fill_rect.size[0] / max(1.0, w)
+        self._dc_fill_rect.pos = (x, y)
+        self._dc_fill_rect.size = (w * progress, h)
+        self._dc_flash_rect.pos = (x, y)
+        self._dc_flash_rect.size = (w, h)
 
     # --- pause / resume (port of CoinTex GameScreen pattern) -------------
 
