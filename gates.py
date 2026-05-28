@@ -70,6 +70,11 @@ class Gate(Widget):
         self.consumed = False        # True once a gate in the pair fires
         self.missed = False          # True if pair scrolled past without entering
         self.selected = False        # True if THIS gate was the one picked
+        # M13 — versus only. Independent per-hero tracking so a gate
+        # consumed by the local player doesn't lock out the opponent.
+        # GameScreen sets opponent_consumed once the opponent has passed
+        # the gate's row, whether they entered a panel or not.
+        self.opponent_consumed = False
 
         color = OP_COLORS[op]
         with self.canvas.before:

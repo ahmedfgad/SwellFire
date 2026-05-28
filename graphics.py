@@ -151,21 +151,32 @@ class BatchedRenderer(Widget):
     cost is just the Python-side vertex emit loop — see `rebuild`.
     """
 
-    def __init__(self, pool: EntityPool, **kwargs):
+    def __init__(self, pool: EntityPool, *,
+                 tint: tuple[float, float, float, float] | None = None,
+                 owner_array: "bytearray | None" = None,
+                 owner_filter: int | None = None,
+                 **kwargs):
         super().__init__(**kwargs)
         self.pool = pool
+        # M13 — owner-filter renderer. When set, only pool slots with
+        # ``owner_array[i] == owner_filter`` reach the mesh. Combined
+        # with ``tint`` this lets us draw local and opponent
+        # projectiles from a single shared pool with different colours,
+        # so the player can read whose shots are whose at a glance.
+        self._owner_array = owner_array
+        self._owner_filter = owner_filter
         with self.canvas:
+            if tint is not None:
+                self._tint_color = Color(*tint)
+            else:
+                self._tint_color = None
             self._mesh = Mesh(
                 mode="triangles",
                 texture=pool.atlas.texture,
                 vertices=[],
                 indices=[],
             )
-        # Reusable scratch buffer for the vertex array. 16 floats per quad
-        # (4 verts x 4 floats: x, y, u, v).
         self._verts: list[float] = [0.0] * (pool.capacity * 16)
-        # Indices are computed each frame from active slots only, so empties
-        # never reach the GPU.
 
     def rebuild(self) -> None:
         pool = self.pool
@@ -178,6 +189,8 @@ class BatchedRenderer(Widget):
         u1 = pool.u1
         v1 = pool.v1
         active = pool.active
+        owner_arr = self._owner_array
+        owner_filter = self._owner_filter
         verts = self._verts
         indices: list[int] = []
 
@@ -185,6 +198,9 @@ class BatchedRenderer(Widget):
         cap = pool.capacity
         for i in range(cap):
             if not active[i]:
+                continue
+            if (owner_filter is not None and owner_arr is not None
+                    and owner_arr[i] != owner_filter):
                 continue
             x1 = cx[i] - hw[i]
             x2 = cx[i] + hw[i]

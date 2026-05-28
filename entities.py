@@ -318,16 +318,21 @@ class ProjectileController:
         cap = pool.capacity
         self.damage = [0] * cap
         self.ttl = [0.0] * cap
+        # M13 — owner per slot. 0 = local (host's) player, 1 = opponent.
+        # resolve_projectile_collisions reads this back so kills route
+        # to the right player's score.
+        self.owner = bytearray(cap)
         self.spawned_total = 0
         self.recycled_total = 0
 
     def spawn(self, x: float, y: float, vx: float, vy: float,
               w: float, h: float, frame: str,
-              damage: int, ttl: float) -> int:
+              damage: int, ttl: float, owner: int = 0) -> int:
         idx = self.pool.spawn(x, y, vx, vy, w, h, frame)
         if idx >= 0:
             self.damage[idx] = damage
             self.ttl[idx] = ttl
+            self.owner[idx] = owner
             self.spawned_total += 1
         return idx
 
@@ -510,7 +515,7 @@ def find_nearest_enemy(hero_cx: float, hero_cy: float,
 def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,
                 weapon, projectile_controller: ProjectileController,
                 enemy_controller: EnemyController,
-                rng: random.Random) -> int:
+                rng: random.Random, owner: int = 0) -> int:
     """Spawn the projectiles for one shot. Returns number actually spawned.
 
     Picks a direction by snapping to the nearest living enemy; with no
@@ -545,7 +550,7 @@ def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,
         vy = (aim_x * sin_a + aim_y * cos_a) * speed
         idx = projectile_controller.spawn(
             hero_cx, muzzle_y, vx, vy, size, size,
-            weapon.frame, weapon.damage, weapon.ttl,
+            weapon.frame, weapon.damage, weapon.ttl, owner=owner,
         )
         if idx >= 0:
             spawned += 1
@@ -623,7 +628,8 @@ class SquadController:
 def fire_from_positions(positions, target_x: float, target_y: float,
                         weapon, projectile_controller: ProjectileController,
                         rng: random.Random,
-                        damage_override: int | None = None) -> int:
+                        damage_override: int | None = None,
+                        owner: int = 0) -> int:
     """Spawn one projectile per shooter position, all aimed at one target.
 
     Shooter positions are `(x, y)` tuples — typically the hero's muzzle plus
@@ -653,7 +659,7 @@ def fire_from_positions(positions, target_x: float, target_y: float,
         vy = (aim_x * sin_a + aim_y * cos_a) * speed
         idx = projectile_controller.spawn(
             sx, sy, vx, vy, size, size,
-            weapon.frame, damage, weapon.ttl,
+            weapon.frame, damage, weapon.ttl, owner=owner,
         )
         if idx >= 0:
             spawned += 1
@@ -881,6 +887,7 @@ def resolve_projectile_collisions(
     e_cy = ep.cy
     e_hw = ep.hw
     p_damage = projectile_controller.damage
+    p_owner = projectile_controller.owner
     e_hp = enemy_controller.hp
 
     e_type = enemy_controller.type
@@ -908,9 +915,13 @@ def resolve_projectile_collisions(
                     hit_x = e_cx[ei]
                     hit_y = e_cy[ei]
                     enemy_type = int(e_type[ei])
+                    killer = int(p_owner[pi])
                     ep.release(ei)
                     enemy_controller.recycled_total += 1
-                    on_kill(hit_x, hit_y, enemy_type)
+                    # Callback signature stayed (hit_x, hit_y, type) for
+                    # backwards compat; ``owner`` is appended as a 4th
+                    # positional arg — game.py reads it to route kills.
+                    on_kill(hit_x, hit_y, enemy_type, killer)
                     kills += 1
                 break   # projectile consumed
     return kills

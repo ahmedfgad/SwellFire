@@ -272,6 +272,19 @@ class GameScreen(ui.StyledScreen):
         self.opponent_kills = 0
         self.opponent_coins = 0
         self.opponent_alive = True
+        # Opponent's auto-fire cooldown + coin remainder. Mirrors the
+        # host-side ``_fire_cooldown`` / ``_coin_remainder`` fields but
+        # tracks opponent's per-shot rate and fractional kill rewards.
+        self._opponent_fire_cooldown = 0.0
+        self._opponent_coin_remainder = 0.0
+        # Opponent's equipped weapon + grenade balance. Updated when
+        # opponent passes a WEAPON or GRENADE gate. Mirrors the local
+        # current_weapon_id / grenade_count so the opponent's auto-fire
+        # uses the latest gun and gate effects are symmetric.
+        self.opponent_weapon_id = DEFAULT_WEAPON_ID
+        self.opponent_grenade_count = 0
+        # Tinted renderer used for the opponent's projectiles.
+        self.opponent_projectile_renderer = None
         self._mp_tick = 0
         self._last_input_norm_x = None
         # 20 Hz snapshot rate (every 3 ticks at 60 fps). Bandwidth-friendly
@@ -545,10 +558,26 @@ class GameScreen(ui.StyledScreen):
         if self.projectile_pool is None:
             self.projectile_pool = graphics.EntityPool(PROJECTILE_POOL_CAPACITY, self._atlas)
             self.projectile_controller = entities.ProjectileController(self.projectile_pool)
+            # M13 — split the rendering by owner so the player can tell
+            # which projectiles came from which hero. The local renderer
+            # has no tint (texture as-is); a second renderer for
+            # opponent shots paints them red. Both read the same pool;
+            # owner_array drives the per-slot filter inside rebuild().
             self.projectile_renderer = graphics.BatchedRenderer(
-                self.projectile_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+                self.projectile_pool,
+                owner_array=self.projectile_controller.owner,
+                owner_filter=0,
+                size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
             )
             self.stage.add_widget(self.projectile_renderer)
+            self.opponent_projectile_renderer = graphics.BatchedRenderer(
+                self.projectile_pool,
+                tint=(1.0, 0.45, 0.45, 1.0),
+                owner_array=self.projectile_controller.owner,
+                owner_filter=1,
+                size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.opponent_projectile_renderer)
 
         if self.particle_pool is None:
             self.particle_pool = graphics.EntityPool(PARTICLE_POOL_CAPACITY, self._atlas)
@@ -677,6 +706,7 @@ class GameScreen(ui.StyledScreen):
             Window.unbind(on_key_down=self._key_handler)
             self._key_handler = None
         for renderer in (self.enemy_renderer, self.projectile_renderer,
+                         self.opponent_projectile_renderer,
                          self.particle_renderer, self.squad_renderer,
                          self.pickup_renderer):
             if renderer is not None and renderer.parent:
@@ -700,6 +730,8 @@ class GameScreen(ui.StyledScreen):
         self.opponent_kills = 0
         self.opponent_coins = 0
         self.opponent_alive = True
+        self.opponent_weapon_id = DEFAULT_WEAPON_ID
+        self.opponent_grenade_count = 0
         self.enemy_pool = None
         self.enemy_controller = None
         self.enemy_spawner = None
@@ -707,6 +739,7 @@ class GameScreen(ui.StyledScreen):
         self.projectile_pool = None
         self.projectile_controller = None
         self.projectile_renderer = None
+        self.opponent_projectile_renderer = None
         self.particle_pool = None
         self.particle_controller = None
         self.particle_renderer = None
@@ -1289,30 +1322,34 @@ class GameScreen(ui.StyledScreen):
 
             self.projectile_controller.update(dt, x_min, y_min, x_max, y_max)
 
-            # Projectile vs enemy collisions. on_kill receives the archetype
-            # tag so we can trigger the on-death effect (bomber AOE, splitter
-            # split) on top of the standard particle burst.
-            def _on_kill(hit_x, hit_y, enemy_type, _self=self):
+            # Projectile vs enemy collisions. on_kill now also receives
+            # the killer (projectile owner) — 0 = local, 1 = opponent —
+            # so versus kills route to the right player's stats.
+            def _on_kill(hit_x, hit_y, enemy_type, killer, _self=self):
                 _self._spawn_death_polish(hit_x, hit_y)
                 _self._add_shake(0.35)
-                # Fractional coin reward — accumulated in a remainder, with
-                # the integer portion paid on each frame the accumulator
-                # exceeds 1. Doubles when the 2× pickup is active.
                 reward = COIN_PARTIAL_REWARD.get(enemy_type, 0.30)
                 if _self.double_coin_until > _self._run_time:
                     reward *= 2.0
-                _self._coin_remainder += reward
-                while _self._coin_remainder >= 1.0:
-                    _self._coins_earned += 1
-                    _self._coin_remainder -= 1.0
+                if killer == 0:
+                    _self._coin_remainder += reward
+                    while _self._coin_remainder >= 1.0:
+                        _self._coins_earned += 1
+                        _self._coin_remainder -= 1.0
+                    _self.kills_total += 1
+                else:
+                    _self._opponent_coin_remainder += reward
+                    while _self._opponent_coin_remainder >= 1.0:
+                        _self.opponent_coins += 1
+                        _self._opponent_coin_remainder -= 1.0
+                    _self.opponent_kills += 1
                 if enemy_type == entities.TYPE_BOMBER:
                     _self._bomber_explode(hit_x, hit_y)
                 elif enemy_type == entities.TYPE_SPLITTER:
                     _self._splitter_split(hit_x, hit_y)
-            kills = entities.resolve_projectile_collisions(
+            entities.resolve_projectile_collisions(
                 self.projectile_controller, self.enemy_controller, self.grid, _on_kill,
             )
-            self.kills_total += kills
 
             # Projectile vs boss (M10): AABB-only — boss is one big entity.
             if self.boss_controller is not None and self.boss is not None and self.boss.alive:
@@ -1337,6 +1374,13 @@ class GameScreen(ui.StyledScreen):
                 boss_module.resolve_projectile_vs_boss(
                     self.projectile_controller, self.boss_controller, _on_boss_hit,
                 )
+
+            # M13 — opponent's auto-fire + gate pass on the host's tick.
+            # Done here so opponent's projectiles are spawned BEFORE the
+            # collision pass below, letting opponent's shots resolve the
+            # same frame they're fired.
+            if role == "host":
+                self._opponent_tick_versus(dt)
 
             # Squad attrition: enemies that pierce the squad's front line cost one runner each.
             # When squad_count hits 0 the hero falls and the level fails.
@@ -1373,6 +1417,8 @@ class GameScreen(ui.StyledScreen):
             self.enemy_renderer.rebuild()
         if self.projectile_renderer is not None:
             self.projectile_renderer.rebuild()
+        if self.opponent_projectile_renderer is not None:
+            self.opponent_projectile_renderer.rebuild()
         if self.particle_renderer is not None:
             self.particle_renderer.rebuild()
         if self.squad_renderer is not None:
@@ -1929,16 +1975,19 @@ class GameScreen(ui.StyledScreen):
                         if hasattr(self.enemy_controller, "type") else 0,
                     ])
 
-        # Live projectiles (just positions — they all use the same atlas
-        # frame, so no type byte needed).
+        # Live projectiles. Each row also carries the owner byte so the
+        # client can paint them red vs neutral — the player can read
+        # whose shots are whose at a glance.
         projectiles = []
         if self.projectile_pool is not None:
             pool = self.projectile_pool
+            owner = self.projectile_controller.owner
             for i in range(pool.capacity):
                 if pool.active[i]:
                     projectiles.append([
                         round((pool.cx[i] - sx) / sw, 4),
                         round((pool.cy[i] - sy) / sh, 4),
+                        int(owner[i]),
                     ])
 
         running.mp_net.send({
@@ -2004,6 +2053,8 @@ class GameScreen(ui.StyledScreen):
                 self.enemy_renderer.rebuild()
             if self.projectile_renderer is not None:
                 self.projectile_renderer.rebuild()
+            if self.opponent_projectile_renderer is not None:
+                self.opponent_projectile_renderer.rebuild()
             if self.squad_renderer is not None:
                 self.squad_renderer.rebuild()
 
@@ -2177,9 +2228,12 @@ class GameScreen(ui.StyledScreen):
                               sx: float, sy: float,
                               sw: float, sh: float) -> None:
         """Same shape as _mp_apply_enemies — zero the pool, repopulate
-        from the snapshot. Projectiles use a single atlas frame so no
-        per-slot type byte is needed."""
+        from the snapshot. Each entry is [x_frac, y_frac, owner_byte]
+        so the local + opponent renderers can split rendering by owner.
+        Backwards-tolerant: rows without owner are treated as local.
+        """
         pool = self.projectile_pool
+        ctrl = self.projectile_controller
         for i in range(pool.capacity):
             if pool.active[i]:
                 pool.active[i] = 0
@@ -2188,11 +2242,16 @@ class GameScreen(ui.StyledScreen):
             if i >= pool.capacity:
                 break
             try:
-                x_frac, y_frac = entry
-            except (ValueError, TypeError):
+                if len(entry) >= 3:
+                    x_frac, y_frac, owner_byte = entry[0], entry[1], int(entry[2])
+                else:
+                    x_frac, y_frac, owner_byte = entry[0], entry[1], 0
+            except (ValueError, TypeError, IndexError):
                 continue
-            pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
-                       0.0, 0.0, 14.0, 22.0, "projectile")
+            idx = pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
+                             0.0, 0.0, 14.0, 22.0, "projectile")
+            if idx >= 0:
+                ctrl.owner[idx] = owner_byte
 
     def _mp_broadcast_result(self, host_completed_won: bool) -> None:
         """Host side: compute scores for both players, declare the winner
@@ -2254,6 +2313,94 @@ class GameScreen(ui.StyledScreen):
                    "distance":     int(self.distance), "time": self._run_time},
         )
         dialog.open()
+
+    # --- opponent auto-fire + gate handling (versus only, host) ---------
+
+    def _opponent_tick_versus(self, dt: float) -> None:
+        """Host-side: drive the opponent's auto-fire + gate consumption.
+
+        Called from ``_update`` only when role == "host", opponent_hero
+        exists, and opponent is still alive. Fires from the opponent's
+        muzzle at the nearest enemy (owner=1 so kills route to
+        opponent_kills via _on_kill), and walks the live gate pairs to
+        apply any the opponent has reached.
+        """
+        if (self.opponent_hero is None or not self.opponent_alive
+                or self.enemy_controller is None
+                or self.projectile_controller is None):
+            return
+
+        # --- auto-fire ---------------------------------------------------
+        # Uses opponent's currently equipped weapon (set by WEAPON
+        # gates). No tier multiplier, no squad followers — just the
+        # opponent hero's muzzle.
+        weapon = weapons.get(self.opponent_weapon_id)
+        self._opponent_fire_cooldown -= dt
+        if self._opponent_fire_cooldown <= 0.0:
+            entities.fire_weapon(
+                self.opponent_hero.center_x,
+                self.opponent_hero.center_y,
+                MUZZLE_OFFSET_Y, weapon,
+                self.projectile_controller, self.enemy_controller,
+                self._fire_rng, owner=1,
+            )
+            self._opponent_fire_cooldown = 1.0 / weapon.fire_rate
+
+        # --- gate pass-through ------------------------------------------
+        if self.gate_controller is None:
+            return
+        op_cx = self.opponent_hero.center_x
+        op_cy = self.opponent_hero.center_y
+        for pair in self.gate_controller.pairs:
+            if any(g.opponent_consumed for g in pair):
+                continue
+            pair_line_y = pair[0].y + pair[0].height * 0.5
+            if pair_line_y > op_cy + pair[0].height * 0.25:
+                continue
+            picked = None
+            for g in pair:
+                if g.x <= op_cx <= g.x + g.width:
+                    picked = g
+                    break
+            if picked is not None:
+                self._apply_gate_effect_to_opponent(picked)
+            for g in pair:
+                g.opponent_consumed = True
+
+    def _apply_gate_effect_to_opponent(self, gate) -> None:
+        """Mirror of _on_apply_gate but writes to opponent state.
+
+        Covers all gate ops: MUL / ADD / SUB / DIV change opponent_squad;
+        WEAPON sets opponent_weapon_id (their auto-fire picks it up next
+        tick); GRENADE bumps opponent_grenade_count (currently a stats
+        counter — opponent has no manual throw, but the count is in the
+        snapshot in case future logic wants to auto-throw).
+        """
+        if gate.op == gates.OP_WEAPON:
+            new_weapon = str(gate.value)
+            if weapons.get(new_weapon) is not None:
+                self.opponent_weapon_id = new_weapon
+            return
+        if gate.op == gates.OP_GRENADE:
+            try:
+                self.opponent_grenade_count += int(gate.value)
+            except (TypeError, ValueError):
+                self.opponent_grenade_count += 1
+            return
+        try:
+            v = int(gate.value)
+        except (TypeError, ValueError):
+            v = 0
+        if gate.op == gates.OP_MUL:
+            self.opponent_squad = min(MAX_SQUAD, max(1, self.opponent_squad * v))
+        elif gate.op == gates.OP_ADD:
+            self.opponent_squad = min(MAX_SQUAD, self.opponent_squad + v)
+        elif gate.op == gates.OP_SUB:
+            self.opponent_squad = max(0, self.opponent_squad - v)
+        elif gate.op == gates.OP_DIV:
+            self.opponent_squad = max(0, self.opponent_squad // max(1, v))
+        if self.opponent_squad <= 0:
+            self.opponent_alive = False
 
     # --- opponent squad-loss handler (versus only, host side) ------------
 
