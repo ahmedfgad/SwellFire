@@ -1137,23 +1137,42 @@ class WorldMapScreen(StyledScreen):
 
 
 class LevelNode(ButtonBehavior, Widget):
-    """Candy-Crush-style circular level node. Click handler is `on_click(index)`."""
+    """Candy-Crush-style circular level node.
 
-    NODE_RADIUS = dp(38)
-    BOSS_RADIUS = dp(50)
+    Visual stack, bottom to top:
+    1. Drop shadow (offset, blurred-looking ellipse)
+    2. Outer ring (theme accent / green for passed / red for boss / gray for locked)
+    3. Inner filled disc
+    4. Small specular highlight near the top — gives a "polished button" feel
+    5. Center number label (always visible; dimmed on locked nodes)
+    6. Star row sitting ABOVE the node when the level has been won
+
+    The "?" text for locked levels was replaced with the actual level
+    number rendered at low alpha — the player can see what's coming
+    next without losing the locked / disabled visual signal.
+    """
+
+    NODE_RADIUS = dp(40)
+    BOSS_RADIUS = dp(54)
     STAR_STRIP_HEIGHT = dp(24)
+    RING_PAD = dp(5)         # extra radius of the ring beyond the inner disc
+    SHADOW_OFFSET = dp(3)
 
     def __init__(self, *, level_index, in_world, is_boss, unlocked, stars,
-                 theme, on_click, **kwargs):
+                 theme, on_click, is_next: bool = False, **kwargs):
         radius = self.BOSS_RADIUS if is_boss else self.NODE_RADIUS
+        # Extra width to accommodate the ring + shadow that sit outside
+        # the disc; height adds the star strip on top.
+        total_size = radius * 2 + self.RING_PAD * 2 + self.SHADOW_OFFSET
         super().__init__(size_hint=(None, None),
-                         size=(radius * 2, radius * 2 + self.STAR_STRIP_HEIGHT),
+                         size=(total_size, total_size + self.STAR_STRIP_HEIGHT),
                          **kwargs)
         self.level_index = level_index
         self.in_world = in_world
         self.is_boss = is_boss
         self.unlocked = unlocked
         self.stars = stars
+        self.is_next = is_next        # next unplayed unlocked level — pulsed
         self._on_click = on_click
         self._theme = theme
         self._radius = radius
@@ -1162,33 +1181,72 @@ class LevelNode(ButtonBehavior, Widget):
         self.bind(pos=self._sync, size=self._sync)
         self._sync()
 
-    def _build_canvas(self) -> None:
+    # --- colour palette ---------------------------------------------------
+
+    def _palette(self) -> dict:
+        """Return (ring, inner, label_color, highlight_alpha) for this state."""
         accent = self._theme["accent"]
+        if not self.unlocked:
+            return {
+                "ring":      (0.42, 0.44, 0.50, 0.92),
+                "inner":     (0.22, 0.24, 0.30, 0.94),
+                "label":     (1.0, 1.0, 1.0, 0.32),
+                "highlight": 0.10,
+            }
+        if self.is_boss:
+            return {
+                "ring":      (1.00, 0.55, 0.30, 1.00),
+                "inner":     (0.62, 0.14, 0.14, 1.00),
+                "label":     (1.0, 1.0, 1.0, 1.0),
+                "highlight": 0.22,
+            }
+        if self.stars > 0:
+            # Cleared levels lean green so the player can spot what's done.
+            return {
+                "ring":      (0.40, 0.85, 0.50, 1.00),
+                "inner":     (0.18, 0.46, 0.28, 1.00),
+                "label":     (1.0, 1.0, 1.0, 1.0),
+                "highlight": 0.20,
+            }
+        # Unlocked, not yet passed.
+        return {
+            "ring":      (accent[0], accent[1], accent[2], 1.00),
+            "inner":     (0.20, 0.55, 0.92, 1.00),
+            "label":     (1.0, 1.0, 1.0, 1.0),
+            "highlight": 0.20,
+        }
+
+    def _build_canvas(self) -> None:
+        pal = self._palette()
         with self.canvas:
-            if not self.unlocked:
-                Color(0.35, 0.35, 0.42, 0.85)
-            else:
-                Color(accent[0], accent[1], accent[2], 0.95)
-            self._halo = Ellipse()
-            if not self.unlocked:
-                Color(0.18, 0.18, 0.22, 0.98)
-            elif self.is_boss:
-                Color(0.92, 0.30, 0.30, 1.0)
-            elif self.stars > 0:
-                Color(0.20, 0.62, 0.40, 1.0)
-            else:
-                Color(0.22, 0.55, 0.92, 1.0)
+            # Drop shadow.
+            self._shadow_color = Color(0, 0, 0,
+                                       0.42 if self.unlocked else 0.22)
+            self._shadow = Ellipse()
+            # "Next to play" gets a soft outer glow so the player can spot
+            # where to go next at a glance.
+            self._glow_color = Color(1.0, 0.92, 0.30,
+                                     0.55 if self.is_next else 0.0)
+            self._glow = Ellipse()
+            # Outer ring.
+            self._ring_color = Color(*pal["ring"])
+            self._ring = Ellipse()
+            # Inner filled disc.
+            self._inner_color = Color(*pal["inner"])
             self._inner = Ellipse()
+            # Specular highlight near the top of the disc.
+            self._highlight_color = Color(1.0, 1.0, 1.0, pal["highlight"])
+            self._highlight = Ellipse()
 
     def _build_children(self) -> None:
-        if self.unlocked:
-            text = str(self.in_world)
-            color = (1.0, 1.0, 1.0, 1.0)
-        else:
-            text = "?"
-            color = (1.0, 1.0, 1.0, 0.45)
-        font_size = sp(28) if self.is_boss else sp(22)
-        self._label = Label(text=text, font_size=font_size, bold=True, color=color,
+        pal = self._palette()
+        # Always render the actual level number — locked levels get a
+        # low-alpha label rather than the old anonymous "?". The player
+        # can see "this is level 7" even before unlocking it.
+        text = str(self.in_world)
+        font_size = sp(30) if self.is_boss else sp(24)
+        self._label = Label(text=text, font_size=font_size, bold=True,
+                            color=pal["label"],
                             halign="center", valign="middle")
         self.add_widget(self._label)
         self._star_row = None
@@ -1199,16 +1257,38 @@ class LevelNode(ButtonBehavior, Widget):
     def _sync(self, *_):
         x, y = self.pos
         r = self._radius
-        circle_y = y
-        self._halo.pos = (x - dp(4), circle_y - dp(4))
-        self._halo.size = (r * 2 + dp(8), r * 2 + dp(8))
-        self._inner.pos = (x, circle_y)
+        ring_pad = self.RING_PAD
+        shadow = self.SHADOW_OFFSET
+        # Inner disc is centred horizontally inside the widget's width,
+        # leaving room for the ring + shadow on all sides.
+        disc_x = x + ring_pad
+        disc_y = y + ring_pad
+        # Shadow: offset down-right of the ring.
+        self._shadow.pos = (disc_x - ring_pad + shadow,
+                            disc_y - ring_pad - shadow)
+        self._shadow.size = (r * 2 + ring_pad * 2, r * 2 + ring_pad * 2)
+        # Glow: 1.5× outside the ring.
+        glow_pad = ring_pad + dp(6)
+        self._glow.pos = (disc_x - glow_pad, disc_y - glow_pad)
+        self._glow.size = (r * 2 + glow_pad * 2, r * 2 + glow_pad * 2)
+        # Ring: the visible outer disc that frames the inner.
+        self._ring.pos = (disc_x - ring_pad, disc_y - ring_pad)
+        self._ring.size = (r * 2 + ring_pad * 2, r * 2 + ring_pad * 2)
+        # Inner: the coloured disc that holds the number.
+        self._inner.pos = (disc_x, disc_y)
         self._inner.size = (r * 2, r * 2)
-        self._label.pos = (x, circle_y)
+        # Highlight: a flat elliptical sheen near the top of the disc.
+        hi_w = r * 1.4
+        hi_h = r * 0.45
+        self._highlight.pos = (disc_x + r - hi_w / 2,
+                               disc_y + r * 1.05)
+        self._highlight.size = (hi_w, hi_h)
+        # Number label centred on the disc.
+        self._label.pos = (disc_x, disc_y)
         self._label.size = (r * 2, r * 2)
         self._label.text_size = self._label.size
         if self._star_row is not None:
-            self._star_row.pos = (x, circle_y + r * 2 + dp(2))
+            self._star_row.pos = (disc_x, disc_y + r * 2 + dp(4))
             self._star_row.size = (r * 2, self.STAR_STRIP_HEIGHT - dp(4))
 
     def on_release(self):
@@ -1277,6 +1357,16 @@ class LevelSelectScreen(StyledScreen):
         self.map_widget.canvas.before.clear()
 
         nodes_data = list(levels.levels_in_world(world))
+        # Identify the "next-to-play" node — the lowest unlocked level
+        # that hasn't been beaten yet. That's the one we want to glow so
+        # the player can spot where to head next at a glance.
+        next_index = None
+        for lvl in nodes_data:
+            idx = lvl["index"]
+            if running.state.is_unlocked(idx) and running.state.get_stars(idx) == 0:
+                next_index = idx
+                break
+
         for lvl in nodes_data:
             index = lvl["index"]
             unlocked = running.state.is_unlocked(index)
@@ -1286,6 +1376,7 @@ class LevelSelectScreen(StyledScreen):
             node = LevelNode(
                 level_index=index, in_world=in_world, is_boss=is_boss,
                 unlocked=unlocked, stars=stars, theme=theme,
+                is_next=(index == next_index),
                 on_click=lambda i: running.start_level(i),
             )
             self.map_widget.add_widget(node)
@@ -1304,7 +1395,11 @@ class LevelSelectScreen(StyledScreen):
         map_h = self.map_widget.height
         if map_w <= 1 or map_h <= 1:
             return
-        line_points = []
+        # Place each node by anchoring its disc centre (not its widget
+        # origin) onto the zigzag path. The widget origin is the bottom-
+        # left of the bounding box, so subtract ring_pad + radius to
+        # land the disc centre on (cx, cy).
+        centres: list[tuple[float, float]] = []
         for i, node in enumerate(nodes):
             x_frac = (self.NODE_LEFT_X_FRAC
                       if i % 2 == 0
@@ -1312,15 +1407,60 @@ class LevelSelectScreen(StyledScreen):
             y_frac = (i + 0.5) / n
             cx = map_w * x_frac
             cy = map_h * y_frac
-            node.x = cx - node._radius
-            node.y = cy - node._radius
-            line_points.extend([cx, cy])
+            r = node._radius
+            ring_pad = LevelNode.RING_PAD
+            node.x = cx - r - ring_pad
+            node.y = cy - r - ring_pad
+            centres.append((cx, cy))
+
+        # Build a smooth curved path through the node centres using a
+        # quadratic Bezier per segment. The control point sits at the
+        # segment midpoint, shifted perpendicular by ~18 % of the
+        # segment length and alternating in sign — this creates the
+        # gentle weaving "candy path" look instead of straight zigzag
+        # legs with sharp corners.
+        SAMPLES_PER_SEG = 18
+        path_points: list[float] = []
+        for i in range(len(centres) - 1):
+            p0x, p0y = centres[i]
+            p1x, p1y = centres[i + 1]
+            mx = (p0x + p1x) * 0.5
+            my = (p0y + p1y) * 0.5
+            dx = p1x - p0x
+            dy = p1y - p0y
+            seg_len = (dx * dx + dy * dy) ** 0.5 or 1.0
+            # Perpendicular unit vector — rotate (dx, dy) by 90°.
+            perp_x = -dy / seg_len
+            perp_y = dx / seg_len
+            offset = seg_len * 0.18 * (1 if i % 2 == 0 else -1)
+            cx_ctl = mx + perp_x * offset
+            cy_ctl = my + perp_y * offset
+            for s in range(SAMPLES_PER_SEG + 1):
+                # Skip the duplicate point at segment boundaries so we
+                # don't get a kink where two segments meet.
+                if i > 0 and s == 0:
+                    continue
+                t = s / SAMPLES_PER_SEG
+                u = 1.0 - t
+                x = u * u * p0x + 2 * u * t * cx_ctl + t * t * p1x
+                y = u * u * p0y + 2 * u * t * cy_ctl + t * t * p1y
+                path_points.extend([x, y])
+
         self.map_widget.canvas.before.clear()
         with self.map_widget.canvas.before:
-            Color(1, 1, 1, 0.15)
-            Line(points=line_points, width=10.0, joint="round", cap="round")
-            Color(1, 1, 1, 0.45)
-            Line(points=line_points, width=2.8, joint="round", cap="round")
+            # Drop shadow — wide, soft.
+            Color(0, 0, 0, 0.30)
+            Line(points=path_points, width=dp(8),
+                 joint="round", cap="round")
+            # Dirt-path base — tan, the candy-crush "trail" look.
+            Color(0.82, 0.70, 0.45, 0.78)
+            Line(points=path_points, width=dp(6),
+                 joint="round", cap="round")
+            # Centerline highlight — light cream to give the path
+            # a subtle "embossed" feel.
+            Color(1.0, 0.95, 0.78, 0.55)
+            Line(points=path_points, width=dp(2),
+                 joint="round", cap="round")
 
     def _scroll_to_highest(self) -> None:
         running = app()
