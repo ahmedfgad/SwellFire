@@ -292,6 +292,10 @@ class GameScreen(ui.StyledScreen):
         self.opponent_projectile_renderer = None
         self._mp_tick = 0
         self._last_input_norm_x = None
+        # M13 — client sends its equipped weapon to the host once after
+        # the game starts so the host can use it for opponent_weapon_id.
+        # Flag is set after the first send so we don't spam the channel.
+        self._mp_weapon_sent = False
         # 20 Hz snapshot rate (every 3 ticks at 60 fps). Bandwidth-friendly
         # and visually smooth enough — anything faster pushes JSON encoding
         # and TCP send overhead up without obvious win.
@@ -738,6 +742,7 @@ class GameScreen(ui.StyledScreen):
         self.opponent_weapon_id = DEFAULT_WEAPON_ID
         self.opponent_grenade_count = 0
         self.opponent_double_coin_until = 0.0
+        self._mp_weapon_sent = False
         self.enemy_pool = None
         self.enemy_controller = None
         self.enemy_spawner = None
@@ -1497,10 +1502,20 @@ class GameScreen(ui.StyledScreen):
         else:
             self._dist_progress = 0.0
         self._sync_dist_bar()
+        # Weapon chip — name + current tier from the shop. Boss levels
+        # override the starting weapon mid-level and the host's
+        # `current_weapon_id` mutates on a WEAPON gate; either way the
+        # tier reflects the local player's shop investment, so a
+        # mid-level weapon swap shows the same tier the player paid for.
+        running_app = ui.app()
+        tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
+                if running_app and running_app.state else 1)
+        weapon_label = "{}  Lv{}".format(weapon_name, tier)
+
         # Stat chips.
         if self.squad_chip is not None:
             self.squad_chip.set_value(str(self.squad_count))
-            self.weapon_chip.set_value(weapon_name)
+            self.weapon_chip.set_value(weapon_label)
             self.kills_chip.set_value(str(self.kills_total))
             other = self._coins_earned - self._coins_pickups
             self.coins_chip.set_value("+{}+{}".format(
@@ -1923,6 +1938,12 @@ class GameScreen(ui.StyledScreen):
                 sx = self.stage.x
                 sw = self.stage.width
                 self.opponent_target_x = sx + max(0.0, min(1.0, tx)) * sw
+            elif kind == "weapon":
+                # Client told us which weapon they equipped from their
+                # own shop. Validate against the registry before applying.
+                w = str(msg.get("weapon", ""))
+                if weapons.get(w) is not None:
+                    self.opponent_weapon_id = w
             elif kind in ("leave", "_disconnected"):
                 # Peer left — fall back to solo so the host can still finish
                 # the level. Same shape as _exit's mp_net cleanup.
@@ -2119,6 +2140,26 @@ class GameScreen(ui.StyledScreen):
             self.coins_chip.set_value("+{}+{}".format(
                 self._coins_pickups, other,
             ))
+            # Weapon chip on the client: shows the *client's* own
+            # equipped weapon + tier. Host's stat is mirrored only for
+            # squad / kills / coins; the weapon a player uses is local
+            # info, not part of the snapshot.
+            weapon_name = weapons.get(self.current_weapon_id).name
+            running_app = ui.app()
+            tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
+                    if running_app and running_app.state else 1)
+            self.weapon_chip.set_value("{}  Lv{}".format(weapon_name, tier))
+
+        # First-tick handshake: tell the host which weapon the client
+        # equipped from their own shop. Host uses it as the opponent's
+        # starting weapon (without this, opponent always defaults to
+        # "pistol" no matter what the client picked).
+        if not self._mp_weapon_sent:
+            running.mp_net.send({
+                "t": "weapon",
+                "weapon": self.current_weapon_id,
+            })
+            self._mp_weapon_sent = True
 
         # Forward local input to the host. Throttle to once per tick max
         # and only on meaningful change — keeps the channel quiet.
