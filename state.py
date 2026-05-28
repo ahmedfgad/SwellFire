@@ -26,13 +26,20 @@ DEFAULT_SETTINGS = {
     "mp_last_ip": "",         # the host address the joiner typed last time
 }
 
-# Starting weapon — pistol unlocked at boot, the rest gated behind gates/shop.
+# Starting weapon — pistol unlocked at boot, the rest gated behind shop
+# purchases. `weapon_unlocks` records what the player owns; the highest
+# weapon they've purchased is automatically the new default starting
+# weapon (see `state.starting_weapon`).
 DEFAULT_WEAPON_UNLOCKS = {
     "pistol": True,
     "rifle": False,
     "shotgun": False,
     "sniper": False,
 }
+
+# Order of weapons from worst → best. Used by `starting_weapon` to pick
+# the highest-tier unlocked weapon as the default.
+WEAPON_TIERS = ["pistol", "rifle", "shotgun", "sniper"]
 
 SAVE_NAME = "gaterunner_save.json"
 
@@ -57,6 +64,9 @@ class GameState:
             "grenade_balance": 0,
             "shield_balance": 0,
             "weapon_unlocks": dict(DEFAULT_WEAPON_UNLOCKS),
+            # Permanent shop upgrade — +N to every non-boss level's starting
+            # squad. Capped at +6 by `set_squad_bonus`.
+            "squad_bonus": 0,
             "settings": dict(DEFAULT_SETTINGS),
         }
 
@@ -169,6 +179,66 @@ class GameState:
         if not self.is_weapon_unlocked(weapon_id):
             self.data["weapon_unlocks"][weapon_id] = True
             self.save()
+
+    @property
+    def starting_weapon(self) -> str:
+        """The highest-tier weapon the player owns — used as the default
+        starting weapon for non-boss levels.
+
+        Boss levels override with their own `starting_weapon` field.
+        """
+        for tier in reversed(WEAPON_TIERS):
+            if self.is_weapon_unlocked(tier):
+                return tier
+        return "pistol"
+
+    @property
+    def squad_bonus(self) -> int:
+        return int(self.data.get("squad_bonus", 0))
+
+    def set_squad_bonus(self, n: int) -> None:
+        self.data["squad_bonus"] = max(0, min(6, int(n)))
+        self.save()
+
+    # --- shop API --------------------------------------------------------
+    #
+    # The shop UI calls these. Each returns True if the purchase succeeded
+    # (caller used them to gate the button). Coins are deducted atomically;
+    # if the resulting state is rejected the deduction is rolled back.
+
+    def can_afford(self, price: int) -> bool:
+        return self.coins_balance >= int(price)
+
+    def spend_coins(self, price: int) -> bool:
+        price = int(price)
+        if not self.can_afford(price):
+            return False
+        self.data["coins_balance"] -= price
+        self.save()
+        return True
+
+    def purchase_weapon(self, weapon_id: str, price: int) -> bool:
+        if self.is_weapon_unlocked(weapon_id):
+            return False
+        if not self.spend_coins(price):
+            return False
+        self.data["weapon_unlocks"][weapon_id] = True
+        self.save()
+        return True
+
+    def purchase_booster(self, booster_id: str, qty: int, price: int) -> bool:
+        if not self.spend_coins(price):
+            return False
+        self.add_booster(booster_id, int(qty))
+        return True
+
+    def purchase_squad_bonus(self, target: int, price: int) -> bool:
+        if self.squad_bonus >= target:
+            return False
+        if not self.spend_coins(price):
+            return False
+        self.set_squad_bonus(target)
+        return True
 
     # settings
     def get_setting(self, key):

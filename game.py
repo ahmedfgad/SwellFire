@@ -68,6 +68,18 @@ ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad
 MAX_GRENADES = 9                    # in-run cap; HUD shows current count
 GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within this
                                     # (sized to cover the full stage in front of the hero)
+# Coin rewards per archetype kill — tank kills are worth more (high-effort).
+# Grunt / swarmer = 1, bomber / splitter = 2, tank = 3.
+COIN_REWARD_BY_TYPE = {
+    entities.TYPE_GRUNT:    1,
+    entities.TYPE_SWARMER:  1,
+    entities.TYPE_BOMBER:   2,
+    entities.TYPE_SPLITTER: 2,
+    entities.TYPE_TANK:     3,
+}
+# Bonus coins paid at level end.
+COIN_BONUS_LEVEL_COMPLETE = 50
+COIN_BONUS_PER_STAR = 30
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -341,6 +353,10 @@ class GameScreen(ui.StyledScreen):
             self.shield_count = 0
         self.shield_active_until = 0.0
         self._run_time = 0.0
+        # Coins earned during the run (per-kill + gate-pickup). Persisted
+        # to state.coins_balance in _end_level so a partial run still pays
+        # the player for whatever they killed before dying.
+        self._coins_earned = 0
         if self.squad_controller is not None:
             self.squad_controller.sync_to_count(0)   # hero alone at level start
         if self.gate_controller is not None:
@@ -487,8 +503,18 @@ class GameScreen(ui.StyledScreen):
         else:
             # Non-boss levels also get a (smaller) starting squad now —
             # `levels.starting_squad` scales 1→6 across W1→W6 so the player
-            # can survive the intro before reaching the first gate.
-            self.squad_count = max(1, int(cfg.get("starting_squad", 1)))
+            # can survive the intro before reaching the first gate. Plus
+            # the persistent shop bonus (state.squad_bonus) so a player
+            # who invested coins gets a tangible boost.
+            base = int(cfg.get("starting_squad", 1))
+            running_app = ui.app()
+            bonus = running_app.state.squad_bonus if (running_app and running_app.state) else 0
+            self.squad_count = max(1, base + bonus)
+            # Starting weapon: use the player's highest-tier purchased weapon
+            # (state.starting_weapon — "pistol" by default). The shop
+            # upgrades this for every non-boss level once bought.
+            if running_app and running_app.state:
+                self.current_weapon_id = running_app.state.starting_weapon
 
     def _spawn_boss(self, cfg: dict) -> None:
         if self._atlas is None or self.stage is None:
@@ -843,6 +869,11 @@ class GameScreen(ui.StyledScreen):
             def _on_kill(hit_x, hit_y, enemy_type, _self=self):
                 _self._spawn_death_polish(hit_x, hit_y)
                 _self._add_shake(0.35)
+                # Coin reward per kill, varies by archetype:
+                #   grunt / swarmer = 1, bomber / splitter = 2, tank = 3.
+                # Persisted at level end (we accumulate in self._coins_earned
+                # so a missed save isn't lossy).
+                _self._coins_earned += COIN_REWARD_BY_TYPE.get(enemy_type, 1)
                 if enemy_type == entities.TYPE_BOMBER:
                     _self._bomber_explode(hit_x, hit_y)
                 elif enemy_type == entities.TYPE_SPLITTER:
@@ -1004,9 +1035,10 @@ class GameScreen(ui.StyledScreen):
         """Apply a passed gate's effect: mutate squad_count or swap weapon."""
         if self._level_ended:
             return
-        # Player picked a gate → reset the pity-counter.
+        # Player picked a gate → reset the pity-counter, earn small coin reward.
         if self.gate_spawner is not None:
             self.gate_spawner.consecutive_misses = 0
+        self._coins_earned += 3
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
@@ -1057,10 +1089,16 @@ class GameScreen(ui.StyledScreen):
         level_cfg = self.level_config or levels.get_level(level_index) or levels.get_level(1)
         stars = levels.stars_for(level_cfg, won, final_squad)
 
+        # End-of-level coin bonus: 50 for completing + 30 per star.
+        if won:
+            self._coins_earned += COIN_BONUS_LEVEL_COMPLETE + COIN_BONUS_PER_STAR * stars
+
         # Persist for single-player levels. Multiplayer never touches the save.
         if running.current_mode == "single" and level_index:
             running.state.record_result(level_index, score, stars,
                                         distance=int(self.distance))
+            if self._coins_earned > 0:
+                running.state.add_coins(self._coins_earned)
             # Persist leftover booster balances. No more free-grenade baseline
             # — anything the player has at level end is what they earned or
             # carried into the level.

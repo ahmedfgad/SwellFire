@@ -214,10 +214,14 @@ def build_levels() -> dict[int, dict[str, Any]]:
             is_boss = (in_world == LEVELS_PER_WORLD)
             # Boss HP is high enough that a passive squad of `starting_squad`
             # cannot grind it down before the boss's volleys overwhelm the
-            # squad. Sim-tuned in the difficulty regression script.
-            boss_hp = int(round(_lerp(350.0, 1100.0, t))) if is_boss else 0
+            # squad. Sim-tuned in the difficulty regression script — the
+            # 450 floor was raised from 350 because W3L10 passive was
+            # winning in 30 s without picking a single gate.
+            boss_hp = int(round(_lerp(450.0, 1200.0, t))) if is_boss else 0
             if is_boss:
-                starting_squad = int(round(_lerp(3.0, 12.0, world / NUM_WORLDS)))
+                # Lowered the top end from 3..12 to 2.5..11 so W3-W5 bosses
+                # don't auto-pass passive on starting squad alone.
+                starting_squad = int(round(_lerp(2.5, 11.0, world / NUM_WORLDS)))
             else:
                 # Non-boss starting squad scales with world: W1=1, W2=2, W3=3,
                 # W4=4, W5=5, W6=6. Sub-linear fire cap (22) makes this

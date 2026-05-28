@@ -30,6 +30,7 @@ from kivy.properties import ListProperty, NumericProperty
 import graphics
 import levels
 import net
+import shop
 
 
 ABOUT_TEXT = (
@@ -347,6 +348,8 @@ class MenuScreen(StyledScreen):
 
         play = StyledButton(text="Play", bg=[0.2, 0.7, 0.4, 1],
                             size_hint_y=None, height=BTN_HEIGHT)
+        shop_btn = StyledButton(text="Shop", bg=[1.0, 0.65, 0.20, 1],
+                                size_hint_y=None, height=BTN_HEIGHT)
         multiplayer = StyledButton(text="Multiplayer", bg=[0.55, 0.4, 0.8, 1],
                                    size_hint_y=None, height=BTN_HEIGHT)
         how = StyledButton(text="How to play", bg=[0.9, 0.6, 0.2, 1],
@@ -359,13 +362,14 @@ class MenuScreen(StyledScreen):
                                 size_hint_y=None, height=BTN_HEIGHT)
 
         play.bind(on_release=lambda *_: app().go("worldmap"))
+        shop_btn.bind(on_release=lambda *_: app().go("shop"))
         multiplayer.bind(on_release=lambda *_: app().go("multiplayer"))
         how.bind(on_release=lambda *_: app().go("tutorial"))
         guide.bind(on_release=lambda *_: app().go("guide"))
         about.bind(on_release=lambda *_: app().go("about"))
         settings.bind(on_release=lambda *_: app().go("settings"))
 
-        for btn in (play, multiplayer, how, guide, about, settings):
+        for btn in (play, shop_btn, multiplayer, how, guide, about, settings):
             box.add_widget(btn)
 
         self.stars = Label(text="", font_size=sp(16), color=[1, 1, 1, 0.85],
@@ -378,9 +382,157 @@ class MenuScreen(StyledScreen):
         running.audio.play_menu_music()
         self.stars.text = "Stars collected: {}    Coins: {}".format(
             running.state.total_stars(), running.state.coins_balance)
+        if hasattr(self, "_refresh_play_label"):
+            self._refresh_play_label()
         # First-launch auto-tutorial — same one-shot flag CoinTex uses.
         if not running.state.get_setting("tutorial_seen"):
             Clock.schedule_once(lambda dt: running.go("tutorial"), 0)
+
+
+class ShopScreen(StyledScreen):
+    """Coins-for-upgrades shop. Read-only catalog from `shop.CATALOG`;
+    purchase actions live on `state.GameState`. Re-rendered on every
+    enter so prices reflect the current coins balance."""
+
+    theme_world = 6
+
+    def build(self):
+        scroll, self._box = _scroll_panel(size_hint=(0.92, 0.94),
+                                          padding=dp(18), spacing=dp(10))
+        # Header
+        header = BoxLayout(orientation="vertical",
+                          size_hint_y=None, height=dp(78))
+        header.add_widget(Label(
+            text="Shop", font_size=sp(28), bold=True, color=(1, 0.85, 0.2, 1),
+            size_hint_y=None, height=dp(40),
+        ))
+        self.balance_label = Label(
+            text="Coins: 0", font_size=sp(18), bold=True,
+            color=(1.0, 0.92, 0.40, 1.0),
+            size_hint_y=None, height=dp(34),
+        )
+        header.add_widget(self.balance_label)
+        self._box.add_widget(header)
+        # Sections — populated on enter so price-affordability is fresh.
+        self._section_holders = {}
+        for cat in shop.CATEGORY_ORDER:
+            section = BoxLayout(orientation="vertical", spacing=dp(6),
+                                size_hint_y=None)
+            section.bind(minimum_height=section.setter("height"))
+            section_label = Label(
+                text=shop.CATEGORY_LABELS.get(cat, cat),
+                font_size=sp(20), bold=True, color=(1, 1, 1, 0.92),
+                halign="left", valign="middle",
+                size_hint_y=None, height=dp(40),
+            )
+            section_label.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+            section.add_widget(section_label)
+            self._box.add_widget(section)
+            self._section_holders[cat] = section
+        # Back button at the bottom.
+        back = StyledButton(text="Back", bg=[0.45, 0.45, 0.5, 1],
+                            size_hint_y=None, height=BTN_HEIGHT)
+        back.bind(on_release=lambda *_: app().go("menu"))
+        self._box.add_widget(back)
+        self.root_layout.add_widget(scroll)
+
+    def on_enter(self):
+        app().audio.play_menu_music()
+        self._render()
+
+    def _render(self):
+        running = app()
+        state = running.state
+        self.balance_label.text = "Coins: {}".format(state.coins_balance)
+        # Clear previous items in each section, leaving the section label.
+        for cat in shop.CATEGORY_ORDER:
+            section = self._section_holders[cat]
+            # Keep only the section header (index 0).
+            while len(section.children) > 1:
+                section.remove_widget(section.children[0])
+            for item in shop.category_items(cat):
+                section.add_widget(self._make_item_widget(item, state))
+
+    def _make_item_widget(self, item: shop.ShopItem, state) -> "BoxLayout":
+        # One row per shop item: title + price on top, description + button on bottom.
+        row = BoxLayout(orientation="vertical", spacing=dp(2),
+                        size_hint_y=None, height=dp(108),
+                        padding=(dp(4), dp(6)))
+        with row.canvas.before:
+            Color(0.10, 0.12, 0.18, 0.85)
+            bg_rect = RoundedRectangle(radius=[dp(10)])
+        row.bind(pos=lambda *a, _r=bg_rect, _rw=row: setattr(_r, "pos", _rw.pos),
+                 size=lambda *a, _r=bg_rect, _rw=row: setattr(_r, "size", _rw.size))
+
+        top = BoxLayout(orientation="horizontal", size_hint_y=None,
+                        height=dp(34))
+        top.add_widget(Label(
+            text=item.label, font_size=sp(17), bold=True, color=(1, 1, 1, 1),
+            halign="left", valign="middle", size_hint_x=0.7,
+        ))
+        # Right-aligned price.
+        owned = shop.is_owned(item, state)
+        price_label = Label(
+            text=("OWNED" if owned else "{} c".format(item.price)),
+            font_size=sp(17), bold=True,
+            color=((0.55, 0.95, 0.55, 1) if owned else (1.0, 0.92, 0.40, 1.0)),
+            halign="right", valign="middle", size_hint_x=0.3,
+        )
+        price_label.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        top.add_widget(price_label)
+        # Let labels respect the text_size for halign.
+        top.children[-1].text_size = (top.children[-1].width, None)
+        for lbl in (top.children[-1], top.children[0]):
+            lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        row.add_widget(top)
+
+        bottom = BoxLayout(orientation="horizontal", spacing=dp(6),
+                           size_hint_y=None, height=dp(64))
+        desc = Label(
+            text=item.description, font_size=sp(13), color=(1, 1, 1, 0.85),
+            halign="left", valign="top", size_hint_x=0.70,
+        )
+        desc.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        bottom.add_widget(desc)
+
+        can_buy = (not owned) and state.can_afford(item.price)
+        # Squad bonuses must be bought in order (1 → 2 → 3).
+        if item.category == "squad" and not owned:
+            if state.squad_bonus < item.squad_target - 1:
+                can_buy = False
+        buy_label = (
+            "Buy" if can_buy
+            else ("OK" if owned else "Locked")
+        )
+        buy_bg = (
+            [0.20, 0.70, 0.40, 1] if can_buy
+            else [0.40, 0.40, 0.45, 1]
+        )
+        buy = StyledButton(text=buy_label, bg=buy_bg, font_size=sp(15),
+                           size_hint_x=0.30)
+        buy.disabled = not can_buy
+        buy.bind(on_release=lambda *_, _it=item: self._buy(_it))
+        bottom.add_widget(buy)
+        row.add_widget(bottom)
+        return row
+
+    def _buy(self, item: shop.ShopItem) -> None:
+        state = app().state
+        success = False
+        if item.category == "weapon":
+            wid = item.id.split("_", 1)[1]
+            success = state.purchase_weapon(wid, item.price)
+        elif item.category == "booster":
+            success = state.purchase_booster(
+                item.booster_id, item.booster_qty, item.price,
+            )
+        elif item.category == "squad":
+            success = state.purchase_squad_bonus(item.squad_target, item.price)
+        if success:
+            app().audio.play_sfx("gate_pickup")
+        else:
+            app().audio.play_sfx("hit")
+        self._render()
 
 
 class WorldMapScreen(StyledScreen):

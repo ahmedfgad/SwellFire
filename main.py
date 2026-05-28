@@ -69,6 +69,7 @@ class GateRunnerApp(App):
         self.sm.add_widget(ui.MultiplayerMenuScreen(name="multiplayer"))
         self.sm.add_widget(ui.HostScreen(name="mphost"))
         self.sm.add_widget(ui.JoinScreen(name="mpjoin"))
+        self.sm.add_widget(ui.ShopScreen(name="shop"))
         self.sm.add_widget(game.GameScreen(name="game"))
         self.sm.add_widget(stresstest.StressTestScreen(name="stresstest"))
         return self.sm
