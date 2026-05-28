@@ -29,6 +29,7 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import entities
+import gates
 import graphics
 import levels
 import ui
@@ -52,6 +53,7 @@ GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 HERO_FRAME_NAME = "runner_blue"
 DEFAULT_WEAPON_ID = "pistol"
+MAX_SQUAD = 100                     # cap for M7 squad_count; M8 renders up to this
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -110,6 +112,11 @@ class GameScreen(ui.StyledScreen):
         self._fire_cooldown = 0.0
         self._fire_rng = random.Random()
         self.kills_total = 0
+        # Gates + squad (M7).
+        self.gate_layer: Widget | None = None
+        self.gate_controller: gates.GateController | None = None
+        self.gate_spawner: gates.GateSpawner | None = None
+        self.squad_count = 1
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
@@ -240,6 +247,13 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.particle_renderer)
 
+        # Gate layer lives under the hero so the hero appears "passing through".
+        if self.gate_layer is None:
+            self.gate_layer = Widget(size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
+            self.stage.add_widget(self.gate_layer)
+            self.gate_controller = gates.GateController(self.gate_layer)
+            self.gate_spawner = gates.GateSpawner(self.gate_controller)
+
         if self.hero is None:
             self.hero = graphics.AtlasSprite(
                 self._atlas, HERO_FRAME_NAME,
@@ -252,10 +266,17 @@ class GameScreen(ui.StyledScreen):
             self._key_handler = self._on_key
             Window.bind(on_key_down=self._key_handler)
 
-        # Reset shooting state.
+        # Reset shooting + squad state.
         self.current_weapon_id = DEFAULT_WEAPON_ID
         self._fire_cooldown = 0.0
         self.kills_total = 0
+        self.squad_count = 1
+        if self.gate_controller is not None:
+            self.gate_controller.clear()
+        if self.gate_spawner is not None:
+            # Reset the spawner so a fresh level starts past its first interval.
+            self.gate_spawner._next_distance = 400.0  # noqa: SLF001 — first-spawn distance
+        self.lane_centers = []
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -272,6 +293,10 @@ class GameScreen(ui.StyledScreen):
                          self.particle_renderer):
             if renderer is not None and renderer.parent:
                 renderer.parent.remove_widget(renderer)
+        if self.gate_controller is not None:
+            self.gate_controller.clear()
+        if self.gate_layer is not None and self.gate_layer.parent:
+            self.gate_layer.parent.remove_widget(self.gate_layer)
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
         self.enemy_pool = None
@@ -284,6 +309,10 @@ class GameScreen(ui.StyledScreen):
         self.particle_pool = None
         self.particle_controller = None
         self.particle_renderer = None
+        self.gate_layer = None
+        self.gate_controller = None
+        self.gate_spawner = None
+        self.lane_centers = []
         self.hero = None
         self._dragging = False
 
@@ -348,6 +377,22 @@ class GameScreen(ui.StyledScreen):
             self.enemy_controller.update(dt, self.hero.center_x,
                                          x_min, y_min, x_max, y_max)
 
+        # 3b. Gates: spawner emits a new pair when distance passes the next
+        # interval; controller scrolls all gates + checks pass-through.
+        if (self.gate_controller is not None
+                and self.gate_spawner is not None
+                and self.hero is not None):
+            self.gate_spawner.tick(self.distance, x_min, x_max, y_max)
+            self.gate_controller.update(
+                dt, SCROLL_SPEED_PX_PER_SEC,
+                self.hero.center_x, self.hero.center_y,
+                self._on_apply_gate,
+            )
+            # Lane gravity follows the active pair's gates.
+            self.lane_centers = self.gate_controller.active_lane_centers(
+                self.hero.center_y,
+            )
+
         # 4. Auto-fire: cooldown → fire_weapon → projectile update → collision → particles.
         if (self.hero is not None
                 and self.projectile_controller is not None
@@ -394,18 +439,44 @@ class GameScreen(ui.StyledScreen):
         hero_cx = self.hero.center_x if self.hero is not None else 0.0
         enemy_count = self.enemy_pool.active_count if self.enemy_pool is not None else 0
         weapon_name = weapons.get(self.current_weapon_id).name
-        self.hud_label.text = ("Distance {:5.0f} m     Hero X {:.0f}     "
+        self.hud_label.text = ("Distance {:5.0f} m     Squad {}     "
                                "Weapon: {}     Kills {}").format(
-            self.distance, hero_cx, weapon_name, self.kills_total,
+            self.distance, self.squad_count, weapon_name, self.kills_total,
         )
-        spawned = self.enemy_controller.spawned_total if self.enemy_controller else 0
+        gates_passed = self.gate_controller.applied_total if self.gate_controller else 0
+        gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
         proj_active = self.projectile_pool.active_count if self.projectile_pool else 0
         part_active = self.particle_pool.active_count if self.particle_pool else 0
         self.debug.report_counts(
             dist=int(self.distance),
-            enemies=enemy_count, spawned=spawned, kills=self.kills_total,
+            enemies=enemy_count, kills=self.kills_total,
+            gates=gates_passed, missed=gates_missed,
             projectiles=proj_active, particles=part_active,
         )
+
+    # --- gate effect application -----------------------------------------
+
+    def _on_apply_gate(self, gate) -> None:
+        """Apply a passed gate's effect: mutate squad_count or swap weapon."""
+        if gate.op == gates.OP_MUL:
+            self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
+        elif gate.op == gates.OP_ADD:
+            self.squad_count = min(MAX_SQUAD, self.squad_count + int(gate.value))
+        elif gate.op == gates.OP_SUB:
+            self.squad_count = max(1, self.squad_count - int(gate.value))
+        elif gate.op == gates.OP_WEAPON:
+            if gate.value in weapons.WEAPONS:
+                self.current_weapon_id = gate.value
+                self._fire_cooldown = 0.0
+        # Audio + particle burst at the hero so the pickup reads.
+        running = ui.app()
+        running.audio.play_sfx("gate_pickup")
+        if self.particle_controller is not None and self.hero is not None:
+            self.particle_controller.burst(
+                self.hero.center_x, self.hero.center_y + HERO_H * 0.3,
+                count=10, speed=260.0, ttl=0.45, size=12.0,
+                frame="particle", rng=self._fire_rng,
+            )
 
     # --- weapon switching keyboard ---------------------------------------
 
