@@ -1,0 +1,4 @@
+# Packages for the autoplay genetic algorithm research variant under PlayerGA/.
+-r requirements.txt
+pygad
+numpy

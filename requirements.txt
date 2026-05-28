@@ -1,0 +1,7 @@
+# Kivy is the only package needed to run the game.
+# Version 2.3 or later works with Python 3.12. The [base] extra installs the
+# SDL2 packages so audio plays on the desktop. Pillow is used by the asset
+# pipeline tools/ (atlas packing, AI sprite generation pre/post processing)
+# and is pulled in transitively by Kivy on most platforms anyway.
+kivy[base]>=2.3.0
+pillow>=10.0.0

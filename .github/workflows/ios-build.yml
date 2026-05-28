@@ -1,0 +1,188 @@
+# Builds the GateRunner iOS app on a macOS runner with kivy-ios.
+#
+# iOS apps can only be built on macOS, so this uses a GitHub macOS runner.
+# For a public repository these runners are free.
+#
+# What it produces (download from the run's Artifacts section):
+#   1. GateRunner-unsigned-ipa   an unsigned app file for sideloading with AltStore
+#                                or Sideloadly. Those tools sign it with your own
+#                                Apple ID. See IOS_INSTALL.md.
+#   2. GateRunner-xcode-project  the Xcode project. Open it on a Mac to set your
+#                                team, Archive, and upload to the App Store.
+#
+# The app is not signed here, so the build needs no Apple account and no secrets.
+# Signing is done later, either by the sideload tools or in Xcode. A paid Apple
+# Developer account is only needed for the App Store, not for this build.
+#
+# Run it from the Actions tab with "Run workflow", or by pushing a tag like v1.0.
+
+name: Build iOS app
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools with Homebrew
+        run: brew install autoconf automake libtool pkg-config
+
+      - name: Install kivy-ios
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install kivy-ios cython
+
+      # The toolchain build (python3 and kivy) is the long step. Caching the
+      # build and dist folders makes later runs much faster. To force a clean
+      # build, change the key suffix (v1 to v2) or delete the cache from the
+      # Actions cache list.
+      - name: Cache the kivy-ios toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            dist
+          key: ${{ runner.os }}-kivyios-v1
+
+      - name: Build the iOS toolchain (python3 and kivy)
+        run: toolchain build python3 kivy
+
+      # Copy only the files the app needs at run time into a clean folder. This
+      # keeps the dev environment, build outputs and any secrets out of the app.
+      - name: Stage the app files
+        run: |
+          mkdir -p ios_app/assets
+          cp ./*.py ios_app/
+          # Mirror the runtime asset tree (atlases/music/sfx/ui). Use rsync so
+          # we don't fail if a subfolder is empty during early development.
+          rsync -a --exclude='raw/' assets/ ios_app/assets/ 2>/dev/null || true
+          echo "Staged files:"
+          ls -R ios_app
+
+      - name: Create the Xcode project
+        run: toolchain create GateRunner ios_app
+
+      # kivy-ios's template puts the Kivy logo in icon.png and ships an empty
+      # AppIcon.appiconset, so the home-screen icon and launch screen both
+      # default to the Kivy logo. Replace them with the GateRunner artwork.
+      - name: Apply the GateRunner icon and presplash
+        run: |
+          PROJ_DIR=$(ls -d *-ios | head -1)
+          tools/ios_apply_assets.sh "$PROJ_DIR" icon.png presplash.png
+
+      # kivy-ios may write the folder name in lower case, so find it instead of
+      # guessing. Save the names for the next steps.
+      - name: Find the Xcode project
+        run: |
+          PROJ_DIR=$(ls -d *-ios | head -1)
+          XCODEPROJ=$(find "$PROJ_DIR" -maxdepth 1 -name '*.xcodeproj' | head -1)
+          SCHEME=$(basename "$XCODEPROJ" .xcodeproj)
+          echo "PROJ_DIR=$PROJ_DIR" >> "$GITHUB_ENV"
+          echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          echo "Found $XCODEPROJ with scheme $SCHEME"
+          xcodebuild -list -project "$XCODEPROJ" || true
+
+      # kivy-ios writes its own default name, bundle id and version into the app
+      # Info.plist, and allows every orientation. Set the GateRunner values here
+      # so the built app matches the Android app and stays landscape only.
+      - name: Set the app metadata
+        run: |
+          PLIST=$(find "$PROJ_DIR" -name "${SCHEME}-Info.plist" | head -1)
+          if [ -z "$PLIST" ]; then PLIST=$(find "$PROJ_DIR" -name "*-Info.plist" | head -1); fi
+          echo "Editing $PLIST"
+          PB=/usr/libexec/PlistBuddy
+          $PB -c "Set :CFBundleIdentifier com.ahmedgad.gaterunner" "$PLIST"
+          $PB -c "Set :CFBundleDisplayName GateRunner" "$PLIST" || $PB -c "Add :CFBundleDisplayName string GateRunner" "$PLIST"
+          $PB -c "Set :CFBundleName GateRunner" "$PLIST" || true
+          $PB -c "Set :CFBundleShortVersionString 1.0" "$PLIST" || $PB -c "Add :CFBundleShortVersionString string 1.0" "$PLIST"
+          $PB -c "Set :CFBundleVersion 10000" "$PLIST" || $PB -c "Add :CFBundleVersion string 10000" "$PLIST"
+          # The 2-player feature talks to a nearby device over the local network.
+          $PB -c "Add :NSLocalNetworkUsageDescription string 'GateRunner uses the local network to play with a nearby device.'" "$PLIST" || true
+          $PB -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          $PB -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          $PB -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          $PB -c "Add :UISupportedInterfaceOrientations: string UIInterfaceOrientationLandscapeLeft" "$PLIST"
+          $PB -c "Add :UISupportedInterfaceOrientations: string UIInterfaceOrientationLandscapeRight" "$PLIST"
+          echo "--- updated values ---"
+          $PB -c "Print :CFBundleIdentifier" "$PLIST"
+          $PB -c "Print :CFBundleShortVersionString" "$PLIST"
+          $PB -c "Print :CFBundleVersion" "$PLIST"
+          $PB -c "Print :UISupportedInterfaceOrientations" "$PLIST"
+
+      # Build for a real device without signing. Signing is left to Xcode or the
+      # sideload tools, which sign with the user's own Apple ID.
+      - name: Build the app (unsigned)
+        run: |
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build_dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      # Wrap the built .app in a Payload folder and zip it as an .ipa. This is
+      # the layout AltStore and Sideloadly expect. The -y flag keeps symlinks
+      # inside the app intact.
+      - name: Package the unsigned .ipa
+        run: |
+          APP=$(find build_dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "Packaging $APP"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -r -y GateRunner-unsigned.ipa Payload >/dev/null
+          ls -lh GateRunner-unsigned.ipa
+
+      - name: Zip the Xcode project
+        run: zip -r -y GateRunner-xcode-project.zip "$PROJ_DIR" >/dev/null
+
+      - name: Upload the unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: GateRunner-unsigned-ipa
+          path: GateRunner-unsigned.ipa
+          retention-days: 30
+
+      - name: Upload the Xcode project
+        uses: actions/upload-artifact@v4
+        with:
+          name: GateRunner-xcode-project
+          path: GateRunner-xcode-project.zip
+          retention-days: 30
+
+      - name: Write a run summary
+        run: |
+          {
+            echo "## GateRunner iOS build"
+            echo ""
+            echo "Two files are ready in the Artifacts section of this run."
+            echo ""
+            echo "- GateRunner-unsigned-ipa: an unsigned app file. Install it on an iPhone with AltStore or Sideloadly, which sign it with your own Apple ID. See IOS_INSTALL.md."
+            echo "- GateRunner-xcode-project: the Xcode project. Open it on a Mac to set your team, Archive, and upload to the App Store."
+            echo ""
+            echo "The app was not signed here, so no Apple account or secrets were needed."
+          } >> "$GITHUB_STEP_SUMMARY"

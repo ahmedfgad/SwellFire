@@ -31,6 +31,8 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# buildozer.spec is checked in (Android build config), unignore it.
+!buildozer.spec
 
 # Installer logs
 pip-log.txt
@@ -216,3 +218,33 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- GateRunner additions ---
+
+# Buildozer / python-for-android
+.buildozer/
+bin/
+*.apk
+*.aab
+
+# kivy-ios
+.ios-venv/
+GateRunner-ios/
+
+# Signing files, keep these private
+*.keystore
+*.jks
+*.pem
+*.p12
+keystore-backup-note.txt
+
+# Local save file written by state.py (per-user progress)
+gaterunner_save.json
+gaterunner_save.json.tmp
+
+# Asset pipeline raw inputs (generated outputs under assets/atlases/ etc. are tracked)
+assets/raw/
+
+# OS and editor files
+.DS_Store
+*.swp
