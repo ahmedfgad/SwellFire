@@ -127,7 +127,8 @@ class EnemyController:
         return idx
 
     def update(self, dt: float, hero_cx: float,
-               x_min: float, y_min: float, x_max: float, y_max: float) -> None:
+               x_min: float, y_min: float, x_max: float, y_max: float,
+               on_escape=None) -> None:
         """One per-frame step: lateral home toward hero, descend, recycle.
 
         The chase step is a simple proportional controller, clamped to each
@@ -135,6 +136,14 @@ class EnemyController:
         the spawner) is what makes a wave feel like a wave rather than a
         synchronized grid — some enemies veer toward the hero, others
         plod straight down.
+
+        ``on_escape(cx, cy)`` (optional) fires for any enemy that drops
+        below the play area without being killed — i.e. it slipped past
+        the squad on a lateral path that ``resolve_squad_attrition``
+        doesn't cover (because that check only sees enemies inside
+        the front-line zone). The caller charges one squad member per
+        escape so the player can't just dodge sideways and let everything
+        sail by for free.
         """
         pool = self.pool
         active = pool.active
@@ -175,8 +184,13 @@ class EnemyController:
             elif cx[i] + hw[i] > x_max:
                 cx[i] = x_max - hw[i]
 
-            # Off-screen at bottom → free the slot.
+            # Off-screen at bottom → enemy escaped past the squad.
+            # Fire the callback *before* releasing so the caller still
+            # has the enemy's last known position for the squad-loss
+            # particle burst.
             if cy[i] < despawn_y:
+                if on_escape is not None:
+                    on_escape(cx[i], cy[i])
                 state[i] = STATE_DEAD
                 pool.release(i)
                 self.recycled_total += 1

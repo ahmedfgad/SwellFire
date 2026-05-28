@@ -1089,8 +1089,14 @@ class GameScreen(ui.StyledScreen):
                 and self.enemy_spawner is not None
                 and self.hero is not None):
             self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
-            self.enemy_controller.update(dt, self.hero.center_x,
-                                         x_min, y_min, x_max, y_max)
+            # `on_escape` charges the same one-runner cost when an
+            # enemy slips off the bottom on a path that
+            # `resolve_squad_attrition` doesn't cover.
+            self.enemy_controller.update(
+                dt, self.hero.center_x,
+                x_min, y_min, x_max, y_max,
+                on_escape=self._on_squad_loss,
+            )
 
         # 3a. Pickups: spawner drops coin / double-coin items; controller
         # scrolls them with the world. Hero auto-collects on overlap.
@@ -1262,51 +1268,12 @@ class GameScreen(ui.StyledScreen):
 
             # Squad attrition: enemies that pierce the squad's front line cost one runner each.
             # When squad_count hits 0 the hero falls and the level fails.
-            def _on_loss(hit_x, hit_y, _self=self, _rng=self._fire_rng):
-                if _self._level_ended or _self.squad_count <= 0:
-                    return
-                # Shield blocks attrition. The enemy is still killed (it
-                # bounced off the shield) — feels like deflection, not a freebie.
-                if _self.shield_active_until > _self._run_time:
-                    if _self.particle_controller is not None:
-                        _self.particle_controller.burst(
-                            hit_x, hit_y, count=8, speed=300.0, ttl=0.30,
-                            size=12.0, frame="particle", rng=_rng,
-                        )
-                    _self._add_shake(0.6)
-                    return
-                _self.squad_count -= 1
-                _self.attrition_total += 1
-                if _self.particle_controller is not None:
-                    # Yellow sparks (impact).
-                    _self.particle_controller.burst(
-                        hit_x, hit_y, count=6, speed=240.0, ttl=0.4,
-                        size=10.0, frame="particle", rng=_rng,
-                    )
-                    # Red splatter (body fragments) so attrition reads
-                    # unambiguously as a hit on the squad.
-                    _self.particle_controller.burst(
-                        hit_x, hit_y, count=6, speed=180.0, ttl=0.55,
-                        size=14.0, frame="enemy_red", rng=_rng,
-                    )
-                # Hero flashes red so the player can't miss the hit.
-                if _self.hero is not None:
-                    _self.hero.flash(
-                        duration=0.30,
-                        color=(1.0, 0.25, 0.25, 0.78),
-                    )
-                # M11: medium shake on attrition; bigger if it was the final hit.
-                _self._add_shake(2.5 if _self.squad_count > 0 else 9.0)
-                running = ui.app()
-                running.audio.play_sfx("damage")
-                if _self.squad_count <= 0:
-                    _self._end_level(won=False)
             entities.resolve_squad_attrition(
                 self.enemy_controller,
                 self.hero.center_x, self.hero.center_y,
                 ATTRITION_ZONE_HALF_W,
                 self.hero.center_y + ATTRITION_FRONT_OFFSET,
-                _on_loss,
+                self._on_squad_loss,
             )
 
             self.particle_controller.update(dt)
@@ -1739,6 +1706,53 @@ class GameScreen(ui.StyledScreen):
             running.go("levelselect")
         else:
             running.go("menu")
+
+    # --- squad-loss handler (shared by attrition and escape) -------------
+
+    def _on_squad_loss(self, hit_x: float, hit_y: float) -> None:
+        """One squad runner is removed. Shared by two paths:
+
+        1. ``resolve_squad_attrition`` — an enemy reached the front line
+           while in the lateral contact zone.
+        2. ``EnemyController.update``'s ``on_escape`` — an enemy slipped
+           past the squad off the bottom of the play area.
+
+        Without (2), enemies that traveled down a column far from the
+        hero just left the screen for free — the player could dodge
+        sideways and the level couldn't fail. Now an escape is treated
+        identically to a direct hit: shield blocks it, otherwise the
+        squad loses one, sparks + body-fragment burst spawn, hero
+        flashes, and squad=0 ends the level.
+        """
+        if self._level_ended or self.squad_count <= 0:
+            return
+        # Shield blocks the loss; the enemy is still consumed (it
+        # bounced off the shield) so the player still benefits.
+        if self.shield_active_until > self._run_time:
+            if self.particle_controller is not None:
+                self.particle_controller.burst(
+                    hit_x, hit_y, count=8, speed=300.0, ttl=0.30,
+                    size=12.0, frame="particle", rng=self._fire_rng,
+                )
+            self._add_shake(0.6)
+            return
+        self.squad_count -= 1
+        self.attrition_total += 1
+        if self.particle_controller is not None:
+            self.particle_controller.burst(
+                hit_x, hit_y, count=6, speed=240.0, ttl=0.4,
+                size=10.0, frame="particle", rng=self._fire_rng,
+            )
+            self.particle_controller.burst(
+                hit_x, hit_y, count=6, speed=180.0, ttl=0.55,
+                size=14.0, frame="enemy_red", rng=self._fire_rng,
+            )
+        if self.hero is not None:
+            self.hero.flash(duration=0.30, color=(1.0, 0.25, 0.25, 0.78))
+        self._add_shake(2.5 if self.squad_count > 0 else 9.0)
+        ui.app().audio.play_sfx("damage")
+        if self.squad_count <= 0:
+            self._end_level(won=False)
 
     # --- HUD sync helpers ------------------------------------------------
 
