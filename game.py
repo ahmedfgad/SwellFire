@@ -1603,14 +1603,29 @@ class GameScreen(ui.StyledScreen):
                 level_cfg["world_index"],
             )
 
-        def on_retry():
-            if level_index:
-                running.start_level(level_index)
-            else:
-                running.go("menu")
+        # In versus mode neither "next level" nor "retry" makes sense
+        # without coordinating with the other player. Both buttons just
+        # leave the match — same as the client's _mp_show_result path.
+        in_versus = running.current_mode != "single"
+        if in_versus:
+            on_next = None
+            def on_retry():
+                self._exit()
+            def on_menu():
+                self._exit()
+            level_label = "Versus  -  {}".format(
+                "You Win!" if getattr(self, "_mp_local_won", True)
+                else "Opponent Wins"
+            )
+        else:
+            def on_retry():
+                if level_index:
+                    running.start_level(level_index)
+                else:
+                    running.go("menu")
 
-        def on_menu():
-            running.go("menu")
+            def on_menu():
+                running.go("menu")
 
         gates_hit = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
@@ -1825,22 +1840,65 @@ class GameScreen(ui.StyledScreen):
     def _mp_send_snapshot(self) -> None:
         """Host side: build + send the per-tick snapshot.
 
-        MVP schema — just hero positions + per-player stats + the host's
-        distance for end-of-level detection on the client. Entity sync
-        (enemies / gates / projectiles) is a follow-up: this turn proves
-        the wire works.
+        Schema includes hero positions, per-player stats, distance,
+        AND the live entity arrays (gates + enemies) so the client can
+        render a populated world. Positions normalised to stage frac
+        in [0, 1] so the client doesn't need to know stage geometry.
+        Field names are single-letter where possible to keep JSON small.
         """
         running = ui.app()
         if running.mp_net is None or self.hero is None:
             return
-        # Normalize hero X to 0-1 so the client doesn't need stage geometry.
         sx = self.stage.x
+        sy = self.stage.y
         sw = max(1.0, self.stage.width)
+        sh = max(1.0, self.stage.height)
         p1_norm_x = (self.hero.center_x - sx) / sw
         if self.opponent_hero is not None:
             p2_norm_x = (self.opponent_hero.center_x - sx) / sw
         else:
             p2_norm_x = 0.5
+
+        # Live gate pairs. Each pair: y_frac + 2 panels.
+        gate_pairs = []
+        if self.gate_controller is not None:
+            for pair in self.gate_controller.pairs:
+                left, right = sorted(pair, key=lambda g: g.x)
+                # Same y for both panels; emit once.
+                y_frac = (left.y - sy) / sh
+                gate_pairs.append([
+                    round(y_frac, 4),
+                    round((left.x - sx) / sw, 4),
+                    round(left.width / sw, 4),
+                    round(left.height / sh, 4),
+                    left.op,
+                    left.value,
+                    left.label_text,
+                    1 if left.consumed else 0,
+                    1 if left.selected else 0,
+                    round((right.x - sx) / sw, 4),
+                    round(right.width / sw, 4),
+                    round(right.height / sh, 4),
+                    right.op,
+                    right.value,
+                    right.label_text,
+                    1 if right.consumed else 0,
+                    1 if right.selected else 0,
+                ])
+
+        # Live enemies. Compact: [x_frac, y_frac, type_int].
+        enemies = []
+        if self.enemy_pool is not None:
+            pool = self.enemy_pool
+            for i in range(pool.capacity):
+                if pool.active[i]:
+                    enemies.append([
+                        round((pool.cx[i] - sx) / sw, 4),
+                        round((pool.cy[i] - sy) / sh, 4),
+                        int(self.enemy_controller.type[i])
+                        if hasattr(self.enemy_controller, "type") else 0,
+                    ])
+
         running.mp_net.send({
             "t": "snap",
             "tick": self._mp_tick,
@@ -1859,6 +1917,8 @@ class GameScreen(ui.StyledScreen):
                 "alive": self.opponent_alive,
             },
             "dist":  round(self.distance, 1),
+            "g":     gate_pairs,
+            "e":     enemies,
             "ended": self._level_ended,
         })
 
@@ -1893,6 +1953,33 @@ class GameScreen(ui.StyledScreen):
         if latest is not None:
             self._mp_apply_snapshot(latest)
 
+        # Drive the local centerline-stripe scroll so the world feels
+        # alive on the client too — host's distance is authoritative,
+        # we just step the stripes by the elapsed dt.
+        sx_s, sy_s = self.stage.pos
+        sw_s, sh_s = self.stage.size
+        if sh_s > 0:
+            drop = SCROLL_SPEED_PX_PER_SEC * dt
+            for i in range(len(self._stripe_ys)):
+                self._stripe_ys[i] -= drop
+                while self._stripe_ys[i] < sy_s:
+                    self._stripe_ys[i] += sh_s
+            self._paint_stripes()
+
+        # Sync chips + distance bar from snapshot-driven state.
+        if self.distance_goal > 0:
+            self._dist_progress = min(1.0, self.distance / self.distance_goal)
+        else:
+            self._dist_progress = 0.0
+        self._sync_dist_bar()
+        if self.squad_chip is not None:
+            self.squad_chip.set_value(str(self.squad_count))
+            self.kills_chip.set_value(str(self.kills_total))
+            other = self._coins_earned - self._coins_pickups
+            self.coins_chip.set_value("+{}+{}".format(
+                self._coins_pickups, other,
+            ))
+
         # Forward local input to the host. Throttle to once per tick max
         # and only on meaningful change — keeps the channel quiet.
         if self.hero is not None and self.stage.width > 0:
@@ -1906,29 +1993,128 @@ class GameScreen(ui.StyledScreen):
                 self._last_input_norm_x = target_norm
 
     def _mp_apply_snapshot(self, snap: dict) -> None:
-        """Client side: position both heroes + replicate stats from the
-        host's snapshot. Host's hero is in snap["p1"]; this client's hero
-        (the one local touch represents) is in snap["p2"]."""
+        """Client side: position both heroes + replicate stats + rebuild
+        the visible entities (gates, enemies) from the host's snapshot.
+
+        On the client: self.hero IS p2 (locally controlled); self.opponent_hero
+        is p1 (the host's hero, ghosted at 70 % opacity).
+        """
         sx = self.stage.x
+        sy = self.stage.y
         sw = max(1.0, self.stage.width)
-        # On the client, self.hero IS p2 (the local player). self.opponent_hero
-        # is p1 (the host).
+        sh = max(1.0, self.stage.height)
+        # --- heroes ---------------------------------------------------
         p1 = snap.get("p1", {})
         p2 = snap.get("p2", {})
+        # Compute the hero Y the same way the host's _update does. The
+        # client's local loop never runs, so the previous version of
+        # this code left hero.y at 0 and the heroes rendered at the
+        # very bottom edge of the stage — that's the "player misplaced"
+        # bug. Now we drive Y from the host's distance (so the bob
+        # matches what the host sees too).
+        bob = math.sin(self.distance / 22.0) * 5.0
+        hero_y = sy + sh * HERO_BOTTOM_FRAC + bob
         if self.opponent_hero is not None:
             self.opponent_hero.center_x = sx + float(p1.get("x", 0.5)) * sw
+            self.opponent_hero.y = hero_y
         if self.hero is not None:
-            # Snapshot is authoritative for the local hero too — fixes
-            # any client-side mis-prediction from typed-out input.
             self.hero.center_x = sx + float(p2.get("x", 0.5)) * sw
-        self.squad_count   = int(p2.get("squad", self.squad_count))
-        self.kills_total   = int(p2.get("kills", self.kills_total))
-        self._coins_earned = int(p2.get("coins", self._coins_earned))
+            self.hero.y = hero_y
+        # --- stats ---------------------------------------------------
+        self.squad_count    = int(p2.get("squad", self.squad_count))
+        self.kills_total    = int(p2.get("kills", self.kills_total))
+        self._coins_earned  = int(p2.get("coins", self._coins_earned))
         self.opponent_squad = int(p1.get("squad", self.opponent_squad))
         self.opponent_kills = int(p1.get("kills", self.opponent_kills))
         self.opponent_coins = int(p1.get("coins", self.opponent_coins))
         self.opponent_alive = bool(p1.get("alive", True))
-        self.distance = float(snap.get("dist", self.distance))
+        self.distance       = float(snap.get("dist", self.distance))
+        # --- gates ----------------------------------------------------
+        # Cheapest correct approach: rebuild the gate widgets from the
+        # snapshot each tick. 20 Hz × <10 gates is well below any
+        # render-cost threshold and avoids tracking gate IDs across
+        # the network.
+        if self.gate_controller is not None:
+            self._mp_rebuild_gates(snap.get("g", []), sx, sy, sw, sh)
+        # --- enemies --------------------------------------------------
+        # Drop straight into the pool's parallel arrays so the existing
+        # BatchedRenderer picks them up on its next vertex rebuild.
+        if self.enemy_pool is not None:
+            self._mp_apply_enemies(snap.get("e", []), sx, sy, sw, sh)
+
+    def _mp_rebuild_gates(self, pairs_snap: list, sx: float, sy: float,
+                          sw: float, sh: float) -> None:
+        """Sync the client's gate widgets to match the host's pairs.
+
+        Clears existing widgets and rebuilds — simpler than diffing,
+        and the pair count is small enough that the cost is negligible.
+        """
+        gc = self.gate_controller
+        for pair in gc.pairs:
+            for g in pair:
+                if g.parent:
+                    g.parent.remove_widget(g)
+        gc.pairs = []
+        for entry in pairs_snap:
+            try:
+                (y_frac,
+                 lx, lw, lh, lop, lval, llabel, lcons, lsel,
+                 rx, rw, rh, rop, rval, rlabel, rcons, rsel) = entry
+            except (ValueError, TypeError):
+                continue
+            y_px = sy + y_frac * sh
+            left = gates.Gate(
+                lop, lval, llabel,
+                size_hint=(None, None),
+                size=(lw * sw, lh * sh),
+                pos=(sx + lx * sw, y_px),
+            )
+            right = gates.Gate(
+                rop, rval, rlabel,
+                size_hint=(None, None),
+                size=(rw * sw, rh * sh),
+                pos=(sx + rx * sw, y_px),
+            )
+            if lcons:
+                if lsel: left.mark_selected()
+                else:    left.mark_consumed(dim=True)
+            if rcons:
+                if rsel: right.mark_selected()
+                else:    right.mark_consumed(dim=True)
+            gc.stage.add_widget(left)
+            gc.stage.add_widget(right)
+            gc.pairs.append([left, right])
+
+    def _mp_apply_enemies(self, enemies_snap: list, sx: float, sy: float,
+                          sw: float, sh: float) -> None:
+        """Push host enemy positions into the local pool. We bypass
+        EnemySpawner / EnemyController entirely on the client — those
+        are sim-side; we just need the pool's parallel arrays populated
+        so BatchedRenderer can draw them."""
+        pool = self.enemy_pool
+        # Zero everything first, then activate the slots we need.
+        for i in range(pool.capacity):
+            if pool.active[i]:
+                pool.active[i] = 0
+        pool.active_count = 0
+        # Type → atlas frame map for the renderer's UV pickup.
+        frame_for_type = {
+            entities.TYPE_GRUNT:    "enemy_red",
+            entities.TYPE_SWARMER:  "enemy_red",
+            entities.TYPE_TANK:     "enemy_red",
+            entities.TYPE_BOMBER:   "enemy_red",
+            entities.TYPE_SPLITTER: "enemy_red",
+        }
+        for i, entry in enumerate(enemies_snap):
+            if i >= pool.capacity:
+                break
+            try:
+                x_frac, y_frac, type_int = entry
+            except (ValueError, TypeError):
+                continue
+            frame_name = frame_for_type.get(int(type_int), "enemy_red")
+            pool.spawn(sx + x_frac * sw, sy + y_frac * sh,
+                       0.0, 0.0, 40.0, 40.0, frame_name)
 
     def _mp_broadcast_result(self, host_completed_won: bool) -> None:
         """Host side: compute scores for both players, declare the winner
@@ -1972,13 +2158,15 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
-        # Reuse the single-player dialog — winner is already encoded
-        # per device in local_won.
+        # In versus, both buttons leave the match — there's no "retry"
+        # without re-coordinating with the other player, and no "next
+        # level" either. Both route back to the multiplayer menu via
+        # _exit (which already handles mp_net teardown).
         dialog = ui.LevelResultDialog(
             won=won, stars=0, score=score,
             level_label="Versus  -  {}".format(
                 "You Win!" if won else "Opponent Wins"),
-            on_next=None, on_retry=None, on_menu=self._exit,
+            on_next=None, on_retry=self._exit, on_menu=self._exit,
             stats={"coins_total": self._coins_earned,
                    "coins_pickup": self._coins_pickups,
                    "kills":        self.kills_total,

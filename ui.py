@@ -1813,7 +1813,10 @@ class AutoPlayerScreen(StyledScreen):
 
 class MultiplayerMenuScreen(StyledScreen):
     """Pick whether to host a versus game or join one."""
-    theme_world = 4
+    # World 4 (Snowfield) gave a near-white top gradient that washed
+    # out the white labels. Cosmos (world 6) is what every other meta
+    # screen uses and gives the contrast needed for the body text.
+    theme_world = 6
 
     def build(self):
         scroll, box = _scroll_panel(size_hint=(0.72, 0.94))
@@ -1854,7 +1857,7 @@ class HostScreen(StyledScreen):
     used is omitted — see net.send_start where mode is hard-coded to
     'versus'.
     """
-    theme_world = 4
+    theme_world = 6
 
     def build(self):
         self.net = None
@@ -1987,7 +1990,7 @@ class HostScreen(StyledScreen):
 
 class JoinScreen(StyledScreen):
     """Joins a hosted versus game by typing the host's address."""
-    theme_world = 4
+    theme_world = 6
 
     def build(self):
         self.net = None
