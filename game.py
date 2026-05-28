@@ -326,6 +326,12 @@ class GameScreen(ui.StyledScreen):
         self._level_ended = False
         # Carry over the per-save booster balances into the run; level-end
         # writes back what's left so they persist between runs.
+        #
+        # The "free starter grenade" used to live here, but it produced a
+        # stockpile (5-7 grenades) that made grenades feel like a regular
+        # item rather than a rare panic button. The safety it provided is
+        # now covered by the pity-gate floor (gates.GateSpawner) so the
+        # player can recover from missed pairs without a freebie.
         running_app = ui.app()
         if running_app and running_app.state:
             self.grenade_count = running_app.state.get_booster_balance("grenade")
@@ -333,15 +339,6 @@ class GameScreen(ui.StyledScreen):
         else:
             self.grenade_count = 0
             self.shield_count = 0
-        # Free grenade at level start. Guarantees the player always has a
-        # panic button — they can't get into an unrecoverable squad=1 + no-
-        # gate-in-sight death spiral from RNG. The free grenade does NOT
-        # persist back to the save (see _end_level): we cap the persisted
-        # delta against the starting balance so spending the free one isn't
-        # treated as "consumed save grenades".
-        self._free_grenade_baseline = self.grenade_count
-        if self.grenade_count < 1:
-            self.grenade_count = 1
         self.shield_active_until = 0.0
         self._run_time = 0.0
         if self.squad_controller is not None:
@@ -455,12 +452,17 @@ class GameScreen(ui.StyledScreen):
 
         if self.gate_spawner is not None:
             if is_boss:
-                # No gates during the boss fight; bump the interval out of reach.
-                self.gate_spawner.interval_px = 1e9
+                # Boss levels keep gates available but sparser: ~5 pairs over
+                # the whole fight, so the player has rescue options without
+                # the gate-stream trivializing the fight.
+                self.gate_spawner.interval_px = 1500.0
+                self.gate_spawner.max_grenade_gates = 1
             else:
                 self.gate_spawner.interval_px = cfg["gate_interval_px"]
+                self.gate_spawner.max_grenade_gates = int(cfg.get("max_grenade_gates", 0))
             self.gate_spawner.allowed_ops = list(cfg["allowed_ops"])
             self.gate_spawner.allowed_weapons = list(cfg["allowed_weapons"])
+            self.gate_spawner.reset_per_level()
 
         # Boss spawn / teardown.
         self._teardown_boss()
@@ -1041,15 +1043,10 @@ class GameScreen(ui.StyledScreen):
         if running.current_mode == "single" and level_index:
             running.state.record_result(level_index, score, stars,
                                         distance=int(self.distance))
-            # Persist leftover booster balances. The free starter grenade
-            # is excluded: we only count grenades collected during the run
-            # (anything above the baseline at level start).
-            baseline = getattr(self, "_free_grenade_baseline", 0)
-            effective_grenades = self.grenade_count
-            if baseline == 0:
-                # Player got the free grenade; don't credit it back if unused.
-                effective_grenades = max(0, self.grenade_count - 1)
-            g_delta = effective_grenades - running.state.get_booster_balance("grenade")
+            # Persist leftover booster balances. No more free-grenade baseline
+            # — anything the player has at level end is what they earned or
+            # carried into the level.
+            g_delta = self.grenade_count - running.state.get_booster_balance("grenade")
             if g_delta != 0:
                 running.state.add_booster("grenade", g_delta)
             s_delta = self.shield_count - running.state.get_booster_balance("shield")

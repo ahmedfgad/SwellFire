@@ -168,6 +168,18 @@ class GateSpawner:
         # Pity-gate tracking: GateController updates this counter whenever a
         # pair scrolls past with neither gate consumed (miss).
         self.consecutive_misses = 0
+        # Per-level cap on grenade gates so they stay a rare resource.
+        # Game.GameScreen sets this from the level config on entry, and
+        # `reset_per_level()` zeros the counter that tracks how many have
+        # spawned so far.
+        self.max_grenade_gates = 0
+        self.grenade_gates_spawned = 0
+
+    def reset_per_level(self) -> None:
+        """Call at level start. Resets per-run counters that track
+        rare-resource emission and the pity-gate floor."""
+        self.grenade_gates_spawned = 0
+        self.consecutive_misses = 0
 
     def tick(self, distance: float, x_min: float, x_max: float, y_top: float) -> bool:
         """Spawn a pair when the run has advanced past the next interval.
@@ -213,24 +225,34 @@ class GateSpawner:
         """Pick an op + value + display label. Avoids a pair with two
         identical ops, which would be a non-choice for the player.
 
-        Respects `allowed_ops` (which ops the level allows) and
-        `allowed_weapons` (which weapons appear in WEAPON gates).
+        Reward magnitudes are intentionally tight: ×2 only (no ×3), ADD
+        capped at 7, SUB up to 7, GRENADE always 1. The cumulative effect
+        across many gates makes the level passable; no single gate carries
+        the run.
+
+        `grenade` is hard-capped per level via `max_grenade_gates` so
+        grenades stay a rare resource. Once the cap is hit, the spawner
+        retries with grenade removed from the pool.
         """
-        # Op pool table — values + label function are level-independent.
         op_table = {
-            OP_MUL:     ([2, 3],           lambda v: "x{}".format(v)),
-            OP_ADD:     ([5, 10, 15],      lambda v: "+{}".format(v)),
-            OP_SUB:     ([3, 5],           lambda v: "-{}".format(v)),
+            OP_MUL:     ([2],              lambda v: "x{}".format(v)),
+            OP_ADD:     ([3, 5, 7],        lambda v: "+{}".format(v)),
+            OP_SUB:     ([4, 7],           lambda v: "-{}".format(v)),
             OP_WEAPON:  (self.allowed_weapons or self.DEFAULT_WEAPONS,
                          lambda v: v.upper()),
-            OP_GRENADE: ([1, 2, 3],        lambda v: "GRENADE x{}".format(v)),
+            OP_GRENADE: ([1],              lambda v: "GRENADE x{}".format(v)),
         }
         allowed = [op for op in self.allowed_ops if op != exclude_op and op in op_table]
         if not allowed:
             allowed = [op for op in self.DEFAULT_OPS if op != exclude_op]
+        # Grenade cap enforcement.
+        if self.grenade_gates_spawned >= self.max_grenade_gates and OP_GRENADE in allowed:
+            allowed = [op for op in allowed if op != OP_GRENADE] or allowed
         op = self._rng.choice(allowed)
         values, fmt = op_table[op]
         value = self._rng.choice(values)
+        if op == OP_GRENADE:
+            self.grenade_gates_spawned += 1
         return op, value, fmt(value)
 
 

@@ -145,7 +145,14 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 enemy_hp = 3
             enemy_chase_min = _lerp(25.0, 80.0, t)
             enemy_chase_max = _lerp(80.0, 170.0, t)
-            gate_interval_px = _lerp(720.0, 420.0, t)
+            # Gate cadence: target a fixed number of pairs per level so the
+            # player makes 10-24 decisions per run regardless of level
+            # length. Earlier formulas used a fixed px interval, which gave
+            # later levels (longer) absurd gate counts (71 pairs in W4L1!).
+            # Floor at 380 px so the earliest levels still have visible
+            # spacing between pairs.
+            target_pairs = _lerp(10.0, 24.0, t)
+            gate_interval_px = max(380.0, (distance_goal - 200.0) / target_pairs)
 
             # Per-level type. Boss levels override.
             if in_world == LEVELS_PER_WORLD:
@@ -173,6 +180,15 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 allowed_ops.append("weapon")
             if world >= 5:
                 allowed_ops.append("sub")
+            # Grenade scarcity: W1 has none (excluded from allowed_ops above);
+            # W2-W3 get 1 max per level, W4+ get 2 max. Boss levels keep their
+            # own cap (set in game.py).
+            if world == 1:
+                max_grenade_gates = 0
+            elif world <= 3:
+                max_grenade_gates = 1
+            else:
+                max_grenade_gates = 2
 
             # Enemy archetype mix per world. Weights are relative; the spawner
             # normalizes. Late worlds add tank/bomber/splitter so a uniform-
@@ -237,6 +253,7 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 "min_duration_sec": min_duration,
                 "kill_target": kill_target,
                 "allowed_enemy_types": allowed_enemy_types,
+                "max_grenade_gates": max_grenade_gates,
             }
     return levels
 
