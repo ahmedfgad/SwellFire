@@ -216,7 +216,16 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # cannot grind it down before the boss's volleys overwhelm the
             # squad. Sim-tuned in the difficulty regression script.
             boss_hp = int(round(_lerp(350.0, 1100.0, t))) if is_boss else 0
-            starting_squad = int(round(_lerp(3.0, 12.0, world / NUM_WORLDS))) if is_boss else 1
+            if is_boss:
+                starting_squad = int(round(_lerp(3.0, 12.0, world / NUM_WORLDS)))
+            else:
+                # Non-boss starting squad scales with world: W1=1, W2=2, W3=3,
+                # W4=4, W5=5, W6=6. Sub-linear fire cap (22) makes this
+                # invisible firepower-wise for higher worlds (extra members
+                # just absorb attrition), but it lets the player survive the
+                # intro period before the first gate lands. Verified by the
+                # difficulty sim — without this scaling W2+ dies at ~4 s.
+                starting_squad = world
             # Per-world minion HP for boss-spawned enemies. Worlds 1-3 → 1,
             # 4-5 → 2, 6 → 3, so the squad can't just hose the wave.
             boss_minion_hp = 1 if world < 4 else (2 if world < 6 else 3)
@@ -261,24 +270,30 @@ def build_levels() -> dict[int, dict[str, Any]]:
 def _allowed_enemy_types(world: int) -> list[tuple[str, float]]:
     """Per-world archetype mix: list of (archetype_name, weight) pairs.
 
-    Weights are relative — `EnemySpawner` normalizes. Tank/bomber/splitter
-    progressively join the mix so the squad must focus-fire, dodge AOE
-    on-death effects, and avoid creating mini-swarms by overkilling.
+    Weights are relative — `EnemySpawner` normalizes. Archetypes unlock
+    progressively as the player goes deeper. Each new archetype shifts
+    one world later from the original draft because the sim showed an
+    earlier roll-out (swarmer in W2, tank in W3) was killing greedy at
+    squad=1 before the first gate could land.
+
+        W1   grunts only
+        W2   grunts only (slightly higher base spawn rate)
+        W3   + swarmer (cluster of 4 → forces wide squad before W4)
+        W4   + tank (focused-fire demand)
+        W5   + bomber (AOE on death)
+        W6   + splitter (overkill penalty)
     """
-    if world == 1:
+    if world <= 2:
         return [("grunt", 1.0)]
-    if world == 2:
-        return [("grunt", 0.85), ("swarmer", 0.15)]
     if world == 3:
-        return [("grunt", 0.65), ("swarmer", 0.15), ("tank", 0.20)]
+        return [("grunt", 0.78), ("swarmer", 0.22)]
     if world == 4:
-        return [("grunt", 0.50), ("swarmer", 0.15),
-                ("tank", 0.15), ("bomber", 0.20)]
+        return [("grunt", 0.55), ("swarmer", 0.20), ("tank", 0.25)]
     if world == 5:
         return [("grunt", 0.40), ("swarmer", 0.15),
-                ("tank", 0.15), ("bomber", 0.15), ("splitter", 0.15)]
-    return [("grunt", 0.35), ("swarmer", 0.15),
-            ("tank", 0.15), ("bomber", 0.15), ("splitter", 0.20)]
+                ("tank", 0.20), ("bomber", 0.25)]
+    return [("grunt", 0.32), ("swarmer", 0.15),
+            ("tank", 0.18), ("bomber", 0.20), ("splitter", 0.15)]
 
 
 LEVELS: dict[int, dict[str, Any]] = build_levels()

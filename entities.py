@@ -211,13 +211,28 @@ class EnemySpawner:
         # Archetype mix: list of (type_int, weight). Default is all grunts.
         # game.GameScreen._apply_level_config overrides with the per-level mix.
         self.spawn_table: list[tuple[int, float]] = [(TYPE_GRUNT, 1.0)]
+        # No enemies for the first `intro_delay` seconds of a level so the
+        # player can SEE the first gate approaching and steer before being
+        # overwhelmed. Reset per level via `reset_per_level()`.
+        self.intro_delay = 1.5
+        self._level_elapsed = 0.0
+
+    def reset_per_level(self) -> None:
+        """Zero the in-level timer. Call on level entry so the intro-delay
+        and ramps start fresh."""
+        self._level_elapsed = 0.0
 
     def tick(self, dt: float, x_min: float, y_min: float,
              x_max: float, y_max: float) -> int:
         """Spawn as many enemies as the accumulated time allows.
 
+        Honors `intro_delay` (no spawns for the first N seconds of the level)
+        so the player sees the first gate approach before any pressure.
         Returns the number spawned this tick (useful for tests).
         """
+        self._level_elapsed += dt
+        if self._level_elapsed < self.intro_delay:
+            return 0
         if self.interval <= 0:
             return 0
         spawned = 0

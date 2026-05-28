@@ -35,7 +35,7 @@ import main as m                    # noqa: E402
 
 
 SIM_DT = 1.0 / 60.0
-SIM_MAX_SECONDS = 60.0   # bumped after the 20-s minimum-duration change
+SIM_MAX_SECONDS = 160.0   # W6L9 is 138 s; allow headroom for greedy to finish
 
 
 @dataclass

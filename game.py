@@ -444,11 +444,23 @@ class GameScreen(ui.StyledScreen):
             # minions.
             if is_boss:
                 self.enemy_spawner.spawn_table = [(entities.TYPE_GRUNT, 1.0)]
+                # Boss controls all spawning — no intro delay needed; the
+                # opening volley is the threat the player sees immediately.
+                self.enemy_spawner.intro_delay = 0.0
             else:
                 self.enemy_spawner.spawn_table = [
                     (entities.TYPE_NAMES[name], weight)
                     for name, weight in cfg["allowed_enemy_types"]
                 ]
+                # World-scaling intro delay: higher worlds get more breathing
+                # room because their base spawn rate and enemy speed would
+                # otherwise overwhelm the starting squad before the player
+                # can react to the first gate. Verified by the difficulty
+                # sim against passive (must still fail) and greedy (must
+                # survive long enough to pick gates).
+                world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+                self.enemy_spawner.intro_delay = 1.5 + 0.5 * (world - 1)
+            self.enemy_spawner.reset_per_level()
 
         if self.gate_spawner is not None:
             if is_boss:
@@ -472,6 +484,11 @@ class GameScreen(ui.StyledScreen):
             self.squad_count = int(cfg.get("starting_squad", 1))
             self.current_weapon_id = cfg.get("starting_weapon", DEFAULT_WEAPON_ID)
             self._fire_cooldown = 0.0
+        else:
+            # Non-boss levels also get a (smaller) starting squad now —
+            # `levels.starting_squad` scales 1→6 across W1→W6 so the player
+            # can survive the intro before reaching the first gate.
+            self.squad_count = max(1, int(cfg.get("starting_squad", 1)))
 
     def _spawn_boss(self, cfg: dict) -> None:
         if self._atlas is None or self.stage is None:
@@ -710,14 +727,15 @@ class GameScreen(ui.StyledScreen):
                 type_mult = 0.70 if spike else 1.0
             else:   # dynamic
                 type_mult = 0.65
-            # In-level ramp: start at +40% interval (gentler), end at -45%
-            # (denser). Player has breathing room to set up the squad, then
-            # the level ramps as the kill_target builds.
+            # In-level ramp: start very gentle (2.5× interval = 40 % of base
+            # spawn rate) and end at 0.55× (relentless). The aggressive
+            # initial floor lets a small starting squad survive long enough
+            # to engage the first few gates before the level ramps up.
             if self.distance_goal > 0:
                 progress = min(1.0, self.distance / self.distance_goal)
             else:
                 progress = 0.0
-            ramp = 1.40 - 0.85 * progress
+            ramp = max(0.55, 2.50 - 2.00 * progress)
             self.enemy_spawner.interval = base_interval * type_mult * ramp
 
         if (self.enemy_controller is not None
