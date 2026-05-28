@@ -26,6 +26,7 @@ Config.set("graphics", "resizable", "1")
 
 import ui
 import levels
+import stresstest
 from audio import AudioManager
 from state import GameState
 
@@ -147,6 +148,7 @@ class GateRunnerApp(App):
         self.sm.add_widget(ui.HostScreen(name="mphost"))
         self.sm.add_widget(ui.JoinScreen(name="mpjoin"))
         self.sm.add_widget(PlaceholderGameScreen(name="game"))
+        self.sm.add_widget(stresstest.StressTestScreen(name="stresstest"))
         return self.sm
 
     def on_stop(self):

@@ -1,21 +1,287 @@
-# GateRunner graphics — M1 scope.
+# GateRunner graphics.
 #
-# M1 provides only the bits ui.py needs at startup: a themed gradient
-# `Background`, a `draw_star` canvas helper used by the level-select rating,
-# and tiny placeholder sprite widgets so the (text-only) tutorial / guide can
-# stand up small visual stand-ins for the runner, enemy, gate and projectile
-# without crashing.
+# Top of file: the Mesh-batched renderer that gameplay uses from M3 onwards
+# (atlas loader, parallel-array entity pool, batched-mesh widget that draws
+# the whole pool with a single Kivy `Mesh` instruction, debug overlay).
 #
-# The real Mesh-batched renderer with atlases lands in M3; everything below
-# this comment is intentionally lo-fi and will be swapped wholesale.
+# Bottom of file: the static placeholder sprite widgets the M1 tutorial /
+# guide screens reference. They use canvas primitives and are intentionally
+# lo-fi; M14 swaps them for atlas-backed sprites and the real character art.
 
+from __future__ import annotations
+
+import json
 import math
+import os
+
+from kivy.clock import Clock
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line, Mesh
+from kivy.uix.label import Label
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line
-from kivy.properties import NumericProperty, BooleanProperty
+from kivy.metrics import dp, sp
+from kivy.properties import BooleanProperty, NumericProperty
 
 
-# --- gradient background ---------------------------------------------------
+# ===========================================================================
+# Mesh-batched renderer (M3)
+# ===========================================================================
+
+class SpriteAtlas:
+    """Loads a packed PNG atlas + its UV-map JSON.
+
+    The companion `tools/gen_placeholder_atlas.py` produces the placeholder
+    bank used through M13; `tools/pack_atlas.py` (added later) packs real
+    sprite-sheet frames during the M14 asset pass.
+
+    JSON shape::
+
+        {
+            "atlas_width": 128,
+            "atlas_height": 128,
+            "frames": {
+                "runner_blue": {"x": 0, "y": 0, "w": 64, "h": 64},
+                ...
+            }
+        }
+
+    `x` and `y` are PIL coordinates (origin top-left); the loader converts to
+    GL texture coords (origin bottom-left).
+    """
+
+    def __init__(self, png_path: str, json_path: str):
+        # Import here so unit tests that don't touch the texture don't pay
+        # the cost of initializing Kivy's image providers.
+        from kivy.core.image import Image as CoreImage
+
+        self._image = CoreImage(png_path, nocache=True)
+        self.texture = self._image.texture
+        # Pixel-art-style: nearest filtering keeps frames crisp at any scale.
+        self.texture.min_filter = "nearest"
+        self.texture.mag_filter = "nearest"
+
+        with open(json_path) as f:
+            meta = json.load(f)
+        self.atlas_w = float(meta["atlas_width"])
+        self.atlas_h = float(meta["atlas_height"])
+        # name -> (u0, v0, u1, v1) where v=0 is the bottom of the texture.
+        self._frames: dict[str, tuple[float, float, float, float]] = {}
+        for name, rect in meta["frames"].items():
+            x = float(rect["x"])
+            y = float(rect["y"])
+            w = float(rect["w"])
+            h = float(rect["h"])
+            u0 = x / self.atlas_w
+            u1 = (x + w) / self.atlas_w
+            # Flip y axis from PIL (top-left) to GL (bottom-left).
+            v0 = 1.0 - (y + h) / self.atlas_h
+            v1 = 1.0 - y / self.atlas_h
+            self._frames[name] = (u0, v0, u1, v1)
+
+    def frame(self, name: str) -> tuple[float, float, float, float]:
+        return self._frames[name]
+
+    def names(self) -> list[str]:
+        return list(self._frames.keys())
+
+
+class EntityPool:
+    """Fixed-capacity sprite pool stored as parallel arrays.
+
+    Parallel arrays (lists of floats) are faster to iterate than per-entity
+    Python objects because the hot loop only touches plain numbers — no
+    attribute lookups, no method dispatch. The hot loop lives in
+    `BatchedRenderer.rebuild` below; this class only stores state.
+
+    Slot management is intentionally minimal for M3 (linear scan on
+    `spawn`). M5's pool keeps a free-list so spawn is O(1).
+    """
+
+    def __init__(self, capacity: int, atlas: SpriteAtlas):
+        self.capacity = capacity
+        self.atlas = atlas
+        # Position, velocity, half-size (so the hot loop avoids divides).
+        self.cx = [0.0] * capacity
+        self.cy = [0.0] * capacity
+        self.vx = [0.0] * capacity
+        self.vy = [0.0] * capacity
+        self.hw = [0.0] * capacity
+        self.hh = [0.0] * capacity
+        # Per-slot UV rectangle, copied from the atlas at spawn time so the
+        # rebuild loop never has to do a dict lookup.
+        self.u0 = [0.0] * capacity
+        self.v0 = [0.0] * capacity
+        self.u1 = [0.0] * capacity
+        self.v1 = [0.0] * capacity
+        # active[i] == 1 for live entities, 0 for free slots.
+        self.active = bytearray(capacity)
+        self.active_count = 0
+
+    def spawn(self, x: float, y: float, vx: float, vy: float,
+              w: float, h: float, frame_name: str) -> int:
+        u0, v0, u1, v1 = self.atlas.frame(frame_name)
+        for i in range(self.capacity):
+            if not self.active[i]:
+                self.cx[i] = x
+                self.cy[i] = y
+                self.vx[i] = vx
+                self.vy[i] = vy
+                self.hw[i] = w * 0.5
+                self.hh[i] = h * 0.5
+                self.u0[i] = u0
+                self.v0[i] = v0
+                self.u1[i] = u1
+                self.v1[i] = v1
+                self.active[i] = 1
+                self.active_count += 1
+                return i
+        return -1   # pool full
+
+    def release(self, i: int) -> None:
+        if self.active[i]:
+            self.active[i] = 0
+            self.active_count -= 1
+
+
+class BatchedRenderer(Widget):
+    """Draws an `EntityPool` with one `Mesh` instruction.
+
+    The whole pool turns into a single draw call (one vertex buffer +
+    one index buffer + one texture bind), which is what unlocks the
+    hundred-plus on-screen entity counts the plan requires. Per-frame
+    cost is just the Python-side vertex emit loop — see `rebuild`.
+    """
+
+    def __init__(self, pool: EntityPool, **kwargs):
+        super().__init__(**kwargs)
+        self.pool = pool
+        with self.canvas:
+            self._mesh = Mesh(
+                mode="triangles",
+                texture=pool.atlas.texture,
+                vertices=[],
+                indices=[],
+            )
+        # Reusable scratch buffer for the vertex array. 16 floats per quad
+        # (4 verts x 4 floats: x, y, u, v).
+        self._verts: list[float] = [0.0] * (pool.capacity * 16)
+        # Indices are computed each frame from active slots only, so empties
+        # never reach the GPU.
+
+    def rebuild(self) -> None:
+        pool = self.pool
+        cx = pool.cx
+        cy = pool.cy
+        hw = pool.hw
+        hh = pool.hh
+        u0 = pool.u0
+        v0 = pool.v0
+        u1 = pool.u1
+        v1 = pool.v1
+        active = pool.active
+        verts = self._verts
+        indices: list[int] = []
+
+        out_i = 0
+        cap = pool.capacity
+        for i in range(cap):
+            if not active[i]:
+                continue
+            x1 = cx[i] - hw[i]
+            x2 = cx[i] + hw[i]
+            y1 = cy[i] - hh[i]
+            y2 = cy[i] + hh[i]
+            base = out_i * 16
+            # Bottom-left
+            verts[base] = x1
+            verts[base + 1] = y1
+            verts[base + 2] = u0[i]
+            verts[base + 3] = v0[i]
+            # Bottom-right
+            verts[base + 4] = x2
+            verts[base + 5] = y1
+            verts[base + 6] = u1[i]
+            verts[base + 7] = v0[i]
+            # Top-right
+            verts[base + 8] = x2
+            verts[base + 9] = y2
+            verts[base + 10] = u1[i]
+            verts[base + 11] = v1[i]
+            # Top-left
+            verts[base + 12] = x1
+            verts[base + 13] = y2
+            verts[base + 14] = u0[i]
+            verts[base + 15] = v1[i]
+            bv = out_i * 4
+            # Two triangles: (BL, BR, TR) and (BL, TR, TL).
+            indices.extend((bv, bv + 1, bv + 2, bv, bv + 2, bv + 3))
+            out_i += 1
+
+        # Kivy's Mesh.vertices accepts a flat sequence of floats; we slice
+        # the scratch buffer so we don't ship trailing zeros for empty slots.
+        self._mesh.vertices = verts[:out_i * 16]
+        self._mesh.indices = indices
+
+
+# --- debug overlay --------------------------------------------------------
+
+class DebugOverlay(Widget):
+    """Top-left HUD: FPS + key entity counts + frame time.
+
+    Refreshed at 5 Hz to keep its own cost off the hot path. Any screen can
+    drop one of these in and call `report_counts(**counts)` per frame; the
+    overlay shows the latest snapshot.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.label = Label(
+            text="", font_size=sp(14), color=(0.95, 1.0, 0.55, 1),
+            halign="left", valign="top", markup=False,
+        )
+        self.add_widget(self.label)
+        self.bind(pos=self._sync, size=self._sync)
+        self._counts: dict[str, int] = {}
+        self._tick = Clock.schedule_interval(self._refresh, 1 / 5.0)
+
+    def _sync(self, *_):
+        self.label.pos = self.pos
+        self.label.size = self.size
+        self.label.text_size = self.size
+
+    def report_counts(self, **counts) -> None:
+        self._counts = counts
+
+    def _refresh(self, _dt) -> None:
+        fps = Clock.get_fps()
+        parts = ["FPS {:5.1f}".format(fps)]
+        if fps > 0:
+            parts.append("({:.1f} ms)".format(1000.0 / fps))
+        for k, v in self._counts.items():
+            parts.append("{}: {}".format(k, v))
+        self.label.text = "  ".join(parts)
+
+    def stop(self) -> None:
+        if self._tick is not None:
+            self._tick.cancel()
+            self._tick = None
+
+
+# Atlas-discovery helper for the runtime: lets gameplay code ask for an
+# atlas by base name (e.g. "stress") and get the right paths in dev *and*
+# in a frozen PyInstaller bundle.
+def find_atlas(base_name: str, project_dir: str = "") -> tuple[str, str]:
+    if not project_dir:
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+    atlas_dir = os.path.join(project_dir, "assets", "atlases")
+    return (
+        os.path.join(atlas_dir, base_name + ".png"),
+        os.path.join(atlas_dir, base_name + ".json"),
+    )
+
+
+# ===========================================================================
+# Themed gradient background (used by every meta screen)
+# ===========================================================================
 
 class Background(Widget):
     """Full-screen gradient drawn from a world theme."""
@@ -59,7 +325,7 @@ class Background(Widget):
         )
 
 
-# --- five-pointed star (used by the level-select rating) -------------------
+# --- five-pointed star (used by the level-select rating) ------------------
 
 def draw_star(cx, cy, outer, color):
     """Add a filled 5-point star to the current canvas at (cx, cy)."""
@@ -67,21 +333,18 @@ def draw_star(cx, cy, outer, color):
     points = []
     for i in range(10):
         radius = outer if i % 2 == 0 else inner
-        angle = math.pi / 2 + i * math.pi / 5  # point up
+        angle = math.pi / 2 + i * math.pi / 5
         points.extend((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
     Color(*color)
     Line(points=points + points[:2], width=1.4, close=True)
-    # crude fill: a small ellipse — the M3 renderer replaces this with a triangle fan
     Ellipse(pos=(cx - outer * 0.55, cy - outer * 0.55),
             size=(outer * 1.1, outer * 1.1))
 
 
-# --- placeholder sprite widgets --------------------------------------------
-#
-# Each is a simple colored shape so the guide screen and tutorial can show
-# *something* without depending on the M3 Mesh renderer or final art. They
-# share a no-op start() / stop() / hit_flash() so ui.py code that came from
-# CoinTex keeps compiling unchanged after M3 swaps them out.
+# ===========================================================================
+# Placeholder sprite widgets used by the M1 tutorial / guide.
+# Replaced wholesale at M14 with atlas-backed sprites.
+# ===========================================================================
 
 class _PlaceholderSprite(Widget):
     moving = BooleanProperty(False)
@@ -103,7 +366,6 @@ class _PlaceholderSprite(Widget):
 
 
 class RunnerSprite(_PlaceholderSprite):
-    """Stand-in for a single squad runner (full sprite lands in M3 + M14)."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas:
@@ -123,13 +385,11 @@ class RunnerSprite(_PlaceholderSprite):
         self._head.size = (w * 0.40, h * 0.36)
 
 
-# Compatibility alias — the CoinTex-style screens reference PlayerSprite.
 class PlayerSprite(RunnerSprite):
     pass
 
 
 class EnemySprite(_PlaceholderSprite):
-    """Stand-in for an enemy. M5 replaces with the real Mesh-batched enemy."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas:
@@ -149,7 +409,6 @@ class EnemySprite(_PlaceholderSprite):
         self._eye.size = (w * 0.16, h * 0.16)
 
 
-# Compatibility alias — CoinTex-named.
 class MonsterSprite(EnemySprite):
     mtype = NumericProperty(1)
     hp = NumericProperty(1)
@@ -157,7 +416,6 @@ class MonsterSprite(EnemySprite):
 
 
 class GateSprite(_PlaceholderSprite):
-    """A single gate panel — full M7 implementation pairs two of these."""
     label = "+1"
 
     def __init__(self, label="+1", **kwargs):
@@ -191,10 +449,6 @@ class Projectile(_PlaceholderSprite):
         self._dot.pos = (x + w * 0.30, y + h * 0.30)
         self._dot.size = (w * 0.40, h * 0.40)
 
-
-# CoinTex carries Hazard/Coin/Freezer as gameplay sprites. GateRunner does not
-# use them, but ui.GuideScreen's icon factory references the names — add thin
-# placeholders so the guide screen stays paint-clean for M1.
 
 class Hazard(_PlaceholderSprite):
     size_factor = NumericProperty(1.0)

@@ -1,0 +1,30 @@
+{
+  "atlas_width": 128,
+  "atlas_height": 128,
+  "frames": {
+    "runner_blue": {
+      "x": 0,
+      "y": 0,
+      "w": 64,
+      "h": 64
+    },
+    "enemy_red": {
+      "x": 64,
+      "y": 0,
+      "w": 64,
+      "h": 64
+    },
+    "projectile": {
+      "x": 0,
+      "y": 64,
+      "w": 64,
+      "h": 64
+    },
+    "particle": {
+      "x": 64,
+      "y": 64,
+      "w": 64,
+      "h": 64
+    }
+  }
+}

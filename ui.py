@@ -349,6 +349,11 @@ class SettingsScreen(StyledScreen):
         auto.bind(on_release=lambda *_: app().go("autoplayer"))
         box.add_widget(auto)
 
+        stress = StyledButton(text="Rendering test (debug)",
+                              bg=[0.25, 0.45, 0.65, 1], size_hint_y=0.12)
+        stress.bind(on_release=lambda *_: app().go("stresstest"))
+        box.add_widget(stress)
+
         reset = StyledButton(text="Reset progress", bg=[0.85, 0.35, 0.3, 1], size_hint_y=0.12)
         reset.bind(on_release=lambda *_: self._confirm_reset())
         box.add_widget(reset)
