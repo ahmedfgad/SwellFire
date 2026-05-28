@@ -708,4 +708,9 @@ class GameScreen(ui.StyledScreen):
                 pass
             running.mp_net.stop()
             running.mp_net = None
-        running.go("menu")
+            running.go("multiplayer")
+            return
+        if running.current_mode == "single":
+            running.go("levelselect")
+        else:
+            running.go("menu")

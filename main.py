@@ -11,6 +11,7 @@ M3-M13 — see the plan at /home/ahmed-gad/.claude/plans/.
 import os
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.config import Config
 
@@ -96,7 +97,32 @@ class GateRunnerApp(App):
     def start_level(self, level_num):
         self.current_level = int(level_num)
         self.current_mode = "single"
-        self.go("game")
+        self.current_world = ((self.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+        self._enter_game()
+
+    def _enter_game(self):
+        """Switch to the game screen, forcing a fresh on_leave/on_enter cycle.
+
+        Kivy's ScreenManager short-circuits when `sm.current` is set to the
+        screen it's already showing. That's the bug Retry / Next Level hit:
+        the navigation looked like a no-op, so the level config never re-applied.
+        We bounce through "levelselect" with an instant transition so the
+        lifecycle methods run and the new level state takes effect.
+        """
+        if self.sm is None:
+            return
+        if self.sm.current == "game":
+            old_dur = self.sm.transition.duration
+            self.sm.transition.duration = 0
+            self.sm.current = "levelselect"
+
+            def _back_to_game(_dt):
+                self.sm.transition.duration = old_dur
+                self.sm.current = "game"
+
+            Clock.schedule_once(_back_to_game, 0)
+        else:
+            self.sm.current = "game"
 
     # --- multiplayer hand-off (real impl in M13) ---------------------------
 
@@ -104,13 +130,13 @@ class GateRunnerApp(App):
         self.current_mode = mode
         self.mp_seed = int(seed)
         self.mp_net = network
-        self.go("game")
+        self._enter_game()
 
     def start_mp_client(self, mode, seed, network):
         self.current_mode = mode
         self.mp_seed = int(seed)
         self.mp_net = network
-        self.go("game")
+        self._enter_game()
 
 
 if __name__ == "__main__":
