@@ -155,6 +155,7 @@ class BatchedRenderer(Widget):
                  tint: tuple[float, float, float, float] | None = None,
                  owner_array: "bytearray | None" = None,
                  owner_filter: int | None = None,
+                 skip_array: "bytearray | None" = None,
                  **kwargs):
         super().__init__(**kwargs)
         self.pool = pool
@@ -165,6 +166,12 @@ class BatchedRenderer(Widget):
         # so the player can read whose shots are whose at a glance.
         self._owner_array = owner_array
         self._owner_filter = owner_filter
+        # Skip array: when truthy at index i, that slot is rendered as
+        # if it were inactive. Used by the per-player pickup pool — the
+        # local player's already-collected coins stay in the pool (so
+        # the opponent can still grab their copy) but are hidden from
+        # the local player's view.
+        self._skip_array = skip_array
         with self.canvas:
             if tint is not None:
                 self._tint_color = Color(*tint)
@@ -191,6 +198,7 @@ class BatchedRenderer(Widget):
         active = pool.active
         owner_arr = self._owner_array
         owner_filter = self._owner_filter
+        skip_arr = self._skip_array
         verts = self._verts
         indices: list[int] = []
 
@@ -198,6 +206,8 @@ class BatchedRenderer(Widget):
         cap = pool.capacity
         for i in range(cap):
             if not active[i]:
+                continue
+            if skip_arr is not None and skip_arr[i]:
                 continue
             if (owner_filter is not None and owner_arr is not None
                     and owner_arr[i] != owner_filter):

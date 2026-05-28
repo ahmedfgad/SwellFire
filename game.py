@@ -83,17 +83,20 @@ GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within th
 # trivializing the shop. A run of ~70 grunt kills now pays ~21 coins
 # (was 70). Tank kills still feel valuable.
 COIN_PARTIAL_REWARD = {
-    entities.TYPE_GRUNT:    0.30,
-    entities.TYPE_SWARMER:  0.30,
-    entities.TYPE_BOMBER:   0.70,
-    entities.TYPE_SPLITTER: 0.60,
-    entities.TYPE_TANK:     1.50,
+    # Cut to ~1/4 of the original rates — at the old values a single
+    # 100-runner level was paying out 4000+ coins, which broke the
+    # shop economy and made everything trivially affordable.
+    entities.TYPE_GRUNT:    0.08,
+    entities.TYPE_SWARMER:  0.08,
+    entities.TYPE_BOMBER:   0.20,
+    entities.TYPE_SPLITTER: 0.15,
+    entities.TYPE_TANK:     0.40,
 }
-# Gate pickup + level-end bonuses also reduced — coins now come primarily
-# from in-level pickups (see pickup_controller).
-COIN_REWARD_GATE = 1
-COIN_BONUS_LEVEL_COMPLETE = 20
-COIN_BONUS_PER_STAR = 10
+# Per-gate reward dropped to 0 — gates are the gameplay mechanic, not
+# a coin faucet. Level-end completion bonus + per-star also halved.
+COIN_REWARD_GATE = 0
+COIN_BONUS_LEVEL_COMPLETE = 10
+COIN_BONUS_PER_STAR = 5
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -116,6 +119,34 @@ def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
 
 # --- the gameplay screen --------------------------------------------------
 
+class _HeroMarker(Widget):
+    """Coloured ground-ring drawn under a hero for identity.
+
+    Versus mode renders two heroes that share the same atlas frame —
+    without a marker each player has to guess which figure they're
+    steering. This widget draws a small flat ellipse (like a coloured
+    shadow) the hero stands on. Local hero gets green, opponent gets
+    red; both players see "self = green, other = red" so the cue is
+    symmetric across devices.
+    """
+
+    def __init__(self, color: tuple[float, float, float, float], **kwargs):
+        super().__init__(size_hint=(None, None), **kwargs)
+        with self.canvas:
+            self._outline_color = Color(0, 0, 0, 0.55)
+            self._outline = Ellipse()
+            self._color = Color(*color)
+            self._ellipse = Ellipse()
+        self.bind(pos=self._sync, size=self._sync)
+        self._sync()
+
+    def _sync(self, *_):
+        self._outline.pos = (self.x - dp(2), self.y - dp(2))
+        self._outline.size = (self.width + dp(4), self.height + dp(4))
+        self._ellipse.pos = self.pos
+        self._ellipse.size = self.size
+
+
 class _IconStyledButton(ui.StyledButton):
     """StyledButton with a vector icon drawn in ``canvas.after``.
 
@@ -127,14 +158,26 @@ class _IconStyledButton(ui.StyledButton):
 
     def __init__(self, icon_kind: str, **kwargs):
         # Count + status text lives at the bottom of the button so the
-        # icon owns the top half.
+        # icon owns the top half. ``valign`` on a Kivy Label only honors
+        # the alignment when ``text_size`` is set, so the on-resize hook
+        # also writes text_size = button size.
         kwargs.setdefault("halign", "center")
         kwargs.setdefault("valign", "bottom")
-        kwargs.setdefault("padding", (dp(2), dp(2)))
+        kwargs.setdefault("padding", (dp(2), dp(4)))
+        kwargs.setdefault("font_size", sp(15))
+        kwargs.setdefault("bold", True)
         super().__init__(**kwargs)
         self.icon_kind = icon_kind  # "grenade" | "shield"
-        self.bind(pos=lambda *_: self._draw_icon(),
-                  size=lambda *_: self._draw_icon())
+        self.bind(pos=lambda *_: self._on_resize(),
+                  size=lambda *_: self._on_resize())
+        self._on_resize()
+
+    def _on_resize(self) -> None:
+        # Constrain text rendering to the button's box; without this the
+        # Label uses an unbounded text area and ignores valign, leaving
+        # the count number invisible behind the icon.
+        if self.width > 0 and self.height > 0:
+            self.text_size = (self.width, self.height)
         self._draw_icon()
 
     def _draw_icon(self) -> None:
@@ -377,6 +420,10 @@ class GameScreen(ui.StyledScreen):
         # tracks opponent's per-shot rate and fractional kill rewards.
         self._opponent_fire_cooldown = 0.0
         self._opponent_coin_remainder = 0.0
+        # Stats for the end-of-match result dialog (versus only).
+        self._opponent_squad_peak = 1
+        self._opponent_gates_hit = 0
+        self._opponent_gates_missed = 0
         # Opponent's equipped weapon + grenade balance. Updated when
         # opponent passes a WEAPON or GRENADE gate. Mirrors the local
         # current_weapon_id / grenade_count so the opponent's auto-fire
@@ -390,6 +437,11 @@ class GameScreen(ui.StyledScreen):
         self.opponent_double_coin_until = 0.0
         # Tinted renderer used for the opponent's projectiles.
         self.opponent_projectile_renderer = None
+        # Per-hero coloured ground markers — green under the local hero,
+        # red under the opponent. Created lazily in on_enter when in
+        # versus mode, removed on on_leave or when switching to single.
+        self.hero_marker = None
+        self.opponent_marker = None
         self._mp_tick = 0
         self._last_input_norm_x = None
         # M13 — client sends its equipped weapon to the host once after
@@ -704,8 +756,13 @@ class GameScreen(ui.StyledScreen):
             self.pickup_pool = graphics.EntityPool(PICKUP_POOL_CAPACITY, self._atlas)
             self.pickup_controller = entities.PickupController(self.pickup_pool)
             self.pickup_spawner = entities.PickupSpawner(self.pickup_controller)
+            # skip_array hides pickups the local player has already
+            # collected — in versus, the slot remains in the pool so the
+            # opponent can still grab their own copy.
             self.pickup_renderer = graphics.BatchedRenderer(
-                self.pickup_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+                self.pickup_pool,
+                skip_array=self.pickup_controller.consumed_by_p1,
+                size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
             )
             self.stage.add_widget(self.pickup_renderer)
 
@@ -732,21 +789,38 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.hero)
 
-        # M13 — Opponent hero, created once when versus mode is entered.
-        # Same sprite as the local hero, drawn at 0.7 opacity so it reads
-        # as "the other player" without needing a separate art asset.
-        if running.current_mode != "single" and self.opponent_hero is None:
-            self.opponent_hero = graphics.AtlasSprite(
-                self._atlas, HERO_FRAME_NAME,
-                size_hint=(None, None), size=(HERO_W, HERO_H),
-            )
-            self.opponent_hero.opacity = 0.70
-            self.stage.add_widget(self.opponent_hero)
-        elif running.current_mode == "single" and self.opponent_hero is not None:
-            # Going back to single after a versus match — remove the ghost.
-            if self.opponent_hero.parent:
-                self.opponent_hero.parent.remove_widget(self.opponent_hero)
-            self.opponent_hero = None
+        # M13 — Opponent hero + per-hero ground-ring markers so each
+        # player can tell at a glance which figure is theirs. Green
+        # under the local hero, red under the opponent. Added BEFORE
+        # the sprite so the marker sits behind the runner.
+        if running.current_mode != "single":
+            if self.hero_marker is None:
+                self.hero_marker = _HeroMarker(
+                    color=(0.30, 0.85, 0.40, 0.90),
+                    size=(HERO_W * 0.95, HERO_H * 0.20),
+                )
+                # Insert under the hero so the sprite paints over it.
+                self.stage.add_widget(self.hero_marker, index=1)
+            if self.opponent_hero is None:
+                self.opponent_hero = graphics.AtlasSprite(
+                    self._atlas, HERO_FRAME_NAME,
+                    size_hint=(None, None), size=(HERO_W, HERO_H),
+                )
+                self.opponent_hero.opacity = 0.70
+                self.stage.add_widget(self.opponent_hero)
+            if self.opponent_marker is None:
+                self.opponent_marker = _HeroMarker(
+                    color=(0.95, 0.35, 0.35, 0.90),
+                    size=(HERO_W * 0.95, HERO_H * 0.20),
+                )
+                self.stage.add_widget(self.opponent_marker, index=1)
+        elif running.current_mode == "single":
+            for widget_attr in ("opponent_hero", "opponent_marker", "hero_marker"):
+                w = getattr(self, widget_attr, None)
+                if w is not None:
+                    if w.parent:
+                        w.parent.remove_widget(w)
+                    setattr(self, widget_attr, None)
 
         # Keyboard input for weapon swap (1..4 select; W cycles).
         if self._key_handler is None:
@@ -836,6 +910,12 @@ class GameScreen(ui.StyledScreen):
         if self.opponent_hero is not None and self.opponent_hero.parent:
             self.opponent_hero.parent.remove_widget(self.opponent_hero)
         self.opponent_hero = None
+        # Markers go with the heroes so they don't dangle on the next entry.
+        for marker_attr in ("hero_marker", "opponent_marker"):
+            mk = getattr(self, marker_attr, None)
+            if mk is not None and mk.parent:
+                mk.parent.remove_widget(mk)
+            setattr(self, marker_attr, None)
         self.opponent_target_x = 0.0
         self.opponent_squad = 1
         self.opponent_kills = 0
@@ -1253,6 +1333,11 @@ class GameScreen(ui.StyledScreen):
             bob = math.sin(self.distance / 22.0) * 5.0
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
+            # Hero identity marker — green ring under the local hero.
+            if self.hero_marker is not None:
+                self.hero_marker.center_x = self.hero.center_x
+                self.hero_marker.y = self.hero.y - dp(2)
+
             # M13 — Opponent hero. On the HOST this is driven by client
             # input (already converted to pixel-space in
             # _mp_drain_host_inbox). Moves at the same lateral speed cap
@@ -1268,6 +1353,9 @@ class GameScreen(ui.StyledScreen):
                 else:
                     self.opponent_hero.center_x = self.opponent_target_x
                 self.opponent_hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
+                if self.opponent_marker is not None:
+                    self.opponent_marker.center_x = self.opponent_hero.center_x
+                    self.opponent_marker.y = self.opponent_hero.y - dp(2)
 
         # 3. Enemies: spawner interval can be modulated by level type
         #    (static / hybrid / dynamic), then spawner ticks + enemies update.
@@ -1334,9 +1422,10 @@ class GameScreen(ui.StyledScreen):
                 PICKUP_COLLECT_RADIUS,
                 self._on_pickup_collect,
             )
-            # M13 — versus: opponent also picks up coins they cross.
-            # Credits go to opponent_coins (and trigger the double-coin
-            # for opponent only — tracked alongside the local timer).
+            # M13 — versus: opponent collects pickups independently via
+            # the per-player consumed_by_p2 array. The pool slot stays
+            # active until the pickup scrolls off, so both players get
+            # their own coin from each pickup.
             if (self._mp_role() == "host"
                     and self.opponent_hero is not None
                     and self.opponent_alive):
@@ -1345,6 +1434,7 @@ class GameScreen(ui.StyledScreen):
                     self.opponent_hero.center_x, self.opponent_hero.center_y,
                     PICKUP_COLLECT_RADIUS,
                     self._on_opponent_pickup_collect,
+                    player_id=1,
                 )
 
         # 3b. Gates: spawner emits a new pair when distance passes the next
@@ -1857,10 +1947,14 @@ class GameScreen(ui.StyledScreen):
             "distance": int(self.distance),
             "time": self._run_time,
         }
+        # In versus, _mp_broadcast_result has stashed opp_stats; pass it
+        # so the host's own dialog shows the side-by-side comparison
+        # too. Single-player path just leaves it None.
         dialog = ui.LevelResultDialog(
             won=won, stars=stars, score=score, level_label=level_label,
             on_next=on_next, on_retry=on_retry, on_menu=on_menu,
             stats=stats,
+            opponent_stats=getattr(self, "_mp_opponent_stats", None),
         )
         dialog.open()
 
@@ -2080,12 +2174,16 @@ class GameScreen(ui.StyledScreen):
         else:
             p2_norm_x = 0.5
 
-        # Live gate pairs. Each pair: y_frac + 2 panels.
+        # Live gate pairs. Each pair includes BOTH players' consumed +
+        # selected flags so the client can render the gate visual from
+        # *its own* perspective (p2). Without per-player flags the
+        # client always sees the host's consumed/selected dimming even
+        # for gates the client hasn't actually picked yet — that was
+        # the "gates only applied to the host" bug.
         gate_pairs = []
         if self.gate_controller is not None:
             for pair in self.gate_controller.pairs:
                 left, right = sorted(pair, key=lambda g: g.x)
-                # Same y for both panels; emit once.
                 y_frac = (left.y - sy) / sh
                 gate_pairs.append([
                     round(y_frac, 4),
@@ -2095,8 +2193,10 @@ class GameScreen(ui.StyledScreen):
                     left.op,
                     left.value,
                     left.label_text,
-                    1 if left.consumed else 0,
-                    1 if left.selected else 0,
+                    1 if left.consumed else 0,           # c1
+                    1 if left.selected else 0,           # s1
+                    1 if left.consumed_by_p2 else 0,     # c2
+                    1 if left.selected_by_p2 else 0,     # s2
                     round((right.x - sx) / sw, 4),
                     round(right.width / sw, 4),
                     round(right.height / sh, 4),
@@ -2105,6 +2205,8 @@ class GameScreen(ui.StyledScreen):
                     right.label_text,
                     1 if right.consumed else 0,
                     1 if right.selected else 0,
+                    1 if right.consumed_by_p2 else 0,
+                    1 if right.selected_by_p2 else 0,
                 ])
 
         # Live enemies. Compact: [x_frac, y_frac, type_int].
@@ -2135,14 +2237,17 @@ class GameScreen(ui.StyledScreen):
                         int(owner[i]),
                     ])
 
-        # Live coin / double-coin pickups. type_int chooses the frame
-        # on the client (gold ellipse vs white star).
+        # Live coin / double-coin pickups, FILTERED to those the client
+        # hasn't collected yet. Their own ``consumed_by_p2`` flag hides
+        # collected pickups from their view while the host can still
+        # see (and the slot can still scroll off) their own copy.
         pickups = []
         if self.pickup_pool is not None:
             pool = self.pickup_pool
             ptype = self.pickup_controller.type
+            cp2 = self.pickup_controller.consumed_by_p2
             for i in range(pool.capacity):
-                if pool.active[i]:
+                if pool.active[i] and not cp2[i]:
                     pickups.append([
                         round((pool.cx[i] - sx) / sw, 4),
                         round((pool.cy[i] - sy) / sh, 4),
@@ -2304,9 +2409,15 @@ class GameScreen(ui.StyledScreen):
         if self.opponent_hero is not None:
             self.opponent_hero.center_x = sx + float(p1.get("x", 0.5)) * sw
             self.opponent_hero.y = hero_y
+            if self.opponent_marker is not None:
+                self.opponent_marker.center_x = self.opponent_hero.center_x
+                self.opponent_marker.y = self.opponent_hero.y - dp(2)
         if self.hero is not None:
             self.hero.center_x = sx + float(p2.get("x", 0.5)) * sw
             self.hero.y = hero_y
+            if self.hero_marker is not None:
+                self.hero_marker.center_x = self.hero.center_x
+                self.hero_marker.y = self.hero.y - dp(2)
         # --- stats ---------------------------------------------------
         self.squad_count    = int(p2.get("squad", self.squad_count))
         self.kills_total    = int(p2.get("kills", self.kills_total))
@@ -2351,8 +2462,10 @@ class GameScreen(ui.StyledScreen):
         for entry in pairs_snap:
             try:
                 (y_frac,
-                 lx, lw, lh, lop, lval, llabel, lcons, lsel,
-                 rx, rw, rh, rop, rval, rlabel, rcons, rsel) = entry
+                 lx, lw, lh, lop, lval, llabel,
+                 lc1, ls1, lc2, ls2,
+                 rx, rw, rh, rop, rval, rlabel,
+                 rc1, rs1, rc2, rs2) = entry
             except (ValueError, TypeError):
                 continue
             y_px = sy + y_frac * sh
@@ -2368,12 +2481,15 @@ class GameScreen(ui.StyledScreen):
                 size=(rw * sw, rh * sh),
                 pos=(sx + rx * sw, y_px),
             )
-            if lcons:
-                if lsel: left.mark_selected()
-                else:    left.mark_consumed(dim=True)
-            if rcons:
-                if rsel: right.mark_selected()
-                else:    right.mark_consumed(dim=True)
+            # Client renders using p2 flags — host's picks don't dim
+            # the client's view, so the player's own gate state stays
+            # readable.
+            if lc2:
+                if ls2: left.mark_selected()
+                else:   left.mark_consumed(dim=True)
+            if rc2:
+                if rs2: right.mark_selected()
+                else:   right.mark_consumed(dim=True)
             gc.stage.add_widget(left)
             gc.stage.add_widget(right)
             gc.pairs.append([left, right])
@@ -2482,24 +2598,51 @@ class GameScreen(ui.StyledScreen):
         running = ui.app()
         if running.mp_net is None:
             return
+        gates_hit_p1 = self.gate_controller.applied_total if self.gate_controller else 0
+        gates_missed_p1 = self.gate_controller.missed_total if self.gate_controller else 0
         p1_score = levels.score_for(
             self.kills_total, max(0, self.squad_count),
-            self.gate_controller.applied_total if self.gate_controller else 0,
-            self.gate_controller.missed_total if self.gate_controller else 0,
+            gates_hit_p1, gates_missed_p1,
         )
         p2_score = levels.score_for(
-            self.opponent_kills, max(0, self.opponent_squad), 0, 0,
+            self.opponent_kills, max(0, self.opponent_squad),
+            self._opponent_gates_hit, self._opponent_gates_missed,
         )
-        # Send the client *their* perspective: local_won + local_score.
+        # Build both stat dicts so each side can render the side-by-side
+        # comparison panel in LevelResultDialog.
+        host_stats = {
+            "coins_total": self._coins_earned,
+            "coins_pickup": self._coins_pickups,
+            "kills":        self.kills_total,
+            "gates_hit":    gates_hit_p1,
+            "gates_missed": gates_missed_p1,
+            "squad_end":    max(0, self.squad_count),
+            "squad_peak":   max(0, self._squad_peak),
+            "distance":     int(self.distance),
+            "time":         self._run_time,
+        }
+        opp_stats = {
+            "coins_total": self.opponent_coins,
+            "coins_pickup": 0,
+            "kills":        self.opponent_kills,
+            "gates_hit":    self._opponent_gates_hit,
+            "gates_missed": self._opponent_gates_missed,
+            "squad_end":    max(0, self.opponent_squad),
+            "squad_peak":   max(0, self._opponent_squad_peak),
+            "distance":     int(self.distance),
+            "time":         self._run_time,
+        }
+        # Send each side its perspective: their score, their stats,
+        # opponent's stats. Client renders identical comparison panel.
         running.mp_net.send({
-            "t": "result",
-            "local_won":   p2_score > p1_score,
-            "local_score": p2_score,
+            "t":              "result",
+            "local_won":      p2_score > p1_score,
+            "local_score":    p2_score,
+            "local_stats":    opp_stats,    # client's own = host's opponent
+            "opponent_stats": host_stats,
         })
-        # On the host's own screen, the existing LevelResultDialog still
-        # opens through _end_level → so just stash who actually won for
-        # downstream code that wants to know.
         self._mp_local_won = p1_score >= p2_score
+        self._mp_opponent_stats = opp_stats
 
     def _mp_show_result(self, msg: dict) -> None:
         """Both sides: the host has declared the match over. Render the
@@ -2512,22 +2655,26 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
-        # In versus, both buttons leave the match — there's no "retry"
-        # without re-coordinating with the other player, and no "next
-        # level" either. Both route back to the multiplayer menu via
-        # _exit (which already handles mp_net teardown).
+        # The host packs both stat dicts into the result message so the
+        # client renders the same side-by-side YOU/OPP panel.
+        local_stats = msg.get("local_stats") or {
+            "coins_total": self._coins_earned,
+            "coins_pickup": self._coins_pickups,
+            "kills":        self.kills_total,
+            "gates_hit":    0, "gates_missed": 0,
+            "squad_end":    max(0, self.squad_count),
+            "squad_peak":   max(0, self._squad_peak),
+            "distance":     int(self.distance),
+            "time":         self._run_time,
+        }
+        opponent_stats = msg.get("opponent_stats")
         dialog = ui.LevelResultDialog(
             won=won, stars=0, score=score,
             level_label="Versus  -  {}".format(
                 "You Win!" if won else "Opponent Wins"),
             on_next=None, on_retry=self._exit, on_menu=self._exit,
-            stats={"coins_total": self._coins_earned,
-                   "coins_pickup": self._coins_pickups,
-                   "kills":        self.kills_total,
-                   "gates_hit":    0, "gates_missed": 0,
-                   "squad_end":    max(0, self.squad_count),
-                   "squad_peak":   max(0, self._squad_peak),
-                   "distance":     int(self.distance), "time": self._run_time},
+            stats=local_stats,
+            opponent_stats=opponent_stats,
         )
         dialog.open()
 
@@ -2548,19 +2695,38 @@ class GameScreen(ui.StyledScreen):
             return
 
         # --- auto-fire ---------------------------------------------------
-        # Uses opponent's currently equipped weapon (set by WEAPON
-        # gates). No tier multiplier, no squad followers — just the
-        # opponent hero's muzzle.
+        # Firepower now scales with opponent_squad — opponent fires
+        # min(squad, MAX_SHOOTERS_PER_SHOT) projectiles, simulating the
+        # squad's combined volley. Earlier the opponent always shot a
+        # single bullet regardless of their squad count, which made
+        # +N/×N gate picks feel useless on the opponent's side.
         weapon = weapons.get(self.opponent_weapon_id)
         self._opponent_fire_cooldown -= dt
         if self._opponent_fire_cooldown <= 0.0:
-            entities.fire_weapon(
-                self.opponent_hero.center_x,
-                self.opponent_hero.center_y,
-                MUZZLE_OFFSET_Y, weapon,
-                self.projectile_controller, self.enemy_controller,
-                self._fire_rng, owner=1,
+            target = entities.find_nearest_enemy(
+                self.opponent_hero.center_x, self.opponent_hero.center_y,
+                self.enemy_controller,
             )
+            if target >= 0:
+                ep = self.enemy_pool
+                target_x = ep.cx[target]
+                target_y = ep.cy[target]
+                # Build a fan of shooter positions around the opponent
+                # hero — opponent's squad followers aren't rendered, but
+                # their fire contribution still counts.
+                n = max(1, min(self.opponent_squad, MAX_SHOOTERS_PER_SHOT))
+                positions = []
+                for i in range(n):
+                    offset = (i - (n - 1) / 2.0) * 14.0
+                    positions.append((
+                        self.opponent_hero.center_x + offset,
+                        self.opponent_hero.center_y + MUZZLE_OFFSET_Y,
+                    ))
+                entities.fire_from_positions(
+                    positions, target_x, target_y, weapon,
+                    self.projectile_controller, self._fire_rng,
+                    owner=1,
+                )
             self._opponent_fire_cooldown = 1.0 / weapon.fire_rate
 
         # --- gate pass-through ------------------------------------------
@@ -2569,7 +2735,8 @@ class GameScreen(ui.StyledScreen):
         op_cx = self.opponent_hero.center_x
         op_cy = self.opponent_hero.center_y
         for pair in self.gate_controller.pairs:
-            if any(g.opponent_consumed for g in pair):
+            # Per-player flag — host's `consumed` doesn't affect opponent.
+            if any(g.consumed_by_p2 for g in pair):
                 continue
             pair_line_y = pair[0].y + pair[0].height * 0.5
             if pair_line_y > op_cy + pair[0].height * 0.25:
@@ -2580,9 +2747,16 @@ class GameScreen(ui.StyledScreen):
                     picked = g
                     break
             if picked is not None:
+                picked.selected_by_p2 = True
                 self._apply_gate_effect_to_opponent(picked)
+                self._opponent_gates_hit += 1
+            else:
+                self._opponent_gates_missed += 1
             for g in pair:
-                g.opponent_consumed = True
+                g.consumed_by_p2 = True
+            # Track opponent's squad peak for the end-of-level summary.
+            if self.opponent_squad > self._opponent_squad_peak:
+                self._opponent_squad_peak = self.opponent_squad
 
     def _apply_gate_effect_to_opponent(self, gate) -> None:
         """Mirror of _on_apply_gate but writes to opponent state.

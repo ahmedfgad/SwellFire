@@ -685,7 +685,10 @@ class PickupController:
                            DOUBLE_COIN_DURATION_SEC.
     """
 
-    COIN_PER_PICKUP = 5
+    # Was 5; coin economy bled at ~4 K per run with progression rewards.
+    # Reduced to 1 (×2 = 2 when the double-coin power-up is active),
+    # in line with the progression-side reductions below.
+    COIN_PER_PICKUP = 1
     DOUBLE_COIN_DURATION_SEC = 12.0
     DESPAWN_BELOW_Y_MARGIN = 60.0
 
@@ -693,6 +696,13 @@ class PickupController:
         self.pool = pool
         cap = pool.capacity
         self.type = bytearray(cap)       # PICKUP_*
+        # M13 — per-player "I have collected this" flags. In single-
+        # player mode only ``consumed_by_p1`` matters and serves the
+        # same role the pool.release() previously did (renderer skips
+        # collected slots). In versus each player tracks independently
+        # so the second player to cross a coin still gets it.
+        self.consumed_by_p1 = bytearray(cap)
+        self.consumed_by_p2 = bytearray(cap)
         self.spawned_total = 0
         self.collected_total = 0
 
@@ -705,13 +715,20 @@ class PickupController:
         return idx
 
     def update(self, dt: float, y_min: float) -> None:
-        """Scroll pickups down with the world; despawn off-bottom."""
+        """Scroll pickups down with the world; despawn off-bottom.
+
+        Releasing the slot also resets both per-player consumed flags
+        so the slot can be reused for a fresh pickup without
+        contaminating the next entity's state.
+        """
         pool = self.pool
         active = pool.active
         cx = pool.cx
         cy = pool.cy
         vx = pool.vx
         vy = pool.vy
+        cp1 = self.consumed_by_p1
+        cp2 = self.consumed_by_p2
         despawn = y_min - self.DESPAWN_BELOW_Y_MARGIN
         for i in range(pool.capacity):
             if not active[i]:
@@ -720,6 +737,8 @@ class PickupController:
             cy[i] += vy[i] * dt
             if cy[i] < despawn:
                 pool.release(i)
+                cp1[i] = 0
+                cp2[i] = 0
 
 
 class PickupSpawner:
@@ -768,28 +787,34 @@ def resolve_pickup_collection(
     hero_cx: float, hero_cy: float,
     radius: float,
     on_collect,
+    player_id: int = 0,
 ) -> int:
-    """Detect hero overlap with pickups; on hit, fire `on_collect(ptype, x, y)`
-    and recycle the pickup. Returns number collected this tick."""
+    """Detect hero overlap with pickups; on hit, fire `on_collect(ptype, x, y)`.
+
+    Per-player consumption (M13): rather than releasing the pool slot
+    on first contact, this only sets ``consumed_by_p<player_id>[i]``.
+    The slot stays active in the pool so the other player can still
+    collect their own copy. The slot is finally released when the
+    pickup scrolls off the bottom of the play area.
+    """
     pool = pickup_controller.pool
     active = pool.active
     cx = pool.cx
     cy = pool.cy
     types = pickup_controller.type
+    consumed = (pickup_controller.consumed_by_p1 if player_id == 0
+                else pickup_controller.consumed_by_p2)
     r2 = radius * radius
     collected = 0
     for i in range(pool.capacity):
-        if not active[i]:
+        if not active[i] or consumed[i]:
             continue
         dx = cx[i] - hero_cx
         dy = cy[i] - hero_cy
         if dx * dx + dy * dy <= r2:
-            ptype = int(types[i])
-            cx_i = cx[i]
-            cy_i = cy[i]
-            pool.release(i)
+            consumed[i] = 1
             pickup_controller.collected_total += 1
-            on_collect(ptype, cx_i, cy_i)
+            on_collect(int(types[i]), cx[i], cy[i])
             collected += 1
     return collected
 

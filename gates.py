@@ -67,14 +67,18 @@ class Gate(Widget):
         self.op = op
         self.value = value
         self.label_text = label_text
-        self.consumed = False        # True once a gate in the pair fires
+        self.consumed = False        # True once a gate in the pair fires (HOST/p1's view)
         self.missed = False          # True if pair scrolled past without entering
-        self.selected = False        # True if THIS gate was the one picked
-        # M13 — versus only. Independent per-hero tracking so a gate
-        # consumed by the local player doesn't lock out the opponent.
-        # GameScreen sets opponent_consumed once the opponent has passed
-        # the gate's row, whether they entered a panel or not.
-        self.opponent_consumed = False
+        self.selected = False        # True if THIS gate was the one picked (p1)
+        # M13 — versus. Independent per-player flags so each player's
+        # interaction with the gate doesn't affect the other. p1 = host,
+        # p2 = client. ``consumed_by_p2`` was previously
+        # ``opponent_consumed``; renamed for symmetry. Visual marking
+        # on the host's widget still tracks p1; the per-player snapshot
+        # sends p2's flags separately so the client can render its own
+        # consumed/selected visual independently.
+        self.consumed_by_p2 = False
+        self.selected_by_p2 = False
 
         color = OP_COLORS[op]
         with self.canvas.before:

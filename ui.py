@@ -407,7 +407,8 @@ class LevelResultDialog(ModalView):
     """Modal shown at level end: title, stars (if won), score, action buttons."""
 
     def __init__(self, won: bool, stars: int, score: int, level_label: str,
-                 *, on_next=None, on_retry, on_menu, stats=None, **kwargs):
+                 *, on_next=None, on_retry, on_menu, stats=None,
+                 opponent_stats=None, **kwargs):
         # Slightly taller now to fit the stats block.
         super().__init__(size_hint=(0.80, 0.78), auto_dismiss=False, **kwargs)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
@@ -446,35 +447,90 @@ class LevelResultDialog(ModalView):
         # just whether they passed. Children especially want to see numbers
         # tick up — "I killed 47 of them" is a story they can retell.
         if stats:
-            grid = GridLayout(cols=2, spacing=(dp(8), dp(4)),
-                              size_hint_y=0.30,
-                              padding=(dp(16), 0, dp(16), 0))
-            # First the headline row: total coins broken out as X + Y.
-            coin_total = stats.get("coins_total", 0)
-            coin_pickup = stats.get("coins_pickup", 0)
-            coin_other = coin_total - coin_pickup
-            coin_value = "[b]{}[/b]   ({} pickups + {} progress)".format(
-                coin_total, coin_pickup, coin_other,
-            )
-            _add_stat_row(grid, "Coins earned", coin_value,
-                          value_color=(1.0, 0.92, 0.40, 1.0))
-            _add_stat_row(grid, "Enemies killed",
-                          "[b]{}[/b]".format(stats.get("kills", 0)))
-            _add_stat_row(grid, "Gates passed",
-                          "[b]{}[/b] hit  /  [b]{}[/b] missed".format(
-                              stats.get("gates_hit", 0),
-                              stats.get("gates_missed", 0),
-                          ))
-            _add_stat_row(grid, "Squad survived",
-                          "[b]{}[/b] of {} runners".format(
-                              stats.get("squad_end", 0),
-                              stats.get("squad_peak", 0),
-                          ))
-            _add_stat_row(grid, "Distance",
-                          "[b]{}[/b] m".format(stats.get("distance", 0)))
-            _add_stat_row(grid, "Time",
-                          "[b]{}[/b]".format(_format_time(stats.get("time", 0.0))))
-            box.add_widget(grid)
+            if opponent_stats:
+                # Versus: 3-column grid with header — Label | YOU | OPP
+                grid = GridLayout(cols=3, spacing=(dp(8), dp(4)),
+                                  size_hint_y=0.36,
+                                  padding=(dp(8), 0, dp(8), 0))
+                grid.add_widget(Label(text="", size_hint_x=0.40))
+                grid.add_widget(Label(text="YOU", font_size=sp(13), bold=True,
+                                      color=(0.40, 0.85, 0.50, 1.0),
+                                      halign="center", valign="middle",
+                                      size_hint_x=0.30))
+                grid.add_widget(Label(text="OPP", font_size=sp(13), bold=True,
+                                      color=(0.95, 0.45, 0.45, 1.0),
+                                      halign="center", valign="middle",
+                                      size_hint_x=0.30))
+                rows = [
+                    ("Coins",   stats.get("coins_total", 0),
+                                opponent_stats.get("coins_total", 0),
+                                (1.0, 0.92, 0.40, 1.0)),
+                    ("Kills",   stats.get("kills", 0),
+                                opponent_stats.get("kills", 0),
+                                (0.95, 0.50, 0.45, 1.0)),
+                    ("Gates",   "{}/{}".format(stats.get("gates_hit", 0),
+                                               stats.get("gates_missed", 0)),
+                                "{}/{}".format(opponent_stats.get("gates_hit", 0),
+                                               opponent_stats.get("gates_missed", 0)),
+                                (1, 1, 1, 1)),
+                    ("Squad",   "{}/{}".format(stats.get("squad_end", 0),
+                                               stats.get("squad_peak", 0)),
+                                "{}/{}".format(opponent_stats.get("squad_end", 0),
+                                               opponent_stats.get("squad_peak", 0)),
+                                (0.65, 0.85, 1.0, 1.0)),
+                    ("Distance","{} m".format(stats.get("distance", 0)),
+                                "{} m".format(opponent_stats.get("distance", 0)),
+                                (1, 1, 1, 1)),
+                    ("Time",    _format_time(stats.get("time", 0.0)),
+                                _format_time(opponent_stats.get("time", 0.0)),
+                                (1, 1, 1, 1)),
+                ]
+                for label, you_v, opp_v, accent in rows:
+                    grid.add_widget(Label(
+                        text=label, font_size=sp(14), color=(1, 1, 1, 0.78),
+                        halign="right", valign="middle", size_hint_x=0.40,
+                    ))
+                    grid.add_widget(Label(
+                        text="[b]{}[/b]".format(you_v), font_size=sp(14),
+                        bold=True, color=accent, markup=True,
+                        halign="center", valign="middle", size_hint_x=0.30,
+                    ))
+                    grid.add_widget(Label(
+                        text="[b]{}[/b]".format(opp_v), font_size=sp(14),
+                        bold=True, color=accent, markup=True,
+                        halign="center", valign="middle", size_hint_x=0.30,
+                    ))
+                box.add_widget(grid)
+            else:
+                grid = GridLayout(cols=2, spacing=(dp(8), dp(4)),
+                                  size_hint_y=0.30,
+                                  padding=(dp(16), 0, dp(16), 0))
+                # First the headline row: total coins broken out as X + Y.
+                coin_total = stats.get("coins_total", 0)
+                coin_pickup = stats.get("coins_pickup", 0)
+                coin_other = coin_total - coin_pickup
+                coin_value = "[b]{}[/b]   ({} pickups + {} progress)".format(
+                    coin_total, coin_pickup, coin_other,
+                )
+                _add_stat_row(grid, "Coins earned", coin_value,
+                              value_color=(1.0, 0.92, 0.40, 1.0))
+                _add_stat_row(grid, "Enemies killed",
+                              "[b]{}[/b]".format(stats.get("kills", 0)))
+                _add_stat_row(grid, "Gates passed",
+                              "[b]{}[/b] hit  /  [b]{}[/b] missed".format(
+                                  stats.get("gates_hit", 0),
+                                  stats.get("gates_missed", 0),
+                              ))
+                _add_stat_row(grid, "Squad survived",
+                              "[b]{}[/b] of {} runners".format(
+                                  stats.get("squad_end", 0),
+                                  stats.get("squad_peak", 0),
+                              ))
+                _add_stat_row(grid, "Distance",
+                              "[b]{}[/b] m".format(stats.get("distance", 0)))
+                _add_stat_row(grid, "Time",
+                              "[b]{}[/b]".format(_format_time(stats.get("time", 0.0))))
+                box.add_widget(grid)
 
         button_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=0.18)
         if won and on_next is not None:
