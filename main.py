@@ -12,10 +12,6 @@ import os
 
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
-from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.metrics import sp, dp
 from kivy.config import Config
 
 # Lock to landscape on desktop (Android / iOS use the orientation set in their
@@ -27,84 +23,9 @@ Config.set("graphics", "resizable", "1")
 import ui
 import levels
 import stresstest
+import game
 from audio import AudioManager
 from state import GameState
-
-
-class PlaceholderGameScreen(ui.StyledScreen):
-    """Stand-in gameplay screen used while M3-M13 wire up the real one.
-
-    Shows the current level / world / mode and a Back button. Replaced when
-    the real GameScreen lands (renderer in M3, gameplay through M13).
-    """
-    theme_world = 1
-
-    def build(self):
-        self.title_label = Label(
-            text="", font_size=sp(34), bold=True,
-            color=[1, 0.88, 0.2, 1],
-            halign="center", valign="middle",
-            size_hint=(0.9, 0.18), pos_hint={"center_x": 0.5, "top": 0.95},
-        )
-        self.title_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.root_layout.add_widget(self.title_label)
-
-        self.info = Label(
-            text="Gameplay lands across milestones M3-M13.\n"
-                 "M1 only wires up the screens and the saved state.",
-            font_size=sp(18), color=[1, 1, 1, 0.92],
-            halign="center", valign="middle",
-            size_hint=(0.8, 0.3), pos_hint={"center_x": 0.5, "center_y": 0.55},
-        )
-        self.info.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.root_layout.add_widget(self.info)
-
-        row = BoxLayout(
-            orientation="horizontal", spacing=dp(18),
-            size_hint=(0.7, 0.12), pos_hint={"center_x": 0.5, "y": 0.08},
-        )
-        finish = ui.StyledButton(text="Mark complete (stub)", bg=[0.2, 0.7, 0.4, 1])
-        finish.bind(on_release=lambda *_: self._mark_complete())
-        back = ui.StyledButton(text="Back", bg=[0.45, 0.45, 0.5, 1])
-        back.bind(on_release=lambda *_: self._exit())
-        row.add_widget(finish)
-        row.add_widget(back)
-        self.root_layout.add_widget(row)
-
-    def on_enter(self):
-        running = app()
-        if running.current_mode == "single" and running.current_level:
-            world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
-            theme = levels.get_world(world)
-            self.title_label.text = "World {} - {}\nLevel {}".format(
-                world, theme["name"], running.current_level)
-            self.bg.set_theme(theme)
-            running.audio.play_level_music(world)
-        else:
-            self.title_label.text = "Multiplayer Versus\n(mode: {})".format(running.current_mode)
-            running.audio.play_level_music(1)
-
-    def _mark_complete(self):
-        """Stub that advances progression so the level-select screen can be
-        exercised end-to-end during M1 testing. Real win condition + star
-        scoring lands in M9-M10."""
-        running = app()
-        if running.current_mode == "single" and running.current_level:
-            running.state.unlock_up_to(running.current_level + 1)
-            running.state.record_result(running.current_level, score=100, stars=1, distance=500)
-        running.go("menu")
-
-    def _exit(self):
-        running = app()
-        # Tear down any active network link if this was a multiplayer match.
-        if running.mp_net is not None:
-            try:
-                running.mp_net.send_leave()
-            except Exception:
-                pass
-            running.mp_net.stop()
-            running.mp_net = None
-        running.go("menu")
 
 
 def app():
@@ -147,7 +68,7 @@ class GateRunnerApp(App):
         self.sm.add_widget(ui.MultiplayerMenuScreen(name="multiplayer"))
         self.sm.add_widget(ui.HostScreen(name="mphost"))
         self.sm.add_widget(ui.JoinScreen(name="mpjoin"))
-        self.sm.add_widget(PlaceholderGameScreen(name="game"))
+        self.sm.add_widget(game.GameScreen(name="game"))
         self.sm.add_widget(stresstest.StressTestScreen(name="stresstest"))
         return self.sm
 

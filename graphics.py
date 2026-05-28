@@ -266,6 +266,38 @@ class DebugOverlay(Widget):
             self._tick = None
 
 
+# --- single-sprite widget for hero / boss / UI sprites -------------------
+
+class AtlasSprite(Widget):
+    """One sprite from an atlas drawn as a single textured Rectangle.
+
+    Use this for low-count widgets that need detail and interaction (hero,
+    boss, gate panel art). Pooled gameplay swarms go through `BatchedRenderer`
+    instead — that's where the per-draw-call cost actually matters.
+    """
+
+    def __init__(self, atlas: "SpriteAtlas", frame_name: str, **kwargs):
+        super().__init__(**kwargs)
+        self._atlas = atlas
+        u0, v0, u1, v1 = atlas.frame(frame_name)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            self._rect = Rectangle(
+                texture=atlas.texture,
+                tex_coords=(u0, v0, u1, v0, u1, v1, u0, v1),
+            )
+        self.bind(pos=self._sync, size=self._sync)
+        self._sync()
+
+    def _sync(self, *_):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+    def set_frame(self, frame_name: str) -> None:
+        u0, v0, u1, v1 = self._atlas.frame(frame_name)
+        self._rect.tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
+
+
 # Atlas-discovery helper for the runtime: lets gameplay code ask for an
 # atlas by base name (e.g. "stress") and get the right paths in dev *and*
 # in a frozen PyInstaller bundle.
