@@ -19,8 +19,10 @@ Not yet here (later milestones, each leaves a runnable build):
 from __future__ import annotations
 
 import math
+import random
 
 from kivy.clock import Clock
+from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, Line
 from kivy.metrics import sp, dp
 from kivy.uix.label import Label
@@ -30,6 +32,7 @@ import entities
 import graphics
 import levels
 import ui
+import weapons
 
 
 # --- gameplay constants ---------------------------------------------------
@@ -43,6 +46,12 @@ LANE_GRAVITY_RADIUS_PX = 80.0       # only engages within this distance of a lan
 N_STRIPES = 14                      # dashed centerline stripes
 STRIPE_LENGTH = 36.0                # px
 ENEMY_POOL_CAPACITY = 200           # M5: 50 typical, stress to 200
+PROJECTILE_POOL_CAPACITY = 120      # rifle * shotgun headroom
+PARTICLE_POOL_CAPACITY = 300        # ~6 particles per kill, ~30 kills concurrent
+GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
+MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
+HERO_FRAME_NAME = "runner_blue"
+DEFAULT_WEAPON_ID = "pistol"
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -89,6 +98,20 @@ class GameScreen(ui.StyledScreen):
         self.enemy_controller: entities.EnemyController | None = None
         self.enemy_spawner: entities.EnemySpawner | None = None
         self.enemy_renderer: graphics.BatchedRenderer | None = None
+        # Projectile / particle / shooting systems (M6).
+        self.projectile_pool: graphics.EntityPool | None = None
+        self.projectile_controller: entities.ProjectileController | None = None
+        self.projectile_renderer: graphics.BatchedRenderer | None = None
+        self.particle_pool: graphics.EntityPool | None = None
+        self.particle_controller: entities.ParticleController | None = None
+        self.particle_renderer: graphics.BatchedRenderer | None = None
+        self.grid = entities.SpatialGrid(GRID_CELL_PX)
+        self.current_weapon_id = DEFAULT_WEAPON_ID
+        self._fire_cooldown = 0.0
+        self._fire_rng = random.Random()
+        self.kills_total = 0
+        # Keyboard binding handle so on_leave can detach cleanly.
+        self._key_handler = None
 
         # The "stage" is the road surface area the hero runs in. It's narrower
         # than the screen so left/right margins read as background scenery.
@@ -191,7 +214,7 @@ class GameScreen(ui.StyledScreen):
             png_path, json_path = graphics.find_atlas("stress")
             self._atlas = graphics.SpriteAtlas(png_path, json_path)
 
-        # Enemy systems first so the enemy mesh draws under the hero.
+        # Pools + renderers, in draw order: enemy (back) → projectile → particle → hero (front).
         if self.enemy_pool is None:
             self.enemy_pool = graphics.EntityPool(ENEMY_POOL_CAPACITY, self._atlas)
             self.enemy_controller = entities.EnemyController(self.enemy_pool)
@@ -201,13 +224,38 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.enemy_renderer)
 
-        # Hero on top.
+        if self.projectile_pool is None:
+            self.projectile_pool = graphics.EntityPool(PROJECTILE_POOL_CAPACITY, self._atlas)
+            self.projectile_controller = entities.ProjectileController(self.projectile_pool)
+            self.projectile_renderer = graphics.BatchedRenderer(
+                self.projectile_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.projectile_renderer)
+
+        if self.particle_pool is None:
+            self.particle_pool = graphics.EntityPool(PARTICLE_POOL_CAPACITY, self._atlas)
+            self.particle_controller = entities.ParticleController(self.particle_pool)
+            self.particle_renderer = graphics.BatchedRenderer(
+                self.particle_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.particle_renderer)
+
         if self.hero is None:
             self.hero = graphics.AtlasSprite(
-                self._atlas, "runner_blue",
+                self._atlas, HERO_FRAME_NAME,
                 size_hint=(None, None), size=(HERO_W, HERO_H),
             )
             self.stage.add_widget(self.hero)
+
+        # Keyboard input for weapon swap (1..4 select; W cycles).
+        if self._key_handler is None:
+            self._key_handler = self._on_key
+            Window.bind(on_key_down=self._key_handler)
+
+        # Reset shooting state.
+        self.current_weapon_id = DEFAULT_WEAPON_ID
+        self._fire_cooldown = 0.0
+        self.kills_total = 0
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -217,14 +265,25 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
-        if self.enemy_renderer is not None and self.enemy_renderer.parent:
-            self.enemy_renderer.parent.remove_widget(self.enemy_renderer)
+        if self._key_handler is not None:
+            Window.unbind(on_key_down=self._key_handler)
+            self._key_handler = None
+        for renderer in (self.enemy_renderer, self.projectile_renderer,
+                         self.particle_renderer):
+            if renderer is not None and renderer.parent:
+                renderer.parent.remove_widget(renderer)
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
         self.enemy_pool = None
         self.enemy_controller = None
         self.enemy_spawner = None
         self.enemy_renderer = None
+        self.projectile_pool = None
+        self.projectile_controller = None
+        self.projectile_renderer = None
+        self.particle_pool = None
+        self.particle_controller = None
+        self.particle_renderer = None
         self.hero = None
         self._dragging = False
 
@@ -277,32 +336,93 @@ class GameScreen(ui.StyledScreen):
             bob = math.sin(self.distance / 22.0) * 5.0
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
-        # 3. Enemies: spawner ticks → enemies updated → renderer rebuilt.
+        # 3. Enemies: spawner ticks → enemies updated.
+        x_min = sx
+        y_min = sy
+        x_max = sx + sw
+        y_max = sy + sh
         if (self.enemy_controller is not None
                 and self.enemy_spawner is not None
-                and self.enemy_renderer is not None
                 and self.hero is not None):
-            hero_cx = self.hero.center_x
-            x_min = sx
-            y_min = sy
-            x_max = sx + sw
-            y_max = sy + sh
             self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
-            self.enemy_controller.update(dt, hero_cx, x_min, y_min, x_max, y_max)
-            self.enemy_renderer.rebuild()
+            self.enemy_controller.update(dt, self.hero.center_x,
+                                         x_min, y_min, x_max, y_max)
 
-        # 4. HUD + debug overlay.
+        # 4. Auto-fire: cooldown → fire_weapon → projectile update → collision → particles.
+        if (self.hero is not None
+                and self.projectile_controller is not None
+                and self.particle_controller is not None
+                and self.enemy_controller is not None):
+            weapon = weapons.get(self.current_weapon_id)
+            self._fire_cooldown -= dt
+            if self._fire_cooldown <= 0.0:
+                # Only fire if there's a target; otherwise leave the cooldown at
+                # 0 so we shoot the instant an enemy appears.
+                target = entities.find_nearest_enemy(
+                    self.hero.center_x, self.hero.center_y, self.enemy_controller,
+                )
+                if target >= 0:
+                    entities.fire_weapon(
+                        self.hero.center_x, self.hero.center_y, MUZZLE_OFFSET_Y,
+                        weapon, self.projectile_controller, self.enemy_controller,
+                        self._fire_rng,
+                    )
+                    self._fire_cooldown = 1.0 / weapon.fire_rate
+
+            self.projectile_controller.update(dt, x_min, y_min, x_max, y_max)
+
+            # Collision: projectile vs enemy via spatial grid; each kill bursts particles.
+            def _on_kill(hit_x, hit_y, _pc=self.particle_controller, _rng=self._fire_rng):
+                _pc.burst(hit_x, hit_y, count=6, speed=240.0, ttl=0.35,
+                          size=10.0, frame="particle", rng=_rng)
+            kills = entities.resolve_projectile_collisions(
+                self.projectile_controller, self.enemy_controller, self.grid, _on_kill,
+            )
+            self.kills_total += kills
+
+            self.particle_controller.update(dt)
+
+        # 5. Mesh rebuilds (one canvas write per renderer per frame).
+        if self.enemy_renderer is not None:
+            self.enemy_renderer.rebuild()
+        if self.projectile_renderer is not None:
+            self.projectile_renderer.rebuild()
+        if self.particle_renderer is not None:
+            self.particle_renderer.rebuild()
+
+        # 6. HUD + debug overlay.
         hero_cx = self.hero.center_x if self.hero is not None else 0.0
         enemy_count = self.enemy_pool.active_count if self.enemy_pool is not None else 0
-        self.hud_label.text = "Distance {:5.0f} m     Hero X {:.0f} px     Enemies {:3d}".format(
-            self.distance, hero_cx, enemy_count,
+        weapon_name = weapons.get(self.current_weapon_id).name
+        self.hud_label.text = ("Distance {:5.0f} m     Hero X {:.0f}     "
+                               "Weapon: {}     Kills {}").format(
+            self.distance, hero_cx, weapon_name, self.kills_total,
         )
         spawned = self.enemy_controller.spawned_total if self.enemy_controller else 0
-        recycled = self.enemy_controller.recycled_total if self.enemy_controller else 0
+        proj_active = self.projectile_pool.active_count if self.projectile_pool else 0
+        part_active = self.particle_pool.active_count if self.particle_pool else 0
         self.debug.report_counts(
-            dist=int(self.distance), enemies=enemy_count,
-            spawned=spawned, recycled=recycled,
+            dist=int(self.distance),
+            enemies=enemy_count, spawned=spawned, kills=self.kills_total,
+            projectiles=proj_active, particles=part_active,
         )
+
+    # --- weapon switching keyboard ---------------------------------------
+
+    def _on_key(self, _window, _key, _scancode, codepoint, _modifier):
+        if not codepoint:
+            return False
+        if codepoint == "w":
+            self.current_weapon_id = weapons.next_id(self.current_weapon_id)
+            self._fire_cooldown = 0.0
+            return True
+        if codepoint in ("1", "2", "3", "4"):
+            new_id = weapons.by_index(int(codepoint) - 1)
+            if new_id is not None:
+                self.current_weapon_id = new_id
+                self._fire_cooldown = 0.0
+                return True
+        return False
 
     # --- input ------------------------------------------------------------
 
