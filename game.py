@@ -133,6 +133,11 @@ class GameScreen(ui.StyledScreen):
         self.boss_controller: boss_module.BossController | None = None
         self.boss_widget: boss_module.BossWidget | None = None
         self.boss_hp_bar: boss_module.BossHPBar | None = None
+        # Screen shake (M11). The shake offset is applied to root_layout.pos
+        # so the whole gameplay frame (stage + HUD) judders together.
+        self.shake_intensity = 0.0
+        self.shake_x = 0.0
+        self.shake_y = 0.0
         # Keyboard binding handle so on_leave can detach cleanly.
         self._key_handler = None
 
@@ -354,6 +359,11 @@ class GameScreen(ui.StyledScreen):
 
     def _reset(self, _dt):
         self.distance = 0.0
+        # Reset shake so a fresh level doesn't inherit the previous one's kick.
+        self.shake_intensity = 0.0
+        self.shake_x = 0.0
+        self.shake_y = 0.0
+        self.root_layout.pos = (0, 0)
         sx, sy = self.stage.pos
         sw, sh = self.stage.size
         if self.hero is not None:
@@ -457,9 +467,63 @@ class GameScreen(ui.StyledScreen):
 
     # --- per-frame update -------------------------------------------------
 
+    # --- M11 polish helpers ----------------------------------------------
+
+    SHAKE_DECAY_PER_SEC = 9.0
+    SHAKE_CAP = 18.0
+
+    def _add_shake(self, amount: float) -> None:
+        """Bump the shake intensity. Capped so several events in one frame
+        don't compound into a window-shattering shake."""
+        self.shake_intensity = min(self.SHAKE_CAP,
+                                   self.shake_intensity + float(amount))
+
+    def _step_shake(self, dt: float) -> None:
+        """Decay shake; pick a random offset within the current intensity."""
+        if self.shake_intensity <= 0.05:
+            self.shake_intensity = 0.0
+            self.shake_x = 0.0
+            self.shake_y = 0.0
+        else:
+            self.shake_x = self._fire_rng.uniform(-self.shake_intensity, self.shake_intensity)
+            self.shake_y = self._fire_rng.uniform(-self.shake_intensity, self.shake_intensity)
+            # Exponential decay so it feels like a kick rather than a tremor.
+            import math as _math
+            self.shake_intensity *= _math.exp(-self.SHAKE_DECAY_PER_SEC * dt)
+        # Translate the entire screen contents.
+        self.root_layout.pos = (self.shake_x, self.shake_y)
+
+    def _spawn_muzzle_polish(self, sx: float, sy: float) -> None:
+        """Stationary bright flash + one slow upward smoke wisp."""
+        pc = self.particle_controller
+        if pc is None:
+            return
+        # Bright yellow flash — large + brief so it reads as a pop.
+        pc.spawn_one(sx, sy, 0.0, 0.0, 22.0, 0.07, "particle")
+        # Smoke wisp drifting up.
+        smoke_vx = self._fire_rng.uniform(-25.0, 25.0)
+        smoke_vy = self._fire_rng.uniform(45.0, 95.0)
+        pc.spawn_one(sx, sy + 6.0, smoke_vx, smoke_vy, 10.0, 0.55, "particle")
+
+    def _spawn_death_polish(self, hit_x: float, hit_y: float) -> None:
+        """Yellow sparks + red body fragments on enemy death."""
+        pc = self.particle_controller
+        if pc is None:
+            return
+        rng = self._fire_rng
+        # Hit sparks (yellow).
+        pc.burst(hit_x, hit_y, count=4, speed=240.0, ttl=0.32,
+                 size=10.0, frame="particle", rng=rng)
+        # Body fragments (red shards reusing the enemy_red atlas frame).
+        # Smaller + slower than the sparks so they feel like meat, not sparkle.
+        pc.burst(hit_x, hit_y, count=5, speed=160.0, ttl=0.48,
+                 size=14.0, frame="enemy_red", rng=rng)
+
     def _update(self, dt):
         if self._level_ended:
             return
+        # Shake first so the offset applies to everything else this frame.
+        self._step_shake(dt)
         self.distance += SCROLL_SPEED_PX_PER_SEC * dt
 
         sx, sy = self.stage.pos
@@ -558,7 +622,8 @@ class GameScreen(ui.StyledScreen):
                     target_x = ep.cx[target]
                     target_y = ep.cy[target]
                     # Shooter positions: hero muzzle + every active follower's muzzle.
-                    positions = [(self.hero.center_x, self.hero.center_y + MUZZLE_OFFSET_Y)]
+                    hero_muzzle = (self.hero.center_x, self.hero.center_y + MUZZLE_OFFSET_Y)
+                    positions = [hero_muzzle]
                     sp = self.squad_pool
                     sc = self.squad_controller
                     for i in range(sp.capacity):
@@ -569,13 +634,20 @@ class GameScreen(ui.StyledScreen):
                         self.projectile_controller, self._fire_rng,
                     )
                     self._fire_cooldown = 1.0 / weapon.fire_rate
+                    # M11 polish: muzzle flash + gun smoke at the hero's muzzle,
+                    # plus a tiny recoil shake.
+                    self._spawn_muzzle_polish(*hero_muzzle)
+                    self._add_shake(0.6)
 
             self.projectile_controller.update(dt, x_min, y_min, x_max, y_max)
 
             # Projectile vs enemy collisions; each kill bursts particles.
-            def _on_kill(hit_x, hit_y, _pc=self.particle_controller, _rng=self._fire_rng):
-                _pc.burst(hit_x, hit_y, count=6, speed=240.0, ttl=0.35,
-                          size=10.0, frame="particle", rng=_rng)
+            # M11: combined sparks + red body fragments via _spawn_death_polish,
+            # plus a small per-kill shake (capped via SHAKE_CAP so 30 simultaneous
+            # kills don't blow the screen out).
+            def _on_kill(hit_x, hit_y, _self=self):
+                _self._spawn_death_polish(hit_x, hit_y)
+                _self._add_shake(0.35)
             kills = entities.resolve_projectile_collisions(
                 self.projectile_controller, self.enemy_controller, self.grid, _on_kill,
             )
@@ -588,12 +660,18 @@ class GameScreen(ui.StyledScreen):
                                  _self=self):
                     _pc.burst(hit_x, hit_y, count=4, speed=200.0, ttl=0.30,
                               size=10.0, frame="particle", rng=_rng)
+                    # M11: bigger shake when the boss is reeling.
+                    _self._add_shake(0.9)
                     if died:
                         # Big celebratory burst at the boss center on kill.
                         if _self.boss is not None:
                             _pc.burst(_self.boss.cx, _self.boss.cy,
                                       count=30, speed=380.0, ttl=0.65,
                                       size=14.0, frame="particle", rng=_rng)
+                            _pc.burst(_self.boss.cx, _self.boss.cy,
+                                      count=18, speed=260.0, ttl=0.80,
+                                      size=18.0, frame="enemy_red", rng=_rng)
+                        _self._add_shake(_self.SHAKE_CAP)  # max kick on boss death
                         _self._end_level(won=True)
                 boss_module.resolve_projectile_vs_boss(
                     self.projectile_controller, self.boss_controller, _on_boss_hit,
@@ -611,6 +689,8 @@ class GameScreen(ui.StyledScreen):
                         hit_x, hit_y, count=8, speed=220.0, ttl=0.4,
                         size=10.0, frame="particle", rng=_rng,
                     )
+                # M11: medium shake on attrition; bigger if it was the final hit.
+                _self._add_shake(2.0 if _self.squad_count > 0 else 8.0)
                 running = ui.app()
                 running.audio.play_sfx("damage")
                 if _self.squad_count <= 0:

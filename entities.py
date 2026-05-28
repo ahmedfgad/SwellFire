@@ -264,6 +264,16 @@ class ParticleController:
             else:
                 break  # pool full
 
+    def spawn_one(self, x: float, y: float, vx: float, vy: float,
+                  size: float, ttl: float, frame: str) -> int:
+        """Single directional particle. Used for muzzle flashes and
+        gun-smoke trails where the direction matters."""
+        idx = self.pool.spawn(x, y, vx, vy, size, size, frame)
+        if idx >= 0:
+            self.ttl[idx] = ttl
+            self.spawned_total += 1
+        return idx
+
     def update(self, dt: float) -> None:
         pool = self.pool
         active = pool.active
