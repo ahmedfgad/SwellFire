@@ -23,7 +23,7 @@ import random
 
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle, RoundedRectangle, Line
+from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle, Line
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.metrics import sp, dp
@@ -115,6 +115,106 @@ def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
 
 
 # --- the gameplay screen --------------------------------------------------
+
+class _IconStyledButton(ui.StyledButton):
+    """StyledButton with a vector icon drawn in ``canvas.after``.
+
+    Used by the on-screen grenade + shield touch buttons. The button's
+    ``text`` shows only the count (with ``valign="bottom"``), and the
+    icon sits in the upper portion — far more readable on small mobile
+    screens than the old plain "G" / "S" letters.
+    """
+
+    def __init__(self, icon_kind: str, **kwargs):
+        # Count + status text lives at the bottom of the button so the
+        # icon owns the top half.
+        kwargs.setdefault("halign", "center")
+        kwargs.setdefault("valign", "bottom")
+        kwargs.setdefault("padding", (dp(2), dp(2)))
+        super().__init__(**kwargs)
+        self.icon_kind = icon_kind  # "grenade" | "shield"
+        self.bind(pos=lambda *_: self._draw_icon(),
+                  size=lambda *_: self._draw_icon())
+        self._draw_icon()
+
+    def _draw_icon(self) -> None:
+        self.canvas.after.clear()
+        x, y = self.pos
+        w, h = self.size
+        if w <= 1 or h <= 1:
+            return
+        cx = x + w * 0.5
+        with self.canvas.after:
+            if self.icon_kind == "grenade":
+                # Dark green pineapple-style body.
+                body_r = min(w * 0.22, h * 0.18)
+                body_cy = y + h * 0.66
+                Color(0.14, 0.30, 0.22, 1.0)
+                Ellipse(pos=(cx - body_r, body_cy - body_r),
+                        size=(body_r * 2, body_r * 2))
+                # Brass cap (small rectangle straddling the top of the body).
+                cap_w = body_r * 0.85
+                cap_h = body_r * 0.40
+                Color(0.55, 0.42, 0.18, 1.0)
+                Rectangle(pos=(cx - cap_w * 0.5, body_cy + body_r * 0.85),
+                          size=(cap_w, cap_h))
+                # Fuse spark — bright yellow ellipse above the cap.
+                spark_r = body_r * 0.32
+                Color(1.0, 0.88, 0.25, 1.0)
+                Ellipse(pos=(cx - spark_r, body_cy + body_r * 0.85 + cap_h),
+                        size=(spark_r * 2, spark_r * 2))
+                # Body highlight (small lighter ellipse off-centre).
+                Color(0.55, 0.75, 0.55, 0.55)
+                hl_w = body_r * 0.6
+                hl_h = body_r * 0.35
+                Ellipse(pos=(cx - body_r * 0.55, body_cy + body_r * 0.10),
+                        size=(hl_w, hl_h))
+            elif self.icon_kind == "shield":
+                # Shield silhouette — rounded rectangle taller than wide,
+                # with stronger rounding on the bottom corners to evoke
+                # the classic shield drop-shape.
+                shield_w = min(w * 0.50, h * 0.34)
+                shield_h = shield_w * 1.28
+                shield_x = cx - shield_w * 0.5
+                shield_cy = y + h * 0.60
+                shield_y = shield_cy - shield_h * 0.5
+                # Outline / drop shadow underneath.
+                Color(0.10, 0.14, 0.20, 0.55)
+                RoundedRectangle(
+                    pos=(shield_x + dp(1), shield_y - dp(1)),
+                    size=(shield_w, shield_h),
+                    radius=[
+                        (shield_w * 0.35, shield_w * 0.35),
+                        (shield_w * 0.35, shield_w * 0.35),
+                        (shield_w * 0.55, shield_w * 0.55),
+                        (shield_w * 0.55, shield_w * 0.55),
+                    ],
+                )
+                # Shield body itself.
+                Color(1.0, 1.0, 1.0, 0.96)
+                RoundedRectangle(
+                    pos=(shield_x, shield_y),
+                    size=(shield_w, shield_h),
+                    radius=[
+                        (shield_w * 0.35, shield_w * 0.35),
+                        (shield_w * 0.35, shield_w * 0.35),
+                        (shield_w * 0.55, shield_w * 0.55),
+                        (shield_w * 0.55, shield_w * 0.55),
+                    ],
+                )
+                # Horizontal accent stripe + centre dot — reads as a
+                # crest mark without needing fine line work.
+                stripe_h = shield_h * 0.10
+                Color(0.18, 0.42, 0.85, 1.0)
+                Rectangle(
+                    pos=(shield_x + shield_w * 0.10,
+                         shield_cy - stripe_h * 0.5),
+                    size=(shield_w * 0.80, stripe_h),
+                )
+                dot_r = shield_w * 0.14
+                Ellipse(pos=(cx - dot_r, shield_cy - dot_r),
+                        size=(dot_r * 2, dot_r * 2))
+
 
 class _StatChip(FloatLayout):
     """One stat readout: small uppercase title + big bold value, on a
@@ -489,16 +589,18 @@ class GameScreen(ui.StyledScreen):
         # Bottom-left touch HUD: grenade + shield buttons. Visible during
         # gameplay; tap to fire/activate. Counts update every frame; greyed
         # out when the player has none.
-        self.grenade_btn = ui.StyledButton(
-            text="G 0", bg=[0.20, 0.80, 0.95, 1], font_size=sp(18),
+        self.grenade_btn = _IconStyledButton(
+            "grenade",
+            text="0", bg=[0.20, 0.80, 0.95, 1], font_size=sp(14),
             size_hint=(0.10, 0.10),
             pos_hint={"x": 0.02, "y": 0.03},
         )
         self.grenade_btn.bind(on_release=lambda *_: self._detonate_grenade())
         self.root_layout.add_widget(self.grenade_btn)
 
-        self.shield_btn = ui.StyledButton(
-            text="S 0", bg=[0.50, 0.85, 1.00, 1], font_size=sp(18),
+        self.shield_btn = _IconStyledButton(
+            "shield",
+            text="0", bg=[0.50, 0.85, 1.00, 1], font_size=sp(14),
             size_hint=(0.10, 0.10),
             pos_hint={"x": 0.14, "y": 0.03},
         )
@@ -1475,7 +1577,9 @@ class GameScreen(ui.StyledScreen):
             if self.distance_goal > 0 else "{:.0f}".format(self.distance)
         # Sync the on-screen booster buttons (count + dimmed when empty).
         if self.grenade_btn is not None:
-            self.grenade_btn.text = "G\n{}".format(self.grenade_count)
+            # Icon owns the top of the button; text shows only the
+            # current count (bottom-aligned by the button's valign).
+            self.grenade_btn.text = "{}".format(self.grenade_count)
             self.grenade_btn.disabled = self.grenade_count <= 0
             self.grenade_btn.bg = (
                 [0.20, 0.80, 0.95, 1] if self.grenade_count > 0
@@ -1484,11 +1588,13 @@ class GameScreen(ui.StyledScreen):
         if self.shield_btn is not None:
             if self.shield_active_until > self._run_time:
                 remaining = self.shield_active_until - self._run_time
-                self.shield_btn.text = "S ACT\n{:.1f}s".format(remaining)
+                # While the shield is active, the bottom text reads
+                # "ACTIVE Ns" so the icon + countdown read together.
+                self.shield_btn.text = "ACT {:.1f}s".format(remaining)
                 self.shield_btn.bg = [1.0, 0.85, 0.30, 1]
                 self.shield_btn.disabled = True
             else:
-                self.shield_btn.text = "S\n{}".format(self.shield_count)
+                self.shield_btn.text = "{}".format(self.shield_count)
                 self.shield_btn.disabled = self.shield_count <= 0
                 self.shield_btn.bg = (
                     [0.50, 0.85, 1.00, 1] if self.shield_count > 0
