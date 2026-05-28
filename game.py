@@ -26,6 +26,7 @@ from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import entities
 import graphics
 import levels
 import ui
@@ -41,6 +42,7 @@ LANE_GRAVITY_STRENGTH = 6.0         # per-second pull rate toward nearest lane
 LANE_GRAVITY_RADIUS_PX = 80.0       # only engages within this distance of a lane center
 N_STRIPES = 14                      # dashed centerline stripes
 STRIPE_LENGTH = 36.0                # px
+ENEMY_POOL_CAPACITY = 200           # M5: 50 typical, stress to 200
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -82,6 +84,11 @@ class GameScreen(ui.StyledScreen):
         self._hero_target_x = 0.0
         # Lane centers (M7 fills these per spawned gate pair).
         self.lane_centers: list[float] = []
+        # Enemy systems (M5).
+        self.enemy_pool: graphics.EntityPool | None = None
+        self.enemy_controller: entities.EnemyController | None = None
+        self.enemy_spawner: entities.EnemySpawner | None = None
+        self.enemy_renderer: graphics.BatchedRenderer | None = None
 
         # The "stage" is the road surface area the hero runs in. It's narrower
         # than the screen so left/right margins read as background scenery.
@@ -184,7 +191,17 @@ class GameScreen(ui.StyledScreen):
             png_path, json_path = graphics.find_atlas("stress")
             self._atlas = graphics.SpriteAtlas(png_path, json_path)
 
-        # Spawn the hero widget into the stage.
+        # Enemy systems first so the enemy mesh draws under the hero.
+        if self.enemy_pool is None:
+            self.enemy_pool = graphics.EntityPool(ENEMY_POOL_CAPACITY, self._atlas)
+            self.enemy_controller = entities.EnemyController(self.enemy_pool)
+            self.enemy_spawner = entities.EnemySpawner(self.enemy_controller, self._atlas)
+            self.enemy_renderer = graphics.BatchedRenderer(
+                self.enemy_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
+            )
+            self.stage.add_widget(self.enemy_renderer)
+
+        # Hero on top.
         if self.hero is None:
             self.hero = graphics.AtlasSprite(
                 self._atlas, "runner_blue",
@@ -200,8 +217,14 @@ class GameScreen(ui.StyledScreen):
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
+        if self.enemy_renderer is not None and self.enemy_renderer.parent:
+            self.enemy_renderer.parent.remove_widget(self.enemy_renderer)
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
+        self.enemy_pool = None
+        self.enemy_controller = None
+        self.enemy_spawner = None
+        self.enemy_renderer = None
         self.hero = None
         self._dragging = False
 
@@ -254,12 +277,32 @@ class GameScreen(ui.StyledScreen):
             bob = math.sin(self.distance / 22.0) * 5.0
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
-        # 3. HUD + debug overlay.
+        # 3. Enemies: spawner ticks → enemies updated → renderer rebuilt.
+        if (self.enemy_controller is not None
+                and self.enemy_spawner is not None
+                and self.enemy_renderer is not None
+                and self.hero is not None):
+            hero_cx = self.hero.center_x
+            x_min = sx
+            y_min = sy
+            x_max = sx + sw
+            y_max = sy + sh
+            self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
+            self.enemy_controller.update(dt, hero_cx, x_min, y_min, x_max, y_max)
+            self.enemy_renderer.rebuild()
+
+        # 4. HUD + debug overlay.
         hero_cx = self.hero.center_x if self.hero is not None else 0.0
-        self.hud_label.text = "Distance {:5.0f} m     Hero X {:.0f} px".format(
-            self.distance, hero_cx,
+        enemy_count = self.enemy_pool.active_count if self.enemy_pool is not None else 0
+        self.hud_label.text = "Distance {:5.0f} m     Hero X {:.0f} px     Enemies {:3d}".format(
+            self.distance, hero_cx, enemy_count,
         )
-        self.debug.report_counts(distance=int(self.distance), lanes=len(self.lane_centers))
+        spawned = self.enemy_controller.spawned_total if self.enemy_controller else 0
+        recycled = self.enemy_controller.recycled_total if self.enemy_controller else 0
+        self.debug.report_counts(
+            dist=int(self.distance), enemies=enemy_count,
+            spawned=spawned, recycled=recycled,
+        )
 
     # --- input ------------------------------------------------------------
 
