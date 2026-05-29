@@ -18,7 +18,7 @@ source.include_exts = py,png,wav,json,atlas
 
 # Folders to leave out of the package. PlayerGA is the research version of the
 # auto-player and pulls in pygad+numpy. tools/ is dev-only.
-source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache__, PlayerGA, tools, assets/raw
+source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache__, PlayerGA, tools, assets/raw, swellfire_media
 
 # Version shown to users.
 version = 1.0

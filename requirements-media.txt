@@ -1,0 +1,6 @@
+# Dev/build-time only — NOT shipped to mobile (see buildozer.spec requirements).
+# Media generation toolchain under tools/: PIL/numpy art + ffmpeg video muxing.
+Pillow
+numpy
+imageio-ffmpeg
+pytest
