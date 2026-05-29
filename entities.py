@@ -61,28 +61,32 @@ TYPE_NAMES = {
 # Per-archetype stats. `base_hp` is multiplied by the level's `enemy_hp`
 # baseline so worlds still ramp HP within an archetype.
 ARCHETYPES: dict[int, dict] = {
+    # M14 — each archetype now has its own atlas frame so the player
+    # can read the incoming threat at a glance (tank is silver-armored,
+    # bomber has a fuse + spark, etc.). Sizes unchanged so collision
+    # and balance numbers stay the same as M9.
     TYPE_GRUNT: dict(
-        frame="enemy_red", size=44.0,
+        frame="enemy_grunt", size=44.0,
         hp_mult=1.0, speed_mult=1.0, chase_mult=1.0,
         spawn_count=1, label="grunt",
     ),
     TYPE_TANK: dict(
-        frame="enemy_red", size=72.0,
+        frame="enemy_tank", size=72.0,
         hp_mult=8.0, speed_mult=0.55, chase_mult=0.50,
         spawn_count=1, label="tank",
     ),
     TYPE_BOMBER: dict(
-        frame="projectile", size=50.0,
+        frame="enemy_bomber", size=50.0,
         hp_mult=2.0, speed_mult=1.15, chase_mult=1.0,
         spawn_count=1, label="bomber",
     ),
     TYPE_SPLITTER: dict(
-        frame="enemy_red", size=60.0,
+        frame="enemy_splitter", size=60.0,
         hp_mult=4.0, speed_mult=0.85, chase_mult=0.7,
         spawn_count=1, label="splitter",
     ),
     TYPE_SWARMER: dict(
-        frame="enemy_red", size=28.0,
+        frame="enemy_swarmer", size=28.0,
         hp_mult=1.0, speed_mult=1.30, chase_mult=1.20,
         spawn_count=4, label="swarmer",
     ),
@@ -769,14 +773,15 @@ class PickupSpawner:
         )
         # Lateral X (keep margin from rails).
         x = self._rng.uniform(x_min + 60.0, x_max - 60.0)
-        # Pick type — rare double-coin chance.
+        # M14 — coin / double_coin now have dedicated atlas frames; the
+        # old "projectile" / "particle" reuses are gone.
         if self._rng.random() < self.DOUBLE_COIN_CHANCE:
             ptype = PICKUP_DOUBLE_COIN
-            frame = "particle"
+            frame = "double_coin"
             size = self.DOUBLE_SIZE
         else:
             ptype = PICKUP_COIN
-            frame = "projectile"
+            frame = "coin"
             size = self.COIN_SIZE
         self.controller.spawn(x, y_top, -scroll_speed, size, frame, ptype)
         return True

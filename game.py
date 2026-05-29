@@ -692,6 +692,31 @@ class GameScreen(ui.StyledScreen):
 
     # --- lifecycle -------------------------------------------------------
 
+    def _apply_world_tint(self, world: int) -> None:
+        """Apply the per-world theme tint to entity renderers (M14).
+
+        Particles pick up the world's accent colour at ~50 % mix with
+        white so bursts feel native to each world — green sparks in
+        Meadow, orange in Desert, etc. Enemies get a very subtle
+        accent tint (~15 % mix) so they still read clearly as enemies
+        but blend with the world's palette.
+        """
+        theme = levels.get_world(world)
+        r, g, b = theme["accent"][0], theme["accent"][1], theme["accent"][2]
+
+        def mix(white_share: float):
+            return (
+                r * (1 - white_share) + 1.0 * white_share,
+                g * (1 - white_share) + 1.0 * white_share,
+                b * (1 - white_share) + 1.0 * white_share,
+                1.0,
+            )
+
+        if self.particle_renderer is not None:
+            self.particle_renderer.set_tint(mix(0.50))
+        if self.enemy_renderer is not None:
+            self.enemy_renderer.set_tint(mix(0.85))
+
     def on_enter(self):
         running = ui.app()
         # Music + theme per-level for single-player; world 1 for multiplayer.
@@ -904,6 +929,15 @@ class GameScreen(ui.StyledScreen):
 
         # Apply the per-level config now that pools + spawners exist.
         self._apply_level_config()
+
+        # M14 — apply the per-world tint to entity renderers. Done here
+        # AFTER pool/renderer creation so the Color instructions exist.
+        # Versus uses W1's theme (Meadow) so MP visuals are stable.
+        if running.current_mode == "single" and running.current_level:
+            tint_world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+        else:
+            tint_world = 1
+        self._apply_world_tint(tint_world)
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -2687,10 +2721,9 @@ class GameScreen(ui.StyledScreen):
                 x_frac, y_frac, ptype = entry[0], entry[1], int(entry[2])
             except (ValueError, TypeError, IndexError):
                 continue
-            # Frame names mirror PickupSpawner: COIN uses "projectile"
-            # (a gold ellipse-ish frame), DOUBLE_COIN uses "particle".
-            frame = ("projectile" if ptype == entities.PICKUP_COIN
-                     else "particle")
+            # M14 — dedicated coin / double_coin frames.
+            frame = ("coin" if ptype == entities.PICKUP_COIN
+                     else "double_coin")
             size = (entities.PickupSpawner.COIN_SIZE
                     if ptype == entities.PICKUP_COIN
                     else entities.PickupSpawner.DOUBLE_SIZE)

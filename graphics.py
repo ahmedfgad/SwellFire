@@ -173,10 +173,13 @@ class BatchedRenderer(Widget):
         # the local player's view.
         self._skip_array = skip_array
         with self.canvas:
+            # Always emit a Color instruction so callers can mutate the
+            # tint after construction via ``set_tint`` — used by M14's
+            # per-world theming. Default white = no visual effect.
             if tint is not None:
                 self._tint_color = Color(*tint)
             else:
-                self._tint_color = None
+                self._tint_color = Color(1.0, 1.0, 1.0, 1.0)
             self._mesh = Mesh(
                 mode="triangles",
                 texture=pool.atlas.texture,
@@ -246,6 +249,17 @@ class BatchedRenderer(Widget):
         # the scratch buffer so we don't ship trailing zeros for empty slots.
         self._mesh.vertices = verts[:out_i * 16]
         self._mesh.indices = indices
+
+    def set_tint(self, color: tuple[float, float, float, float]) -> None:
+        """Update the tint Color applied to this renderer's mesh.
+
+        Used by M14's per-world theming — GameScreen calls this when a
+        level loads so e.g. desert-world enemies pick up a warm orange
+        hue and snowfield enemies cool down toward blue.
+        """
+        if self._tint_color is None:
+            return
+        self._tint_color.rgba = color
 
 
 # --- debug overlay --------------------------------------------------------
