@@ -16,6 +16,7 @@ import os
 
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line, Mesh
+from kivy.core.image import Image as CoreImage
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 from kivy.metrics import dp, sp
@@ -51,8 +52,6 @@ class SpriteAtlas:
     def __init__(self, png_path: str, json_path: str):
         # Import here so unit tests that don't touch the texture don't pay
         # the cost of initializing Kivy's image providers.
-        from kivy.core.image import Image as CoreImage
-
         self._image = CoreImage(png_path, nocache=True)
         self.texture = self._image.texture
         # Pixel-art-style: nearest filtering keeps frames crisp at any scale.
@@ -65,6 +64,11 @@ class SpriteAtlas:
         self.atlas_h = float(meta["atlas_height"])
         # name -> (u0, v0, u1, v1) where v=0 is the bottom of the texture.
         self._frames: dict[str, tuple[float, float, float, float]] = {}
+        # Pixel-space (x, y, w, h) per frame with y measured top-down,
+        # as ``Texture.get_region`` expects. Used by ``frame_region`` to
+        # carve out a sub-texture for AtlasSprite.
+        self._frame_px: dict[str, tuple[int, int, int, int]] = {}
+        self._region_cache: dict[str, "Texture"] = {}
         for name, rect in meta["frames"].items():
             x = float(rect["x"])
             y = float(rect["y"])
@@ -76,9 +80,55 @@ class SpriteAtlas:
             v0 = 1.0 - (y + h) / self.atlas_h
             v1 = 1.0 - y / self.atlas_h
             self._frames[name] = (u0, v0, u1, v1)
+            self._frame_px[name] = (int(x), int(y), int(w), int(h))
+
+    def reload(self, png_path: str, json_path: str) -> None:
+        """Swap the underlying texture + frame map without recreating
+        the SpriteAtlas object. Used for per-world atlas swaps in M14
+        — pool controllers + BatchedRenderers keep their references
+        to ``self`` and pick up the new ``.texture`` on next mesh draw.
+        """
+        self._image = CoreImage(png_path, nocache=True)
+        self.texture = self._image.texture
+        self.texture.min_filter = "nearest"
+        self.texture.mag_filter = "nearest"
+        with open(json_path) as f:
+            meta = json.load(f)
+        self.atlas_w = float(meta["atlas_width"])
+        self.atlas_h = float(meta["atlas_height"])
+        self._frames = {}
+        self._frame_px = {}
+        self._region_cache = {}
+        for name, rect in meta["frames"].items():
+            x = float(rect["x"]); y = float(rect["y"])
+            w = float(rect["w"]); h = float(rect["h"])
+            self._frames[name] = (
+                x / self.atlas_w,
+                1.0 - (y + h) / self.atlas_h,
+                (x + w) / self.atlas_w,
+                1.0 - y / self.atlas_h,
+            )
+            self._frame_px[name] = (int(x), int(y), int(w), int(h))
 
     def frame(self, name: str) -> tuple[float, float, float, float]:
         return self._frames[name]
+
+    def frame_region(self, name: str):
+        """Return a sub-texture for ``name``.
+
+        Used by AtlasSprite — sampling a sub-texture with default UVs
+        sidesteps a Kivy Rectangle quirk where explicit ``tex_coords``
+        rendered as fully transparent against the M14 256×256 atlas.
+        Cached because Texture.get_region creates a new texture
+        object on every call.
+        """
+        cached = self._region_cache.get(name)
+        if cached is not None:
+            return cached
+        x, y, w, h = self._frame_px[name]
+        region = self.texture.get_region(x, y, w, h)
+        self._region_cache[name] = region
+        return region
 
     def names(self) -> list[str]:
         return list(self._frames.keys())
@@ -307,6 +357,92 @@ class DebugOverlay(Widget):
 
 
 # --- single-sprite widget for hero / boss / UI sprites -------------------
+
+# Per-path texture cache shared across all TextureSprites — loading a
+# PNG via CoreImage is cheap but not free, and the hero / boss /
+# opponent etc. tend to use the same file across screens.
+_texture_cache: dict[str, "Texture"] = {}
+
+
+def load_texture(path: str):
+    """Load a PNG into a Kivy Texture, caching by path.
+
+    Sets nearest-neighbour filtering so pixel-art frames stay crisp
+    when scaled to the sprite's widget size.
+    """
+    tex = _texture_cache.get(path)
+    if tex is not None:
+        return tex
+    img = CoreImage(path, nocache=True)
+    tex = img.texture
+    tex.min_filter = "nearest"
+    tex.mag_filter = "nearest"
+    _texture_cache[path] = tex
+    return tex
+
+
+class TextureSprite(Widget):
+    """One-file sprite widget — loads a PNG as its own Texture and draws
+    it with a Rectangle that uses DEFAULT tex_coords (whole texture).
+
+    This is the rendering path we use for the hero, boss, opponent and
+    any other lone widget that previously used AtlasSprite. The
+    motivation is M14's discovery that Kivy 2.3's Rectangle + custom
+    ``tex_coords`` against an atlas Texture renders fully transparent
+    against atlases larger than 128×128. A per-sprite Texture (with
+    default UVs covering the whole image) sidesteps the issue and also
+    makes integrating third-party art a single drop-in: replace the
+    PNG, you're done.
+
+    API mirrors AtlasSprite where possible — pos/size, a ``flash``
+    overlay used by the M11 damage-feedback layer, and ``set_texture``
+    so the boss widget can swap looks mid-fight.
+    """
+
+    def __init__(self, png_path: str, **kwargs):
+        super().__init__(**kwargs)
+        tex = load_texture(png_path)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            self._rect = Rectangle(texture=tex)
+        with self.canvas.after:
+            # Flash overlay on canvas.after so its Color() instruction
+            # doesn't bleed into the main rect's draw state.
+            self._flash_color = Color(1.0, 0.30, 0.30, 0.0)
+            self._flash_rect = Rectangle()
+        self.bind(pos=self._sync, size=self._sync)
+        self._sync()
+        self._flash_remaining = 0.0
+        self._flash_max = 0.0
+        self._flash_peak_alpha = 0.0
+
+    def _sync(self, *_):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+        self._flash_rect.pos = self.pos
+        self._flash_rect.size = self.size
+
+    def set_texture(self, png_path: str) -> None:
+        self._rect.texture = load_texture(png_path)
+
+    def flash(self, duration: float = 0.28,
+              color: tuple[float, float, float, float] = (1.0, 0.25, 0.25, 0.78)) -> None:
+        self._flash_color.rgba = color
+        self._flash_peak_alpha = color[3]
+        self._flash_remaining = duration
+        self._flash_max = duration
+
+    def tick_flash(self, dt: float) -> None:
+        if self._flash_remaining <= 0.0:
+            return
+        self._flash_remaining = max(0.0, self._flash_remaining - dt)
+        if self._flash_remaining <= 0.0:
+            self._flash_color.a = 0.0
+        else:
+            self._flash_color.a = self._flash_peak_alpha * (
+                self._flash_remaining / max(self._flash_max, 0.001)
+            )
+
 
 class AtlasSprite(Widget):
     """One sprite from an atlas drawn as a single textured Rectangle.

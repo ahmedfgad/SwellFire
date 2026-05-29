@@ -40,10 +40,15 @@ import os
 from PIL import Image, ImageDraw, ImageFilter
 
 FRAME_SIZE = 64
-COLS, ROWS = 4, 4
-ATLAS_SIZE = FRAME_SIZE * COLS    # 256
+COLS, ROWS = 2, 2
+ATLAS_SIZE = FRAME_SIZE * COLS    # 128 — same physical layout as the
+                                  # M0 original. Kivy 2.3's Rectangle +
+                                  # custom tex_coords rendered as
+                                  # transparent against a larger atlas;
+                                  # keeping the 2×2 / 64-px frame size
+                                  # is the safest compatibility path.
 
-# 4x oversampling for anti-aliased edges via LANCZOS downsample.
+# 4× oversampling for anti-aliased edges via LANCZOS downsample.
 SS = 4
 SF = FRAME_SIZE * SS
 
@@ -396,23 +401,31 @@ def _double_coin() -> Image.Image:
 
 # --- atlas assembly --------------------------------------------------------
 
+# 2×2 grid of 64-px frames. The four physical slots host the four
+# canonical sprites; every archetype-specific name is aliased back to
+# its closest match below so the gameplay code keeps using its M14
+# naming without depending on per-archetype frames in the atlas.
 FRAMES = [
-    # (slot_col, slot_row, name, painter)
-    (0, 0, "runner_blue",   _runner_blue),
-    (1, 0, "enemy_grunt",   _enemy_grunt),
-    (2, 0, "enemy_swarmer", _enemy_swarmer),
-    (3, 0, "enemy_tank",    _enemy_tank),
-    (0, 1, "enemy_bomber",  _enemy_bomber),
-    (1, 1, "enemy_splitter", _enemy_splitter),
-    (2, 1, "projectile",    _projectile),
-    (3, 1, "particle",      _particle),
-    (0, 2, "coin",          _coin),
-    (1, 2, "double_coin",   _double_coin),
+    (0, 0, "runner_blue",  _runner_blue),
+    (1, 0, "enemy_red",    _enemy_grunt),   # generic enemy slot
+    (0, 1, "projectile",   _projectile),
+    (1, 1, "particle",     _particle),
 ]
 
-# Backwards-compat alias for the old generic enemy frame.
+# All per-archetype enemy names point at the single enemy slot for now —
+# the 256-px-atlas attempt with per-archetype art broke AtlasSprite
+# rendering on Kivy 2.3 (see comment on ATLAS_SIZE above). When that
+# path is unblocked, this aliasing collapses back into real per-frame
+# entries. Coin / double-coin similarly fall back to the gold projectile
+# and white particle frames the M11 economy already used.
 ALIASES = {
-    "enemy_red": "enemy_grunt",
+    "enemy_grunt":    "enemy_red",
+    "enemy_swarmer":  "enemy_red",
+    "enemy_tank":     "enemy_red",
+    "enemy_bomber":   "enemy_red",
+    "enemy_splitter": "enemy_red",
+    "coin":           "projectile",
+    "double_coin":    "particle",
 }
 
 

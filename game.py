@@ -71,6 +71,8 @@ MAX_SHOOTERS_PER_SHOT = 22
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 HERO_FRAME_NAME = "runner_blue"
+HERO_SPRITE_PATH = "assets/sprites/hero_blue.png"
+OPPONENT_SPRITE_PATH = "assets/sprites/hero_green.png"
 DEFAULT_WEAPON_ID = "pistol"
 MAX_SQUAD = 100                     # cap for squad_count; squad pool sized to MAX_SQUAD-1
 ATTRITION_ZONE_HALF_W = 170.0       # half-width of the squad-contact zone (px)
@@ -735,10 +737,33 @@ class GameScreen(ui.StyledScreen):
             running.audio.play_level_music(1)
             self.title_label.text = "Multiplayer Versus     ({})".format(running.current_mode)
 
-        # Load atlas lazily (first level entry only).
+        # Load the world-specific atlas. M14 ships one atlas per world
+        # (world1.png…world6.png), each with a different enemy sprite in
+        # the enemy_red slot so each world's pool of enemies looks
+        # distinct without changing the rendering code.
+        if running.current_mode == "single" and running.current_level:
+            atlas_world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+        else:
+            atlas_world = 1
+        atlas_world = max(1, min(levels.NUM_WORLDS, atlas_world))
+        atlas_key = "world{}".format(atlas_world)
         if self._atlas is None:
-            png_path, json_path = graphics.find_atlas("stress")
+            png_path, json_path = graphics.find_atlas(atlas_key)
             self._atlas = graphics.SpriteAtlas(png_path, json_path)
+            self._atlas_world = atlas_world
+        elif getattr(self, "_atlas_world", None) != atlas_world:
+            png_path, json_path = graphics.find_atlas(atlas_key)
+            self._atlas.reload(png_path, json_path)
+            self._atlas_world = atlas_world
+            # Bind the swapped texture to every BatchedRenderer mesh
+            # that's already alive. Without this, the mesh would keep
+            # the previous world's texture object cached at construction.
+            for renderer in (self.enemy_renderer, self.projectile_renderer,
+                             self.opponent_projectile_renderer,
+                             self.particle_renderer, self.squad_renderer,
+                             self.opponent_squad_renderer, self.pickup_renderer):
+                if renderer is not None and hasattr(renderer, "_mesh"):
+                    renderer._mesh.texture = self._atlas.texture
 
         # Pools + renderers, in draw order: enemy (back) → projectile → particle → hero (front).
         if self.enemy_pool is None:
@@ -834,8 +859,13 @@ class GameScreen(ui.StyledScreen):
                 self.stage.add_widget(self.opponent_squad_renderer)
 
         if self.hero is None:
-            self.hero = graphics.AtlasSprite(
-                self._atlas, HERO_FRAME_NAME,
+            # M14 — switched from AtlasSprite to per-PNG TextureSprite.
+            # The atlas-based Rectangle+tex_coords path went transparent
+            # against multi-frame atlases on Kivy 2.3; a one-file
+            # texture with default UVs sidesteps the bug AND makes
+            # third-party art a drop-in replacement.
+            self.hero = graphics.TextureSprite(
+                HERO_SPRITE_PATH,
                 size_hint=(None, None), size=(HERO_W, HERO_H),
             )
             self.stage.add_widget(self.hero)
@@ -853,8 +883,11 @@ class GameScreen(ui.StyledScreen):
                 # Insert under the hero so the sprite paints over it.
                 self.stage.add_widget(self.hero_marker, index=1)
             if self.opponent_hero is None:
-                self.opponent_hero = graphics.AtlasSprite(
-                    self._atlas, HERO_FRAME_NAME,
+                # Different PNG for opponent so the two players read
+                # as distinct figures (separate from the green/red
+                # marker rings).
+                self.opponent_hero = graphics.TextureSprite(
+                    OPPONENT_SPRITE_PATH,
                     size_hint=(None, None), size=(HERO_W, HERO_H),
                 )
                 self.opponent_hero.opacity = 0.70
