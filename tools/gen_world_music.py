@@ -317,18 +317,26 @@ def build_world1():
     bpm = 104.0
     n = _bar_n(bpm)
     beats = n / SAMPLE_RATE / (60.0 / bpm)
-    chord_beats = [(0, 4, [60, 64, 67]), (4, 4, [55, 59, 62]),
-                   (8, 4, [57, 60, 64]), (12, 4, [53, 57, 60])]
-    chord_beats = [(b, d, m) for (b, d, m) in chord_beats if b < beats]
+    # 16-beat chord progression (C/G/Am/F), tiled across the full loop
+    prog = [(0, 4, [60, 64, 67]), (4, 4, [55, 59, 62]),
+            (8, 4, [57, 60, 64]), (12, 4, [53, 57, 60])]
+    chord_beats = [(blk + b, d, m) for blk in range(0, int(beats), 16)
+                   for (b, d, m) in prog if blk + b < beats]
     pad = _layered_pad(n, bpm, chord_beats)
-    mel = [(0, 1, 72), (1, 1, 76), (2, 1, 79), (3, 1, 76), (4, 1, 74),
-           (5, 1, 71), (6, 2, 67), (8, 1, 72), (9, 1, 69), (10, 2, 72),
-           (12, 1, 65), (13, 1, 69), (14, 2, 72)]
-    mel = [(b, d, m) for (b, d, m) in mel if b < beats]
+    # 16-beat melody motif, tiled; alternate passes lifted an octave for variety
+    motif = [(0, 1, 72), (1, 1, 76), (2, 1, 79), (3, 1, 76), (4, 1, 74),
+             (5, 1, 71), (6, 2, 67), (8, 1, 72), (9, 1, 69), (10, 2, 72),
+             (12, 1, 65), (13, 1, 69), (14, 2, 72)]
+    mel = []
+    for i, blk in enumerate(range(0, int(beats), 16)):
+        lift = 12 if i % 2 else 0
+        mel += [(blk + b, d, m + lift) for (b, d, m) in motif if blk + b < beats]
     lead = delay(seq(n, bpm, mel, _pluck_voice), 60.0 / bpm / 2, mix=0.18)
     roots = [48, 43, 45, 41]
-    bn = [(bar * 4 + off, 1, roots[bar]) for bar in range(len(roots))
-          for off in (0, 2) if bar * 4 + off < beats]
+    bn = [(blk + bar * 4 + off, 1, roots[bar])
+          for blk in range(0, int(beats), 16)
+          for bar in range(len(roots))
+          for off in (0, 2) if blk + bar * 4 + off < beats]
     bass = seq(n, bpm, bn, _bass_voice)
     drums = _drum_track(n, bpm, _basic_beat(beats))
     return normalize(mix(pad * 0.5, lead * 0.7, bass * 0.5, drums * 0.45), 0.9)
