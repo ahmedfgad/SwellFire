@@ -68,7 +68,22 @@ class AudioManager:
         self._world = {}        # world number -> Sound
         self._sfx = {}
         self._current = None    # ("menu",) | ("world", N) | ("boss",)
+        # Capture-mode event timeline (None unless start_capture_log() called).
+        self.capture_log = None
+        self._capture_clock = None
         self._load()
+
+    # --- capture-mode timeline --------------------------------------------
+
+    def start_capture_log(self, clock):
+        """Begin recording (timestamp, kind, name) audio events. `clock` is a
+        zero-arg callable returning the current capture time in seconds."""
+        self.capture_log = []
+        self._capture_clock = clock
+
+    def _record(self, kind, name):
+        if self.capture_log is not None and self._capture_clock is not None:
+            self.capture_log.append((round(self._capture_clock(), 4), kind, name))
 
     # --- one-time load -----------------------------------------------------
 
@@ -134,6 +149,12 @@ class AudioManager:
         self._switch(("boss",))
 
     def _switch(self, key):
+        if key[0] == "menu":
+            self._record("music", "menu")
+        elif key[0] == "boss":
+            self._record("music", "boss")
+        else:
+            self._record("music", "world:{}".format(key[1]))
         if self._current == key:
             current = self._sound_for(key)
             if current is not None and current.state == "play":
@@ -156,6 +177,7 @@ class AudioManager:
     # --- sfx --------------------------------------------------------------
 
     def play_sfx(self, name):
+        self._record("sfx", name)
         if not self._get_setting("sfx_on", True):
             return
         sound = self._sfx.get(name)
