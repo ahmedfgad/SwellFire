@@ -57,6 +57,39 @@ def test_drums_are_finite_and_bounded():
         assert np.max(np.abs(d)) <= 1.0 + 1e-6
 
 
+def test_seq_places_notes_on_grid():
+    bpm = 120.0
+    total = g.seconds_to_samples(2.0)   # 2 s == 1 bar at 120bpm 4/4
+    voice = lambda f, n: g.osc_sine(f, n) * g.adsr(n)
+    # one note on beat 0, one on beat 2
+    buf = g.seq(total, bpm, [(0, 0.5, 60), (2, 0.5, 67)], voice)
+    assert buf.shape == (total,)
+    # energy near beat 0 and beat 2, ~silence right before beat 1's gap end
+    b = g.seconds_to_samples(60.0 / bpm)   # one beat
+    assert np.max(np.abs(buf[:b])) > 0.1
+    assert np.max(np.abs(buf[2 * b:3 * b])) > 0.1
+
+
+def test_crossfade_loop_is_seamless():
+    n = g.SAMPLE_RATE
+    x = g.osc_sine(220.0, n) * 0.8
+    looped = g.crossfade_loop(x, fade_s=0.05)
+    # boundary discontinuity (wrap from last sample to first) is small
+    disc = abs(looped[-1] - looped[0])
+    assert disc < 0.05
+
+
+def test_write_and_read_wav(tmp_path="/tmp/gwm_test.wav"):
+    x = g.osc_sine(330.0, g.SAMPLE_RATE) * 0.5
+    g.write_wav(tmp_path, x)
+    import wave
+    with wave.open(tmp_path, "rb") as w:
+        assert w.getnchannels() == 1
+        assert w.getsampwidth() == 2
+        assert w.getframerate() == g.SAMPLE_RATE
+        assert w.getnframes() == g.SAMPLE_RATE
+
+
 if __name__ == "__main__":
     test_note_freq()
     test_oscillators_shape_and_range()
@@ -64,4 +97,7 @@ if __name__ == "__main__":
     test_lowpass_reduces_highs()
     test_normalize_and_soft_clip_bounds()
     test_drums_are_finite_and_bounded()
+    test_seq_places_notes_on_grid()
+    test_crossfade_loop_is_seamless()
+    test_write_and_read_wav()
     print("PASS: synth core")

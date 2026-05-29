@@ -160,3 +160,54 @@ def normalize(x: np.ndarray, peak: float = 0.9) -> np.ndarray:
 
 def soft_clip(x: np.ndarray) -> np.ndarray:
     return np.tanh(x)
+
+
+def seconds_to_samples(s: float) -> int:
+    return int(round(s * SAMPLE_RATE))
+
+
+def seq(total_n: int, bpm: float, notes, voice) -> np.ndarray:
+    """Place notes on a beat grid.
+
+    notes: list of (beat_offset, duration_beats, midi) — midi may be a float
+    frequency-as-MIDI or an iterable of midi numbers for a chord.
+    voice: callable(freq_hz, n_samples) -> np.ndarray buffer.
+    """
+    out = np.zeros(total_n)
+    beat = 60.0 / bpm
+    for beat_off, dur_beats, midi in notes:
+        start = seconds_to_samples(beat_off * beat)
+        n = seconds_to_samples(dur_beats * beat)
+        if start >= total_n:
+            continue
+        n = min(n, total_n - start)
+        midis = midi if hasattr(midi, "__iter__") else [midi]
+        for m in midis:
+            out[start:start + n] += voice(note_freq(m), n)
+    return out
+
+
+def crossfade_loop(x: np.ndarray, fade_s: float = 0.05) -> np.ndarray:
+    """Fold the tail into the head with an equal-power crossfade so the
+    buffer loops seamlessly. Returns a buffer shortened by the fade length."""
+    f = min(seconds_to_samples(fade_s), x.shape[0] // 4)
+    if f <= 0:
+        return x
+    head = x[:f].copy()
+    body = x[f:].copy()
+    tail = body[-f:]
+    fade_out = np.cos(np.linspace(0, np.pi / 2, f)) ** 2
+    fade_in = np.sin(np.linspace(0, np.pi / 2, f)) ** 2
+    body[-f:] = tail * fade_out + head * fade_in
+    return body
+
+
+def write_wav(path: str, x: np.ndarray) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    clipped = np.clip(x, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype("<i2")
+    with wave.open(path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(pcm.tobytes())
