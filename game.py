@@ -1173,6 +1173,15 @@ class GameScreen(ui.StyledScreen):
             self.hero.center_x = hero_cx
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC
             self._hero_target_x = hero_cx
+        # Boss position was computed in `_apply_level_config` (via `_spawn_boss`)
+        # off the *pre-layout* stage size, which is 0/100 right after on_enter —
+        # leaving the boss pinned to the bottom-left corner. Now that the stage
+        # has its real dimensions, recompute its center (mirrors _spawn_boss).
+        if self.boss is not None:
+            self.boss.cx = sx + sw * 0.5
+            self.boss.cy = sy + sh * 0.82
+            if self.boss_widget is not None:
+                self.boss_widget.update_from_boss()
         if self._update_event is None:
             self._update_event = Clock.schedule_interval(self._update, 1 / 60.0)
         # If auto-play was on for the previous level, keep it on for this

@@ -44,6 +44,9 @@ def _build_argparser():
     ap.add_argument("--out", default=None, help="frames dir for a sequence")
     ap.add_argument("--audio", default=None, help="audio-event JSON output path")
     ap.add_argument("--size", default="1920x1080")
+    ap.add_argument("--win", action="store_true",
+                    help="(level mode) drive the squad to the distance goal so "
+                         "the level-complete + stars dialog fires, then capture it")
     return ap
 
 
@@ -67,7 +70,8 @@ def main(argv=None):
 
     app = appmod.SwellfireApp()
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
-             "settle": 0, "ready": False}
+             "settle": 0, "ready": False, "won_triggered": False,
+             "modal_settle": 0, "modal_seen": False}
     DT = 1.0 / 60.0
     # The Xwayland/SDL2 window ignores Config width/height and opens at 800x600;
     # we force Window.size after build, but the resize is not always honoured by
@@ -117,6 +121,10 @@ def main(argv=None):
         if gs._level_ended:
             # Cancelled before _reset finished; wait one more frame.
             return False
+        # Hide the debug FPS/counter overlay so captured frames are clean
+        # marketing shots (the overlay is a dev aid, never shipped UI).
+        if getattr(gs, "debug", None) is not None:
+            gs.debug.opacity = 0.0
         state["ready"] = True
         return True
 
@@ -139,6 +147,18 @@ def main(argv=None):
                 Clock.schedule_once(_drive, 0)
                 return
 
+        # --win: once the squad has grown (after `warmup` steps), shove the
+        # distance to the goal so the next `_update` fires the genuine
+        # level-complete path (_end_level(won=True) -> VICTORY banner + the
+        # LevelResultDialog with real stars/score). We then wait for that modal
+        # to actually open before grabbing (it's deferred ~1s real-time).
+        if (args.win and args.level is not None and gs is not None
+                and state["ready"] and not state["won_triggered"]
+                and state["frame"] >= args.warmup
+                and not gs._level_ended and gs.distance_goal > 0):
+            gs.distance = gs.distance_goal
+            state["won_triggered"] = True
+
         # Drive a fixed number of fixed-dt steps, grabbing each rendered frame.
         if args.level is not None and gs is not None and app.sm.current == "game":
             # Step the sim by a fixed dt (decoupled from real time).
@@ -160,6 +180,37 @@ def main(argv=None):
                     best = max(seeds, key=lambda f: autoplay.fitness(snap, f, dec, None))
                     gs._hero_target_x = snap["road_left"] + best * snap["road_w"]
         state["simt"] += DT
+
+        # --win: hold off grabbing until the level-complete ModalView is open
+        # (the dialog is scheduled ~1s of real time after _end_level fires;
+        # the busy loop lets that wall-clock time elapse). Then grab it.
+        if args.win:
+            from kivy.uix.modalview import ModalView
+            modal_open = any(isinstance(c, ModalView) for c in Window.children)
+            # The ModalView registers as a Window child the instant it opens,
+            # but its content (stars/score) needs a few frames to lay out and
+            # fade in (_fade_in_modal, ~0.18s). Once the modal is detected, let
+            # `modal_settle` frames pass so the dialog is fully drawn.
+            if state["won_triggered"] and modal_open:
+                state["modal_seen"] = True
+            if state["modal_seen"]:
+                state["modal_settle"] += 1
+            ready = state["modal_seen"] and state["modal_settle"] >= 30
+            if not ready:
+                state["frame"] += 1
+                # Once the win has fired we're just waiting for the dialog,
+                # which is scheduled ~1s of *real* time later. A zero-delay
+                # reschedule starves the wall clock (the sim runs far faster
+                # than real time), so step on a small real delay post-trigger
+                # to let that timer elapse in a bounded number of frames.
+                delay = 1.0 / 120.0 if state["won_triggered"] else 0
+                Clock.schedule_once(_drive, delay)
+                return
+            arr = grab_frame(Window)
+            os.makedirs(os.path.dirname(args.shot) or ".", exist_ok=True)
+            Image.fromarray(arr).save(args.shot)
+            _finish()
+            return
 
         # Grab after warmup.
         if state["frame"] >= args.warmup:
