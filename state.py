@@ -79,6 +79,8 @@ class GameState:
             # Permanent shop upgrade — +N to every non-boss level's starting
             # squad. Capped at +6 by `set_squad_bonus`.
             "squad_bonus": 0,
+            # One-time UX hints already shown (so they don't repeat).
+            "world2_hint_shown": False,
             "settings": dict(DEFAULT_SETTINGS),
         }
 
@@ -237,6 +239,14 @@ class GameState:
 
     def set_squad_bonus(self, n: int) -> None:
         self.data["squad_bonus"] = max(0, min(6, int(n)))
+        self.save()
+
+    @property
+    def world2_hint_shown(self) -> bool:
+        return bool(self.data.get("world2_hint_shown", False))
+
+    def mark_world2_hint_shown(self) -> None:
+        self.data["world2_hint_shown"] = True
         self.save()
 
     # --- shop API --------------------------------------------------------

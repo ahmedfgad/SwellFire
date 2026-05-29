@@ -22,6 +22,7 @@ import math
 import os
 import random
 
+from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle, Line
@@ -69,6 +70,12 @@ PICKUP_COLLECT_RADIUS = 56.0        # px; hero auto-collects pickups within this
 # enemy density — 22 keeps roughly 150 bullets/sec which lets W6 levels
 # stay challenging at any squad size.
 MAX_SHOOTERS_PER_SHOT = 22
+# Boss fights are sized by *time*, not a flat HP number: at spawn we set boss
+# HP so that a player firing at the squad-cap with the boss's reference weapon
+# takes ~this many seconds. That makes the world-end boss the climax — longer
+# than any normal level early/mid game — regardless of the player's build,
+# while staying a capped "sweet spot" rather than a multi-minute slog.
+BOSS_TARGET_SECONDS = 82.0
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 HERO_FRAME_NAME = "runner_blue"
@@ -439,6 +446,7 @@ class GameScreen(ui.StyledScreen):
         # versus mode, removed on on_leave or when switching to single.
         self.hero_marker = None
         self.opponent_marker = None
+        self.shield_aura = None
         self._mp_tick = 0
         self._last_input_norm_x = None
         # M13 — client sends its equipped weapon to the host once after
@@ -897,6 +905,15 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.hero)
 
+        # Shield bubble — a glowing aura shown around the hero while a shield
+        # is up (replaces the old rectangle tint). Added once, hidden until
+        # _activate_shield shows it; repositioned to the hero each frame.
+        if self.shield_aura is None:
+            self.shield_aura = graphics.ShieldAura(
+                size_hint=(None, None), size=(HERO_W * 2.0, HERO_H * 1.7),
+            )
+            self.stage.add_widget(self.shield_aura)
+
         # M13 — Opponent hero + per-hero ground-ring markers so each
         # player can tell at a glance which figure is theirs. Green
         # under the local hero, red under the opponent. Added BEFORE
@@ -1015,6 +1032,41 @@ class GameScreen(ui.StyledScreen):
         # the next frame so positions are real.
         Clock.schedule_once(self._reset, 0)
 
+        # One-time hint the first time the player reaches world 2: the shop
+        # lets them upgrade weapons. Shown over a paused world with a direct
+        # "Go to Shop" button.
+        if (running.current_mode == "single"
+                and running.current_level == levels.LEVELS_PER_WORLD + 1
+                and running_app and running_app.state
+                and not running_app.state.world2_hint_shown):
+            running_app.state.mark_world2_hint_shown()
+            Clock.schedule_once(lambda *_: self._show_world2_hint(), 0.05)
+
+    def _show_world2_hint(self) -> None:
+        if self._level_ended:
+            return
+        self.paused = True
+        try:
+            ui.app().audio.stop_music()
+        except Exception:
+            pass
+        self._show_pause_dim(True)
+
+        def go_shop():
+            self._show_pause_dim(False)
+            self.paused = False
+            self._level_ended = True
+            if self._update_event is not None:
+                self._update_event.cancel()
+                self._update_event = None
+            self._exit_to("shop")
+
+        def later():
+            self._show_pause_dim(False)
+            self._resume()
+
+        ui.WeaponUpgradeDialog(on_shop=go_shop, on_later=later).open()
+
     def on_leave(self):
         if self._update_event is not None:
             self._update_event.cancel()
@@ -1036,6 +1088,12 @@ class GameScreen(ui.StyledScreen):
         self._teardown_boss()
         if self.hero is not None and self.hero.parent:
             self.hero.parent.remove_widget(self.hero)
+        # Shield aura follows the hero off the stage (cancel its pulse first).
+        if self.shield_aura is not None:
+            self.shield_aura.hide()
+            if self.shield_aura.parent:
+                self.shield_aura.parent.remove_widget(self.shield_aura)
+            self.shield_aura = None
         # M13 — also tear the opponent hero off the stage; the on_enter
         # path checks "is None" before creating one, so without this the
         # next versus match would keep the stale ghost AND skip making
@@ -1216,8 +1274,20 @@ class GameScreen(ui.StyledScreen):
         boss_h = 160.0
         boss_cx = sx + sw * 0.5
         boss_cy = sy + sh * 0.82
+        # Time-scaled HP: a maxed squad (≥ MAX_SHOOTERS_PER_SHOT) firing the
+        # boss's reference weapon at its current tier takes ~BOSS_TARGET_SECONDS
+        # to deplete this. Floored by the sim-tuned cfg value so a weak build
+        # never gets a trivially short boss.
+        running = ui.app()
+        ref_weapon = weapons.get(cfg.get("starting_weapon", DEFAULT_WEAPON_ID))
+        tier = (running.state.get_weapon_tier(cfg.get("starting_weapon",
+                DEFAULT_WEAPON_ID)) if running and running.state else 1)
+        ref_dps = (MAX_SHOOTERS_PER_SHOT * ref_weapon.fire_rate
+                   * weapons.tier_damage(ref_weapon, tier))
+        boss_hp = max(int(cfg.get("boss_hp", 100)),
+                      int(round(BOSS_TARGET_SECONDS * ref_dps)))
         self.boss = boss_module.Boss(
-            max_hp=int(cfg.get("boss_hp", 100)),
+            max_hp=boss_hp,
             cx=boss_cx, cy=boss_cy,
             width=boss_w, height=boss_h,
         )
@@ -1847,6 +1917,16 @@ class GameScreen(ui.StyledScreen):
         # 6c. Hero hit-flash decay.
         if self.hero is not None:
             self.hero.tick_flash(dt)
+        # 6c-bis. Shield aura tracks the hero while a shield is up.
+        if self.shield_aura is not None and self.hero is not None:
+            if self.shield_active_until > self._run_time:
+                self.shield_aura.center = self.hero.center
+                if self.shield_aura.opacity == 0.0:
+                    self.shield_aura.show()
+            elif self.shield_aura.opacity != 0.0:
+                self.shield_aura.hide()
+        # 6c-ter. Icy stage tint while Freeze is active.
+        self._set_freeze_tint(self.freeze_active_until > self._run_time)
 
         # 6c. Distance goal reached → level complete (skipped on boss levels —
         #     boss death drives the win condition there).
@@ -2215,12 +2295,11 @@ class GameScreen(ui.StyledScreen):
         self.shield_count -= 1
         self.shield_active_until = self._run_time + boosters.SHIELD_DURATION_SEC
         ui.app().audio.play_sfx("gate_pickup")
-        if self.hero is not None:
-            # Tint the hero blue for the shield duration via the AtlasSprite flash.
-            self.hero.flash(
-                duration=boosters.SHIELD_DURATION_SEC,
-                color=(0.30, 0.70, 1.0, 0.55),
-            )
+        # Glowing shield bubble around the hero (prettier than a flat tint);
+        # positioned + hidden in the per-frame update.
+        if self.shield_aura is not None and self.hero is not None:
+            self.shield_aura.center = self.hero.center
+            self.shield_aura.show()
         self._add_shake(1.5)
 
     def _activate_reinforce(self) -> None:
@@ -2249,6 +2328,9 @@ class GameScreen(ui.StyledScreen):
         self.freeze_count -= 1
         self.freeze_active_until = self._run_time + boosters.FREEZE_DURATION_SEC
         ui.app().audio.play_sfx("gate_pickup")
+        # Frosty pop at the hero + an icy-blue tint over the whole stage for
+        # the duration (driven in the update loop) so the freeze is obvious.
+        self._booster_burst(0.55, 0.85, 1.0)
         self._add_shake(1.5)
 
     def _activate_overdrive(self) -> None:
@@ -2261,6 +2343,10 @@ class GameScreen(ui.StyledScreen):
                                        + boosters.OVERDRIVE_DURATION_SEC)
         self._fire_cooldown = 0.0    # let the surge start firing immediately
         ui.app().audio.play_sfx("gate_pickup")
+        # Orange flare on the hero so the fire-rate surge reads visually.
+        self._booster_burst(1.0, 0.55, 0.15)
+        if self.hero is not None:
+            self.hero.flash(duration=0.5, color=(1.0, 0.55, 0.10, 0.6))
         self._add_shake(1.5)
 
     def _activate_magnet(self) -> None:
@@ -2271,6 +2357,23 @@ class GameScreen(ui.StyledScreen):
         self.magnet_count -= 1
         self.magnet_active_until = self._run_time + boosters.MAGNET_DURATION_SEC
         ui.app().audio.play_sfx("gate_pickup")
+        # Purple pulse on the hero as the magnet switches on.
+        self._booster_burst(0.80, 0.45, 0.95)
+        if self.hero is not None:
+            self.hero.flash(duration=0.5, color=(0.80, 0.45, 0.95, 0.6))
+        self._add_shake(1.2)
+
+    def _booster_burst(self, r: float, g: float, b: float) -> None:
+        """A small celebratory particle pop at the hero for booster activation.
+        (Particle frames are fixed-colour; the accompanying hero flash / stage
+        tint carries the booster's hue.)"""
+        if self.hero is None or self.particle_controller is None:
+            return
+        self.particle_controller.burst(
+            self.hero.center_x, self.hero.center_y + dp(16),
+            count=16, speed=360.0, ttl=0.5, size=12.0,
+            frame="particle", rng=self._fire_rng,
+        )
 
     def _sync_booster_btn(self, btn, count, base_color, active_until) -> None:
         """Refresh a booster HUD button. While a timed effect is running the
@@ -2287,6 +2390,7 @@ class GameScreen(ui.StyledScreen):
             btn.color = [1, 1, 1, 1]
             btn.bg = [0.12, 0.14, 0.18, 1]    # dark so the countdown pops
             btn.disabled = False
+            btn.opacity = 1.0
         else:
             btn.set_icon_visible(True)
             btn.text = "{}".format(count)
@@ -2294,6 +2398,9 @@ class GameScreen(ui.StyledScreen):
             btn.valign = "bottom"
             btn.disabled = count <= 0
             btn.bg = list(base_color) if count > 0 else [0.30, 0.30, 0.35, 1]
+            # Empty boosters fade out so it's obvious they're unavailable —
+            # StyledButton has no built-in disabled visual.
+            btn.opacity = 1.0 if count > 0 else 0.4
 
     def _detonate_grenade(self) -> None:
         """Burn one grenade: kill every enemy within GRENADE_RADIUS of the hero."""
@@ -2384,6 +2491,11 @@ class GameScreen(ui.StyledScreen):
     # --- exit -------------------------------------------------------------
 
     def _exit(self):
+        self._exit_to(None)
+
+    def _exit_to(self, destination):
+        """Leave the level. ``destination`` forces a target screen (e.g.
+        "shop" from the pause menu); otherwise route by mode as usual."""
         # Cut the GA loose if we're leaving the level — it'll re-start on
         # the next _reset if auto_mode is still on.
         if self.auto is not None:
@@ -2398,7 +2510,9 @@ class GameScreen(ui.StyledScreen):
             running.mp_net = None
             running.go("multiplayer")
             return
-        if running.current_mode == "single":
+        if destination:
+            running.go(destination)
+        elif running.current_mode == "single":
             running.go("levelselect")
         else:
             running.go("menu")
@@ -3351,9 +3465,47 @@ class GameScreen(ui.StyledScreen):
 
     # --- pause / resume (port of CoinTex GameScreen pattern) -------------
 
+    def _set_freeze_tint(self, on: bool) -> None:
+        """Translucent icy-blue overlay over the stage while Freeze is active —
+        an unmistakable 'time stopped' cue. Created lazily, fades in/out."""
+        want = 0.22 if on else 0.0
+        if getattr(self, "_freeze_overlay", None) is None:
+            if not on:
+                return
+            ov = Widget()
+            with ov.canvas:
+                self._freeze_color = Color(0.45, 0.78, 1.0, 0.0)
+                self._freeze_rect = Rectangle()
+            self._freeze_overlay = ov
+            # Sit behind the HUD/hero but over the world: add under hero layer.
+            self.stage.add_widget(ov)
+            self._freeze_overlay_on = None
+        self._freeze_rect.pos = self.stage.pos
+        self._freeze_rect.size = self.stage.size
+        if getattr(self, "_freeze_overlay_on", None) != on:
+            self._freeze_overlay_on = on
+            Animation(a=want, duration=0.2).start(self._freeze_color)
+
+    def _show_pause_dim(self, on: bool) -> None:
+        """Fade a translucent black overlay over the gameplay while paused so
+        the frozen world clearly reads as 'paused' behind the modal."""
+        if on:
+            if getattr(self, "_pause_dim", None) is None:
+                dim = Widget()
+                with dim.canvas:
+                    self._pause_dim_color = Color(0, 0, 0, 0.0)
+                    self._pause_dim_rect = Rectangle()
+                self._pause_dim = dim
+                self.root_layout.add_widget(dim)
+            self._pause_dim_rect.pos = self.root_layout.pos
+            self._pause_dim_rect.size = self.root_layout.size
+            Animation(a=0.45, duration=0.18).start(self._pause_dim_color)
+        elif getattr(self, "_pause_dim", None) is not None:
+            Animation(a=0.0, duration=0.18).start(self._pause_dim_color)
+
     def _open_pause(self) -> None:
-        """Open the pause modal. Update loop respects self.paused so the
-        world freezes; ConfirmDialog asks Quit vs Resume."""
+        """Open the pause modal (Resume / Shop / Quit). Update loop respects
+        self.paused so the world freezes; a dim overlay reads as 'paused'."""
         if self._level_ended or self.paused:
             return
         self.paused = True
@@ -3363,20 +3515,29 @@ class GameScreen(ui.StyledScreen):
             running.audio.stop_music()
         except Exception:
             pass
+        self._show_pause_dim(True)
 
-        def quit_to_menu():
+        def leave_run(destination):
+            # Shared teardown for both Quit and Shop — abandons the run.
             self.paused = False
             self._level_ended = True
+            self._show_pause_dim(False)
             if self._update_event is not None:
                 self._update_event.cancel()
                 self._update_event = None
-            self._exit()
+            if destination == "shop":
+                self._exit_to("shop")
+            else:
+                self._exit()
 
-        ui.ConfirmDialog(
-            "Quit to the level menu?\nThis level's progress is lost.",
-            quit_to_menu,
-            yes_text="Quit", no_text="Resume",
-            on_no=self._resume,
+        def on_resume():
+            self._show_pause_dim(False)
+            self._resume()
+
+        ui.PauseDialog(
+            on_resume=on_resume,
+            on_shop=lambda: leave_run("shop"),
+            on_quit=lambda: leave_run("menu"),
         ).open()
 
     def _resume(self) -> None:

@@ -119,6 +119,13 @@ def build_mp_level() -> dict[str, Any]:
     base["distance_goal"] = MP_LEVEL_DURATION_SEC * SCROLL_SPEED_PX_PER_SEC
     base["level_seconds"] = MP_LEVEL_DURATION_SEC
     base["name"] = "Versus Arena"
+    # Feature-complete arena: equation labels (world_tier 3) + the full bonus
+    # gate roster so versus matches single-player W3, not the bare W1 baseline.
+    base["world"] = 3
+    base["allowed_ops"] = ["mul", "add", "sub", "div", "grenade", "reinforce",
+                           "freeze", "overdrive", "magnet", "weapon"]
+    base["allowed_weapons"] = ["rifle", "shotgun"]
+    base["max_grenade_gates"] = 1
     return base
 
 

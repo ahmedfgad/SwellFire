@@ -31,6 +31,8 @@ SFX_FILES = {
     "click":          "click.wav",
     "shoot":          "shoot.wav",
     "hit":            "hit.wav",
+    # Squad-loss feedback reuses the hit sound (game.py plays "damage").
+    "damage":         "hit.wav",
     "enemy_death":    "enemy_death.wav",
     "gate_pickup":    "gate_pickup.wav",
     "coin":           "coin.wav",

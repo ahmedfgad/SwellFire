@@ -7,6 +7,7 @@
 # menu, host, join). Content is rewritten for the GateRunner gate-runner /
 # squad-multiplier loop.
 
+import os
 import random
 import threading
 
@@ -25,6 +26,7 @@ from kivy.uix.textinput import TextInput
 from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.metrics import sp, dp
 from kivy.clock import Clock
+from kivy.animation import Animation
 from kivy.properties import ListProperty, NumericProperty
 
 import graphics
@@ -250,6 +252,7 @@ class ConfirmDialog(ModalView):
         row.add_widget(yes_btn)
         box.add_widget(row)
         self.add_widget(box)
+        _fade_in_modal(self)
 
 
 class InfoDialog(ModalView):
@@ -281,6 +284,123 @@ class InfoDialog(ModalView):
         ok.bind(on_release=confirm)
         box.add_widget(ok)
         self.add_widget(box)
+        _fade_in_modal(self)
+
+
+def _fade_in_modal(modal, duration: float = 0.18) -> None:
+    """Fade a modal's content in on open instead of popping instantly —
+    a small bit of polish applied to every dialog."""
+    modal.opacity = 0.0
+    modal.bind(on_open=lambda *_: Animation(
+        opacity=1.0, duration=duration, t="out_quad").start(modal))
+
+
+class PauseDialog(ModalView):
+    """In-level pause menu: Resume / Shop / Quit, each an icon + button."""
+
+    _ICONS = {
+        "resume": "assets/sprites/icon_resume.png",
+        "shop":   "assets/sprites/icon_shop.png",
+        "quit":   "assets/sprites/icon_quit.png",
+    }
+
+    def __init__(self, on_resume, on_shop, on_quit, **kwargs):
+        super().__init__(size_hint=(0.72, 0.62), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
+        with box.canvas.before:
+            Color(0.12, 0.14, 0.22, 0.98)
+            self._bg = RoundedRectangle(radius=[dp(16)])
+        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
+                 size=lambda *a: setattr(self._bg, "size", box.size))
+        box.add_widget(Label(text="Paused", font_size=sp(28), bold=True,
+                             color=[1, 0.85, 0.2, 1], size_hint_y=0.22))
+
+        def option(icon_key, label, bg, cb):
+            row = BoxLayout(orientation="horizontal", spacing=dp(12),
+                            size_hint_y=0.26)
+            path = self._ICONS.get(icon_key)
+            if path and os.path.exists(path):
+                row.add_widget(graphics.TextureSprite(
+                    path, size_hint=(None, 1), width=dp(46)))
+            btn = StyledButton(text=label, bg=bg)
+
+            def go(*_):
+                self.dismiss()
+                cb()
+            btn.bind(on_release=go)
+            row.add_widget(btn)
+            return row
+
+        box.add_widget(option("resume", "Resume", [0.20, 0.70, 0.40, 1], on_resume))
+        box.add_widget(option("shop", "Shop", [0.95, 0.75, 0.20, 1], on_shop))
+        box.add_widget(option("quit", "Quit", [0.85, 0.30, 0.30, 1], on_quit))
+        self.add_widget(box)
+        _fade_in_modal(self)
+
+
+class WeaponUpgradeDialog(ModalView):
+    """One-time hint shown before world 2: weapons can be upgraded in the
+    shop. Shows an old→new weapon visual and a 'Go to Shop' button."""
+
+    def __init__(self, on_shop, on_later=None, **kwargs):
+        super().__init__(size_hint=(0.86, 0.66), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(12))
+        with box.canvas.before:
+            Color(0.12, 0.14, 0.22, 0.98)
+            self._bg = RoundedRectangle(radius=[dp(16)])
+        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
+                 size=lambda *a: setattr(self._bg, "size", box.size))
+        box.add_widget(Label(text="Upgrade Your Weapons!", font_size=sp(26),
+                             bold=True, color=[1, 0.85, 0.2, 1], size_hint_y=0.18))
+
+        # Old → new weapon visual: current gun, an arrow, a stronger gun.
+        visual = BoxLayout(orientation="horizontal", size_hint_y=0.36,
+                           spacing=dp(8), padding=(dp(20), dp(6)))
+        old = BoxLayout(orientation="vertical")
+        old.add_widget(graphics.TextureSprite(
+            "assets/sprites/icon_weapon_pistol.png", size_hint=(1, 0.8)))
+        old.add_widget(Label(text="Now", font_size=sp(15), color=[0.8, 0.8, 0.85, 1],
+                             size_hint=(1, 0.2)))
+        visual.add_widget(old)
+        visual.add_widget(Label(text="[b]>[/b]", markup=True, font_size=sp(46),
+                                color=[1, 0.85, 0.2, 1], size_hint_x=0.5))
+        new = BoxLayout(orientation="vertical")
+        new.add_widget(graphics.TextureSprite(
+            "assets/sprites/icon_weapon_rifle.png", size_hint=(1, 0.8)))
+        new.add_widget(Label(text="Upgraded", font_size=sp(15),
+                             color=[0.55, 0.95, 0.55, 1], size_hint=(1, 0.2)))
+        visual.add_widget(new)
+        box.add_widget(visual)
+
+        body = Label(
+            text="Coins you earn unlock stronger guns and higher damage. In the "
+                 "Shop, tap a weapon to equip it, then tap Upgrade to raise its "
+                 "damage. Gear up before World 2 gets tougher!",
+            font_size=sp(17), halign="center", valign="middle",
+            color=[1, 1, 1, 1], size_hint_y=0.28,
+        )
+        body.bind(width=lambda *a: setattr(body, "text_size", (body.width, None)))
+        box.add_widget(body)
+
+        row = BoxLayout(orientation="horizontal", spacing=dp(16), size_hint_y=0.2)
+        later = StyledButton(text="Maybe later", bg=[0.45, 0.45, 0.5, 1])
+        shop_btn = StyledButton(text="Go to Shop", bg=[0.2, 0.7, 0.4, 1])
+
+        def do_later(*_):
+            self.dismiss()
+            if on_later:
+                on_later()
+        later.bind(on_release=do_later)
+
+        def do_shop(*_):
+            self.dismiss()
+            on_shop()
+        shop_btn.bind(on_release=do_shop)
+        row.add_widget(later)
+        row.add_widget(shop_btn)
+        box.add_widget(row)
+        self.add_widget(box)
+        _fade_in_modal(self)
 
 
 class StyledScreen(Screen):
@@ -1601,6 +1721,18 @@ GUIDE_ROWS = [
                  "second and the more lanes you cover."),
     ("coin",     "Pick up coins between waves. Spend them between runs to upgrade weapons in "
                  "the shop."),
+    ("grenade",  "Grenade [b](G)[/b] — clears every enemy in front of you. Tap the on-screen "
+                 "button or press G."),
+    ("shield",   "Shield [b](S)[/b] — a few seconds of total protection; enemies can't cost "
+                 "you any runners."),
+    ("reinforce","Reinforcements [b](R)[/b] — instantly summon a burst of extra runners to "
+                 "recover from a bad wave."),
+    ("freeze",   "Freeze [b](F)[/b] — freezes every enemy in place for a few seconds while "
+                 "your squad keeps firing."),
+    ("overdrive","Overdrive [b](O)[/b] — fire much faster (and harder) for a few seconds. "
+                 "Great for bosses."),
+    ("magnet",   "Magnet [b](M)[/b] — pulls every coin on screen straight to you for a few "
+                 "seconds."),
 ]
 
 GUIDE_TIPS = [
@@ -1627,7 +1759,7 @@ class GuideScreen(StyledScreen):
             row = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(84), spacing=dp(14))
             row.add_widget(self._make_icon(kind))
             lbl = Label(text=text, font_size=sp(18), color=[1, 1, 1, 1],
-                        halign="left", valign="middle")
+                        halign="left", valign="middle", markup=True)
             lbl.bind(size=lambda widget, *a: setattr(widget, "text_size", widget.size))
             row.add_widget(lbl)
             col.add_widget(row)
@@ -1655,6 +1787,12 @@ class GuideScreen(StyledScreen):
             "enemy":      "assets/sprites/enemy_w1_grunt.png",
             "projectile": "assets/sprites/icon_projectile.png",
             "coin":       "assets/sprites/icon_coin.png",
+            "grenade":    "assets/sprites/icon_grenade.png",
+            "shield":     "assets/sprites/icon_shield.png",
+            "reinforce":  "assets/sprites/icon_reinforce.png",
+            "freeze":     "assets/sprites/icon_freeze.png",
+            "overdrive":  "assets/sprites/icon_overdrive.png",
+            "magnet":     "assets/sprites/icon_magnet.png",
         }
         # Special inline-drawn icon for "gate" (no asset; renders the
         # ×2 label on a green pill).

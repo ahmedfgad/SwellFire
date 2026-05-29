@@ -14,6 +14,7 @@ import json
 import math
 import os
 
+from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line, Mesh
 from kivy.core.image import Image as CoreImage
@@ -747,6 +748,53 @@ class Freezer(_PlaceholderSprite):
         w, h = self.size
         self._dot.pos = (x + w * 0.20, y + h * 0.20)
         self._dot.size = (w * 0.60, h * 0.60)
+
+
+class ShieldAura(Widget):
+    """A soft glowing bubble drawn around the hero while a shield is active.
+
+    Replaces the old flat rectangle tint: a translucent filled disc plus a
+    brighter pulsing ring reads instantly as a protective bubble and looks
+    far nicer. Position it via ``center`` each frame; ``show()`` / ``hide()``
+    toggle it (and the ring's gentle alpha pulse).
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.opacity = 0.0
+        with self.canvas:
+            self._fill_color = Color(0.35, 0.75, 1.0, 0.16)
+            self._fill = Ellipse()
+            self._ring_color = Color(0.55, 0.88, 1.0, 0.9)
+            self._ring = Line(width=2.6)
+            self._ring2_color = Color(0.85, 0.95, 1.0, 0.5)
+            self._ring2 = Line(width=1.4)
+        self.bind(pos=self._redraw, size=self._redraw)
+        self._anim = None
+        self._redraw()
+
+    def _redraw(self, *_):
+        cx, cy = self.center
+        r = max(self.width, self.height) * 0.5
+        self._fill.pos = (cx - r, cy - r)
+        self._fill.size = (2 * r, 2 * r)
+        self._ring.circle = (cx, cy, r * 0.96)
+        self._ring2.circle = (cx, cy, r * 0.78)
+
+    def show(self) -> None:
+        self.opacity = 1.0
+        if self._anim is None:
+            anim = (Animation(a=0.45, duration=0.5, t="in_out_sine")
+                    + Animation(a=0.95, duration=0.5, t="in_out_sine"))
+            anim.repeat = True
+            anim.start(self._ring_color)
+            self._anim = anim
+
+    def hide(self) -> None:
+        self.opacity = 0.0
+        if self._anim is not None:
+            self._anim.cancel(self._ring_color)
+            self._anim = None
 
 
 class ParticleBurst(Widget):
