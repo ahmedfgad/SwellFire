@@ -13,9 +13,12 @@ def test_icon_is_512_square_rgba_nonblank():
     assert img.getextrema()[3][1] > 0  # some opaque pixels
 
 
-def test_presplash_is_1920x1080():
+def test_presplash_matches_source_size():
+    # presplash is the hand-authored portrait splash from swellfire_media/re/.
     img = g.make_presplash()
-    assert img.size == (1920, 1080)
+    src = Image.open(os.path.join(ROOT, "swellfire_media", "re",
+                                  "swellfire_presplash.png"))
+    assert img.size == src.size
 
 
 def test_main_writes_files():
@@ -23,5 +26,5 @@ def test_main_writes_files():
     assert os.path.exists(os.path.join(ROOT, "icon.png"))
     assert os.path.exists(os.path.join(ROOT, "presplash.png"))
     assert os.path.exists(os.path.join(ROOT, "swellfire_media", "icon.png"))
+    assert os.path.exists(os.path.join(ROOT, "swellfire_media", "presplash.png"))
     assert Image.open(os.path.join(ROOT, "icon.png")).size == (512, 512)
-    assert Image.open(os.path.join(ROOT, "presplash.png")).size == (1920, 1080)
