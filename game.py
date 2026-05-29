@@ -19,6 +19,7 @@ Not yet here (later milestones, each leaves a runnable build):
 from __future__ import annotations
 
 import math
+import os
 import random
 
 from kivy.clock import Clock
@@ -185,8 +186,12 @@ class _IconStyledButton(ui.StyledButton):
     # M14 — pre-loaded icon textures (one per icon_kind). Loaded on
     # first use so we don't pay the CoreImage cost during app start.
     _ICON_PATHS = {
-        "grenade": "assets/sprites/icon_grenade.png",
-        "shield":  "assets/sprites/icon_shield.png",
+        "grenade":   "assets/sprites/icon_grenade.png",
+        "shield":    "assets/sprites/icon_shield.png",
+        "reinforce": "assets/sprites/icon_reinforce.png",
+        "freeze":    "assets/sprites/icon_freeze.png",
+        "overdrive": "assets/sprites/icon_overdrive.png",
+        "magnet":    "assets/sprites/icon_magnet.png",
     }
 
     def _draw_icon(self) -> None:
@@ -196,7 +201,15 @@ class _IconStyledButton(ui.StyledButton):
         if w <= 1 or h <= 1:
             return
         path = self._ICON_PATHS.get(self.icon_kind)
-        if path is None:
+        # Fallback: if the icon file is missing/unloadable, the button still
+        # shows its count text — we just skip the glyph rather than crash.
+        tex = None
+        if path is not None and os.path.exists(path):
+            try:
+                tex = graphics.load_texture(path)
+            except Exception:
+                tex = None
+        if tex is None:
             return
         # Position the icon in the upper portion of the button —
         # roughly the top 60 %. Square aspect ratio.
@@ -206,7 +219,7 @@ class _IconStyledButton(ui.StyledButton):
         with self.canvas.after:
             Color(1, 1, 1, 1)
             Rectangle(
-                texture=graphics.load_texture(path),
+                texture=tex,
                 pos=(ix, iy),
                 size=(side, side),
             )
@@ -332,6 +345,10 @@ class GameScreen(ui.StyledScreen):
         # Touch-HUD buttons (M11.5 follow-up). Initialized in build().
         self.grenade_btn = None
         self.shield_btn = None
+        self.reinforce_btn = None
+        self.freeze_btn = None
+        self.overdrive_btn = None
+        self.magnet_btn = None
         self.pause_btn = None
         self.coins_label = None
         # HUD chip-row widgets. Built in build(); None-initialised so the
@@ -417,12 +434,24 @@ class GameScreen(ui.StyledScreen):
         self.boss_controller: boss_module.BossController | None = None
         self.boss_widget: boss_module.BossWidget | None = None
         self.boss_hp_bar: boss_module.BossHPBar | None = None
-        # Booster inventory (M11.5). HUD-visible counters; keyboard shortcuts:
-        #   G  — throw a grenade (clears nearby enemies, damages boss)
-        #   S  — activate a shield (brief attrition immunity)
+        # Booster inventory. HUD-visible counters; keyboard shortcuts:
+        #   G — grenade (clears nearby enemies, damages boss)
+        #   S — shield (brief attrition immunity)
+        #   R — reinforcements (instant +squad)
+        #   F — freeze (enemies stop for a few seconds)
+        #   O — overdrive (fire-rate + damage surge)
+        #   M — magnet (pickups home to the hero)
         self.grenade_count = 0
         self.shield_count = 0
-        self.shield_active_until = 0.0     # game-time seconds; <= now = inactive
+        self.reinforce_count = 0
+        self.freeze_count = 0
+        self.overdrive_count = 0
+        self.magnet_count = 0
+        # Timed-effect expiries — game-time seconds; <= _run_time = inactive.
+        self.shield_active_until = 0.0
+        self.freeze_active_until = 0.0
+        self.overdrive_active_until = 0.0
+        self.magnet_active_until = 0.0
         # Screen shake (M11). The shake offset is applied to root_layout.pos
         # so the whole gameplay frame (stage + HUD) judders together.
         self.shake_intensity = 0.0
@@ -618,6 +647,25 @@ class GameScreen(ui.StyledScreen):
         )
         self.shield_btn.bind(on_release=lambda *_: self._activate_shield())
         self.root_layout.add_widget(self.shield_btn)
+
+        # New consumable boosters continue the bottom-left row. Each binds to
+        # its activation; counts + active countdowns update in _update_hud.
+        for kind, x, activate in (
+            ("reinforce", 0.26, self._activate_reinforce),
+            ("freeze",    0.38, self._activate_freeze),
+            ("overdrive", 0.50, self._activate_overdrive),
+            ("magnet",    0.62, self._activate_magnet),
+        ):
+            col = boosters.BOOSTERS[kind].hud_color
+            btn = _IconStyledButton(
+                kind,
+                text="0", bg=list(col), font_size=sp(14),
+                size_hint=(0.10, 0.10),
+                pos_hint={"x": x, "y": 0.03},
+            )
+            btn.bind(on_release=lambda *_a, _f=activate: _f())
+            self.root_layout.add_widget(btn)
+            setattr(self, "{}_btn".format(kind), btn)
 
     # --- layout ----------------------------------------------------------
 
@@ -887,12 +935,24 @@ class GameScreen(ui.StyledScreen):
         # player can recover from missed pairs without a freebie.
         running_app = ui.app()
         if running_app and running_app.state:
-            self.grenade_count = running_app.state.get_booster_balance("grenade")
-            self.shield_count = running_app.state.get_booster_balance("shield")
+            st = running_app.state
+            self.grenade_count = st.get_booster_balance("grenade")
+            self.shield_count = st.get_booster_balance("shield")
+            self.reinforce_count = st.get_booster_balance("reinforce")
+            self.freeze_count = st.get_booster_balance("freeze")
+            self.overdrive_count = st.get_booster_balance("overdrive")
+            self.magnet_count = st.get_booster_balance("magnet")
         else:
             self.grenade_count = 0
             self.shield_count = 0
+            self.reinforce_count = 0
+            self.freeze_count = 0
+            self.overdrive_count = 0
+            self.magnet_count = 0
         self.shield_active_until = 0.0
+        self.freeze_active_until = 0.0
+        self.overdrive_active_until = 0.0
+        self.magnet_active_until = 0.0
         self._run_time = 0.0
         # Coins earned during the run (kill remainder + gate pickup + in-level
         # coin pickups). Persisted to state.coins_balance in _end_level so a
@@ -1250,8 +1310,10 @@ class GameScreen(ui.StyledScreen):
                 size=16.0, frame="enemy_red", rng=self._fire_rng,
             )
         self._add_shake(2.2)
-        # Squad members in radius take one hit each (capped). Shield blocks.
-        if self.shield_active_until > self._run_time:
+        # Squad members in radius take one hit each (capped). Shield AND
+        # Freeze block the loss (frozen enemies can't attack).
+        if (self.shield_active_until > self._run_time
+                or self.freeze_active_until > self._run_time):
             return
         if self.squad_pool is None:
             return
@@ -1462,11 +1524,16 @@ class GameScreen(ui.StyledScreen):
                 and self.enemy_spawner is not None
                 and self.hero is not None):
             self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
+            # Freeze booster: enemies stop dead — advance their motion with
+            # dt=0 so positions hold (and none can escape past the squad)
+            # while the squad keeps firing. Attrition + bomber AoE are gated
+            # separately (same check as shield).
+            enemy_dt = 0.0 if self.freeze_active_until > self._run_time else dt
             # `on_escape` charges the same one-runner cost when an
             # enemy slips off the bottom on a path that
             # `resolve_squad_attrition` doesn't cover.
             self.enemy_controller.update(
-                dt, self.hero.center_x,
+                enemy_dt, self.hero.center_x,
                 x_min, y_min, x_max, y_max,
                 on_escape=self._on_squad_loss,
             )
@@ -1483,6 +1550,21 @@ class GameScreen(ui.StyledScreen):
                 SCROLL_SPEED_PX_PER_SEC,
             )
             self.pickup_controller.update(dt, y_min)
+            # Magnet booster: home every active pickup toward the hero so the
+            # normal collection radius vacuums them up — coins fly in.
+            if self.magnet_active_until > self._run_time:
+                pp = self.pickup_pool
+                hx, hy = self.hero.center_x, self.hero.center_y
+                step = boosters.MAGNET_PULL_SPEED * dt
+                for i in range(pp.capacity):
+                    if not pp.active[i]:
+                        continue
+                    dx = hx - pp.cx[i]
+                    dy = hy - pp.cy[i]
+                    dist = math.hypot(dx, dy)
+                    if dist > 1.0:
+                        pp.cx[i] += dx / dist * min(step, dist)
+                        pp.cy[i] += dy / dist * min(step, dist)
             entities.resolve_pickup_collection(
                 self.pickup_controller,
                 self.hero.center_x, self.hero.center_y,
@@ -1607,12 +1689,21 @@ class GameScreen(ui.StyledScreen):
                     tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                             if running_app and running_app.state else 1)
                     effective_damage = weapons.tier_damage(weapon, tier)
+                    # Overdrive booster: extra punch per shot + a faster
+                    # cooldown (applied below) for a few seconds.
+                    overdrive = self.overdrive_active_until > self._run_time
+                    if overdrive:
+                        effective_damage = max(
+                            1, int(round(effective_damage
+                                         * boosters.OVERDRIVE_DAMAGE_MULT)))
                     entities.fire_from_positions(
                         positions, target_x, target_y, weapon,
                         self.projectile_controller, self._fire_rng,
                         damage_override=effective_damage,
                     )
                     self._fire_cooldown = 1.0 / weapon.fire_rate
+                    if overdrive:
+                        self._fire_cooldown /= boosters.OVERDRIVE_FIRE_MULT
                     # M11 polish: muzzle flash + gun smoke at the hero's muzzle,
                     # plus a tiny recoil shake.
                     self._spawn_muzzle_polish(*hero_muzzle)
@@ -1750,31 +1841,20 @@ class GameScreen(ui.StyledScreen):
         weapon_name = weapons.get(self.current_weapon_id).name
         progress = "{:.0f} / {:.0f}".format(self.distance, self.distance_goal) \
             if self.distance_goal > 0 else "{:.0f}".format(self.distance)
-        # Sync the on-screen booster buttons (count + dimmed when empty).
-        if self.grenade_btn is not None:
-            # Icon owns the top of the button; text shows only the
-            # current count (bottom-aligned by the button's valign).
-            self.grenade_btn.text = "{}".format(self.grenade_count)
-            self.grenade_btn.disabled = self.grenade_count <= 0
-            self.grenade_btn.bg = (
-                [0.20, 0.80, 0.95, 1] if self.grenade_count > 0
-                else [0.30, 0.30, 0.35, 1]
-            )
-        if self.shield_btn is not None:
-            if self.shield_active_until > self._run_time:
-                remaining = self.shield_active_until - self._run_time
-                # While the shield is active, the bottom text reads
-                # "ACTIVE Ns" so the icon + countdown read together.
-                self.shield_btn.text = "ACT {:.1f}s".format(remaining)
-                self.shield_btn.bg = [1.0, 0.85, 0.30, 1]
-                self.shield_btn.disabled = True
-            else:
-                self.shield_btn.text = "{}".format(self.shield_count)
-                self.shield_btn.disabled = self.shield_count <= 0
-                self.shield_btn.bg = (
-                    [0.50, 0.85, 1.00, 1] if self.shield_count > 0
-                    else [0.30, 0.30, 0.35, 1]
-                )
+        # Sync the on-screen booster buttons (count, active countdown, dim).
+        self._sync_booster_btn(self.grenade_btn, self.grenade_count,
+                               (0.20, 0.80, 0.95, 1), None)
+        self._sync_booster_btn(self.shield_btn, self.shield_count,
+                               (0.50, 0.85, 1.00, 1), self.shield_active_until)
+        self._sync_booster_btn(self.reinforce_btn, self.reinforce_count,
+                               boosters.REINFORCE.hud_color, None)
+        self._sync_booster_btn(self.freeze_btn, self.freeze_count,
+                               boosters.FREEZE.hud_color, self.freeze_active_until)
+        self._sync_booster_btn(self.overdrive_btn, self.overdrive_count,
+                               boosters.OVERDRIVE.hud_color,
+                               self.overdrive_active_until)
+        self._sync_booster_btn(self.magnet_btn, self.magnet_count,
+                               boosters.MAGNET.hud_color, self.magnet_active_until)
         # Update the standalone 2× COINS power-up indicator (top-center).
         self._update_dc_panel()
         # Top-bar distance progress (0..1).
@@ -1874,6 +1954,18 @@ class GameScreen(ui.StyledScreen):
         elif gate.op == gates.OP_GRENADE:
             self.grenade_count = min(MAX_GRENADES,
                                      self.grenade_count + int(gate.value))
+        elif gate.op == gates.OP_REINFORCE:
+            self.reinforce_count = min(boosters.REINFORCE.max_per_run,
+                                       self.reinforce_count + int(gate.value))
+        elif gate.op == gates.OP_FREEZE:
+            self.freeze_count = min(boosters.FREEZE.max_per_run,
+                                    self.freeze_count + int(gate.value))
+        elif gate.op == gates.OP_OVERDRIVE:
+            self.overdrive_count = min(boosters.OVERDRIVE.max_per_run,
+                                       self.overdrive_count + int(gate.value))
+        elif gate.op == gates.OP_MAGNET:
+            self.magnet_count = min(boosters.MAGNET.max_per_run,
+                                    self.magnet_count + int(gate.value))
         # Audio + particle burst at the hero so the pickup reads.
         running = ui.app()
         running.audio.play_sfx("gate_pickup")
@@ -1937,12 +2029,17 @@ class GameScreen(ui.StyledScreen):
             # Persist leftover booster balances. No more free-grenade baseline
             # — anything the player has at level end is what they earned or
             # carried into the level.
-            g_delta = self.grenade_count - running.state.get_booster_balance("grenade")
-            if g_delta != 0:
-                running.state.add_booster("grenade", g_delta)
-            s_delta = self.shield_count - running.state.get_booster_balance("shield")
-            if s_delta != 0:
-                running.state.add_booster("shield", s_delta)
+            for bid, count in (
+                ("grenade", self.grenade_count),
+                ("shield", self.shield_count),
+                ("reinforce", self.reinforce_count),
+                ("freeze", self.freeze_count),
+                ("overdrive", self.overdrive_count),
+                ("magnet", self.magnet_count),
+            ):
+                delta = count - running.state.get_booster_balance(bid)
+                if delta != 0:
+                    running.state.add_booster(bid, delta)
             if won:
                 running.state.unlock_up_to(level_index + 1)
                 running.audio.play_sfx("level_complete")
@@ -2070,6 +2167,18 @@ class GameScreen(ui.StyledScreen):
         if codepoint == "s":
             self._activate_shield()
             return True
+        if codepoint == "r":
+            self._activate_reinforce()
+            return True
+        if codepoint == "f":
+            self._activate_freeze()
+            return True
+        if codepoint == "o":
+            self._activate_overdrive()
+            return True
+        if codepoint == "m":
+            self._activate_magnet()
+            return True
         return False
 
     def _activate_shield(self) -> None:
@@ -2088,6 +2197,69 @@ class GameScreen(ui.StyledScreen):
                 color=(0.30, 0.70, 1.0, 0.55),
             )
         self._add_shake(1.5)
+
+    def _activate_reinforce(self) -> None:
+        """Burn one reinforcement kit: instantly grow the squad."""
+        if self.reinforce_count <= 0 or self._level_ended:
+            return
+        if self.squad_count >= MAX_SQUAD:
+            return    # don't waste it at a full squad
+        self.reinforce_count -= 1
+        self.squad_count = min(MAX_SQUAD,
+                               self.squad_count + boosters.REINFORCE_AMOUNT)
+        ui.app().audio.play_sfx("gate_pickup")
+        if self.hero is not None and self.particle_controller is not None:
+            self.particle_controller.burst(
+                self.hero.center_x, self.hero.center_y,
+                count=20, speed=360.0, ttl=0.55, size=13.0,
+                frame="runner_blue", rng=self._fire_rng,
+            )
+        self._add_shake(2.0)
+
+    def _activate_freeze(self) -> None:
+        if self.freeze_count <= 0 or self._level_ended:
+            return
+        if self.freeze_active_until > self._run_time:
+            return
+        self.freeze_count -= 1
+        self.freeze_active_until = self._run_time + boosters.FREEZE_DURATION_SEC
+        ui.app().audio.play_sfx("gate_pickup")
+        self._add_shake(1.5)
+
+    def _activate_overdrive(self) -> None:
+        if self.overdrive_count <= 0 or self._level_ended:
+            return
+        if self.overdrive_active_until > self._run_time:
+            return
+        self.overdrive_count -= 1
+        self.overdrive_active_until = (self._run_time
+                                       + boosters.OVERDRIVE_DURATION_SEC)
+        self._fire_cooldown = 0.0    # let the surge start firing immediately
+        ui.app().audio.play_sfx("gate_pickup")
+        self._add_shake(1.5)
+
+    def _activate_magnet(self) -> None:
+        if self.magnet_count <= 0 or self._level_ended:
+            return
+        if self.magnet_active_until > self._run_time:
+            return
+        self.magnet_count -= 1
+        self.magnet_active_until = self._run_time + boosters.MAGNET_DURATION_SEC
+        ui.app().audio.play_sfx("gate_pickup")
+
+    def _sync_booster_btn(self, btn, count, base_color, active_until) -> None:
+        """Refresh a booster HUD button: count + dim-when-empty, or an
+        ``ACT N.Ns`` countdown while a timed effect is running."""
+        if btn is None:
+            return
+        if active_until is not None and active_until > self._run_time:
+            btn.text = "ACT {:.1f}s".format(active_until - self._run_time)
+            btn.bg = [1.0, 0.85, 0.30, 1]
+            btn.disabled = True
+        else:
+            btn.text = "{}".format(count)
+            btn.disabled = count <= 0
+            btn.bg = list(base_color) if count > 0 else [0.30, 0.30, 0.35, 1]
 
     def _detonate_grenade(self) -> None:
         """Burn one grenade: kill every enemy within GRENADE_RADIUS of the hero."""
@@ -3010,9 +3182,10 @@ class GameScreen(ui.StyledScreen):
         """
         if self._level_ended or self.squad_count <= 0:
             return
-        # Shield blocks the loss; the enemy is still consumed (it
-        # bounced off the shield) so the player still benefits.
-        if self.shield_active_until > self._run_time:
+        # Shield (or Freeze) blocks the loss; the enemy is still consumed (it
+        # bounced off the defense) so the player still benefits.
+        if (self.shield_active_until > self._run_time
+                or self.freeze_active_until > self._run_time):
             if self.particle_controller is not None:
                 self.particle_controller.burst(
                     hit_x, hit_y, count=8, speed=300.0, ttl=0.30,

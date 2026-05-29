@@ -195,7 +195,12 @@ def build_levels() -> dict[int, dict[str, Any]]:
 
             allowed_ops = ["mul", "add", "sub"]   # SUB now available from W1
             if world >= 2:
-                allowed_ops.append("grenade")     # bonus pickup gates from W2
+                # Consumable-bonus gates from W2. Two+ bonus ops here let
+                # bonus *pairs* form (grenade always needs a distinct partner),
+                # so grenades reappear at W2. Bonus pairs stay rare via
+                # GateSpawner.BONUS_PAIR_CHANCE; shop sells all of these too.
+                allowed_ops += ["grenade", "reinforce", "freeze",
+                                "overdrive", "magnet"]
             if world >= 3:
                 allowed_ops.append("weapon")
                 allowed_ops.append("div")         # divide-squad gates from W3

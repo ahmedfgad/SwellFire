@@ -125,6 +125,50 @@ CATALOG: list[ShopItem] = [
         description="Three shields for 200 coins (was 240) — bulk discount.",
         booster_id="shield", booster_qty=3,
     ),
+    ShopItem(
+        id="reinforce_1", label="Reinforcements x 1", price=120, category="booster",
+        description="Instantly summon +8 squad members. Press R. The fastest "
+                    "way to recover from a brutal wave.",
+        booster_id="reinforce", booster_qty=1,
+    ),
+    ShopItem(
+        id="reinforce_3", label="Reinforcements x 3", price=300, category="booster",
+        description="Three reinforcement kits for 300 coins — bulk discount.",
+        booster_id="reinforce", booster_qty=3,
+    ),
+    ShopItem(
+        id="freeze_1", label="Freeze x 1", price=80, category="booster",
+        description="Freezes every enemy for 3 seconds while your squad keeps "
+                    "firing. Press F.",
+        booster_id="freeze", booster_qty=1,
+    ),
+    ShopItem(
+        id="freeze_3", label="Freeze x 3", price=200, category="booster",
+        description="Three freezes for 200 coins — bulk discount.",
+        booster_id="freeze", booster_qty=3,
+    ),
+    ShopItem(
+        id="overdrive_1", label="Overdrive x 1", price=80, category="booster",
+        description="2× fire rate (and extra punch) for 5 seconds. Press O. "
+                    "Melts dense waves and bosses.",
+        booster_id="overdrive", booster_qty=1,
+    ),
+    ShopItem(
+        id="overdrive_3", label="Overdrive x 3", price=200, category="booster",
+        description="Three overdrives for 200 coins — bulk discount.",
+        booster_id="overdrive", booster_qty=3,
+    ),
+    ShopItem(
+        id="magnet_1", label="Magnet x 1", price=60, category="booster",
+        description="Pulls every coin on screen to the hero for 6 seconds. "
+                    "Press M.",
+        booster_id="magnet", booster_qty=1,
+    ),
+    ShopItem(
+        id="magnet_3", label="Magnet x 3", price=150, category="booster",
+        description="Three magnets for 150 coins — bulk discount.",
+        booster_id="magnet", booster_qty=3,
+    ),
 
     # --- squad bonuses (cumulative) --------------------------------------
     ShopItem(

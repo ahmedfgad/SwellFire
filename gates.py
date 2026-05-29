@@ -45,13 +45,31 @@ OP_SUB = "sub"
 OP_DIV = "div"          # divide squad by N (÷2, ÷4) — devastating at low squad
 OP_WEAPON = "weapon"
 OP_GRENADE = "grenade"
+# Consumable-bonus gate ops (each grants one charge of the matching booster,
+# collected now and used later — same model as the grenade gate). shield is
+# shop-only and is intentionally NOT a gate op.
+OP_REINFORCE = "reinforce"
+OP_FREEZE = "freeze"
+OP_OVERDRIVE = "overdrive"
+OP_MAGNET = "magnet"
 
 # Squad-altering "math" ops vs one-off "bonus" pickups. A gate pair is drawn
 # entirely from one group: an equation/atomic-math gate always faces another
-# math gate (a real ×2-vs-+5 decision), and weapon/grenade gates form their
-# own occasional bonus pairs — never a math-gate-vs-trivial-gate non-choice.
+# math gate (a real ×2-vs-+5 decision), and bonus gates (weapon + the
+# consumable boosters) form their own occasional bonus pairs — never a
+# math-gate-vs-trivial-gate non-choice.
 MATH_OPS = (OP_MUL, OP_ADD, OP_SUB, OP_DIV)
-BONUS_OPS = (OP_WEAPON, OP_GRENADE)
+BONUS_OPS = (OP_WEAPON, OP_GRENADE, OP_REINFORCE, OP_FREEZE,
+             OP_OVERDRIVE, OP_MAGNET)
+# Consumable bonus ops that grant a charge of a booster, with the gate label.
+# (weapon is handled separately — its value is a weapon id, not a charge.)
+CONSUMABLE_BONUS = {
+    OP_GRENADE:   "GRENADE",
+    OP_REINFORCE: "REINFORCE",
+    OP_FREEZE:    "FREEZE",
+    OP_OVERDRIVE: "OVERDRIVE",
+    OP_MAGNET:    "MAGNET",
+}
 
 # Leading-operator glyphs — proper math symbols read far faster than the ASCII
 # "x", "-", "/" the label strings carry. The label_text stays ASCII (synced to
@@ -74,6 +92,10 @@ OP_COLORS: dict[str, tuple[float, float, float, float]] = {
     OP_DIV:     (0.85, 0.30, 0.65, 0.82),    # magenta — distinguishes from SUB
     OP_WEAPON:  (1.00, 0.74, 0.20, 0.82),    # yellow
     OP_GRENADE: (0.20, 0.85, 0.92, 0.80),    # cyan — feels distinct from the squad/weapon ops
+    OP_REINFORCE: (0.40, 0.90, 0.45, 0.82),  # green — squad recovery
+    OP_FREEZE:    (0.45, 0.80, 1.00, 0.82),  # icy blue
+    OP_OVERDRIVE: (1.00, 0.55, 0.20, 0.82),  # orange — rapid fire
+    OP_MAGNET:    (0.80, 0.45, 0.95, 0.82),  # purple — economy
 }
 
 
@@ -384,9 +406,18 @@ class GateSpawner:
         a real "which gun" choice; weapon-vs-grenade is "gun or a grenade".
         """
         candidates: list[tuple] = []
-        if (OP_GRENADE in self.allowed_ops
-                and self.grenade_gates_spawned < self.max_grenade_gates):
-            candidates.append((OP_GRENADE, 1, "GRENADE x1"))
+        # Consumable boosters — one charge each. Grenade keeps its per-level
+        # cap; the others are uncapped (the per-pair rarity + shop economy
+        # keep them scarce).
+        for op, name in CONSUMABLE_BONUS.items():
+            if op not in self.allowed_ops:
+                continue
+            if op == OP_GRENADE:
+                if self.grenade_gates_spawned >= self.max_grenade_gates:
+                    continue
+                candidates.append((OP_GRENADE, 1, "GRENADE x1"))
+            else:
+                candidates.append((op, 1, name))
         if OP_WEAPON in self.allowed_ops:
             for w in (self.allowed_weapons or self.DEFAULT_WEAPONS):
                 candidates.append((OP_WEAPON, w, w.upper()))

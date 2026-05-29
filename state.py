@@ -63,6 +63,10 @@ class GameState:
             # keys from defaults.
             "grenade_balance": 0,
             "shield_balance": 0,
+            "reinforce_balance": 0,
+            "freeze_balance": 0,
+            "overdrive_balance": 0,
+            "magnet_balance": 0,
             "weapon_unlocks": dict(DEFAULT_WEAPON_UNLOCKS),
             # Per-weapon upgrade tiers (1-4). All four weapons start at
             # tier 1 (free). The shop sells tier 2 → 3 → 4 upgrades; higher
