@@ -248,3 +248,6 @@ assets/raw/
 # OS and editor files
 .DS_Store
 *.swp
+
+# Superpowers brainstorm scratch
+.superpowers/
