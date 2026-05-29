@@ -1548,7 +1548,12 @@ class GameScreen(ui.StyledScreen):
         #    lane center (empty list in M4 = pure free positioning).
         if self.hero is not None:
             target = self._hero_target_x
-            if not self._dragging:
+            # Lane gravity gently snaps a free-floating hero toward the
+            # nearest gate. In auto mode the GA already picks an exact target
+            # (a gate center, a deliberate gap-miss, or an enemy dodge), so
+            # letting gravity pull it back toward a lane center would fight
+            # those choices — skip it while the autoplayer is driving.
+            if not self._dragging and not self.auto_mode:
                 target = lane_gravity_target(target, self.lane_centers, dt)
                 self._hero_target_x = target
             min_x = sx + HERO_W * 0.5

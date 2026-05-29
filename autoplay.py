@@ -6,13 +6,19 @@ Ported from CoinTex's autoplay.py with the genre retargeted:
   over (x, y) target points and fitness was "collect coins / avoid monsters."
 * Gate Runner is effectively 1-D — the world auto-scrolls vertically, the
   hero only steers horizontally — so the solution space is just a target
-  fraction ``f`` in ``[0, 1]`` across the road. Fitness rewards steering
-  through the gate panel that improves the squad the most, dodging
-  upcoming enemies, and grabbing coin/double-coin pickups when safe.
+  fraction ``f`` in ``[0, 1]`` across the road.
+
+Phase 1 objectives: steer through the gate that strengthens the squad the
+most, deliberately miss a pair when *both* gates would weaken it, and dodge
+*close* enemies (far enemies are ignored). Coins are not pursued and no
+boosters are activated in this phase.
 
 The structure is the same as CoinTex: ``sense()`` snapshots the world,
-``fitness()`` scores a candidate target, and ``AutoPlayer`` runs a small
-GA in a daemon thread that re-evaluates a few times per second.
+``_decide()`` picks the one attractor for the current gate pair, ``fitness()``
+scores a candidate target against it, and ``AutoPlayer`` runs a small GA in a
+daemon thread — seeded each tick with structured candidates (gate centers, the
+gap, the previous target) so the optimum is always evaluated — that
+re-evaluates a few times per second.
 
 Tuning lives in the user's save (``ga_style`` and ``ga_speed``) and is
 applied by ``apply_auto_settings`` — same shape as CoinTex so the existing
@@ -21,6 +27,7 @@ AutoPlayerScreen wires up without modification.
 
 from __future__ import annotations
 
+import math
 import random
 import threading
 import time
@@ -33,35 +40,47 @@ import gates
 # How often the GA re-decides. Overridden by apply_auto_settings().
 RETARGET_DELAY = 0.15
 
+# --- mirrors of game.py constants ------------------------------------------
+# autoplay.py is imported by game.py, so a real `import game` here is circular.
+# Keep these in sync with game.py (SCROLL_SPEED_PX_PER_SEC, AUTO_HERO_MAX_SPEED,
+# MAX_SQUAD). They are used for the reachability model and the gate-outcome cap.
+SCROLL_SPEED = 360.0          # px/sec the world scrolls toward the hero
+HERO_LAT_SPEED = 1800.0       # px/sec max sideways slide in auto mode
+MAX_SQUAD = 100               # squad_count ceiling
+GATE_HEIGHT = 112.0           # gate panel height (gates.py GATE_HEIGHT)
+
 # Look-ahead windows (as a fraction of the stage height). Gates have the
 # largest window because the player needs to start steering well before
-# the pair arrives; enemies and pickups only matter once they're close.
+# the pair arrives; enemies only matter once they're close.
 GATE_LOOKAHEAD = 1.4
 ENEMY_LOOKAHEAD = 0.9
-PICKUP_LOOKAHEAD = 1.0
 
-# Fitness weights. Gate selection dominates safety dominates pickups.
-# The numbers were picked so that a gate that doubles the squad outscores
-# a single enemy directly on the target lane, but two enemies in a row
-# can pull the agent off a marginal gate.
+# Fitness weights. Gate selection dominates enemy avoidance.
+# A gate that strengthens the squad outscores a single enemy directly on
+# the target lane, but a close enemy still pushes the target off-center
+# (or two stacked enemies pull the agent off a marginal gate).
 GATE_WEIGHT = 600.0
-# Enemy avoidance was 400 — the agent died on W3+ before finding a gate
-# because the centering bias kept pulling it back into enemy columns.
-# Bumped to 800 and ENEMY_RADIUS widened to 0.14 so dense lanes get a
-# real "go around" signal.
+MISS_WEIGHT = 300.0           # reward for sitting in the gap when both gates weaken
 ENEMY_PENALTY = 800.0
-# Pickup attraction is intentionally disabled. With any non-zero weight,
-# a near coin (d ≈ 0.05) scored ~PICKUP_WEIGHT / 0.05 ≈ 1600 — enough
-# to drag the agent through a SUB or DIV gate, which always loses more
-# squad than the pickup is worth. Coins still get collected when they
-# happen to lie on the way to a good gate; they just don't drive the
-# steering decision anymore.
-PICKUP_WEIGHT = 0.0
-# Centering used to be 5.0, strong enough to fight a marginal dodge.
-# At 1.5 the agent freely commits to a side when threats are present
-# but still returns to the middle on an empty stretch.
+ENEMY_RADIUS = 0.14           # frac-of-road "too close" threshold; farther = ignored
+
+# Reward-peak widths (frac-of-road, std-dev of the Gaussian). The gate peak is
+# ~a quarter-gate wide so the target settles near the center; the gap peak is
+# tight because the deliberate-miss band between two gates is narrow (~9%).
+GATE_SIGMA = 0.10
+GAP_SIGMA = 0.035
+
+# Centering only kicks in on open stretches (no pair in range), to keep the
+# hero off the rails without fighting gate-centering.
 CENTERING_WEIGHT = 1.5
-ENEMY_RADIUS = 0.14           # frac-of-road "too close" threshold
+
+# Anti-jitter: a mild pull toward the previously applied target so the
+# stochastic GA commits instead of oscillating at ~6 Hz near a gate.
+STICKINESS = 30.0
+STICK_SIGMA = 0.06
+
+# Sentinel delta for a lethal gate (outcome <= 0); never chosen as the attractor.
+LETHAL_SENTINEL = -1e6
 
 # Style multipliers — set by apply_auto_settings() from the user's save.
 STYLE_GATE_MULT = 1.0
@@ -156,29 +175,18 @@ def sense(screen) -> dict | None:
                 dy / stage_h,
             ))
 
-    # --- pickups ahead --------------------------------------------------
-    pickups_ahead: list[tuple[float, float]] = []
-    if screen.pickup_controller is not None:
-        pool = screen.pickup_controller.pool
-        for i in range(len(pool.active)):
-            if not pool.active[i]:
-                continue
-            dy = pool.cy[i] - hero_cy
-            if dy < 0 or dy > stage_h * PICKUP_LOOKAHEAD:
-                continue
-            pickups_ahead.append((
-                _frac_x(pool.cx[i], road_left, road_w),
-                dy / stage_h,
-            ))
+    # Pickups/coins are intentionally not sensed in Phase 1 — the autoplayer
+    # steers purely on gates + enemy avoidance. Coins still get collected when
+    # they happen to lie on the chosen path.
 
     return {
         "hero_x_frac": _frac_x(hero_cx, road_left, road_w),
         "road_left":   road_left,
         "road_w":      road_w,
+        "stage_h":     stage_h,
         "squad":       max(1, screen.squad_count),
         "gate":        next_pair,
         "enemies":     enemies_ahead,
-        "pickups":     pickups_ahead,
     }
 
 
@@ -187,63 +195,180 @@ def sense(screen) -> dict | None:
 def _simulate_gate(squad: int, op: str, value) -> int:
     """Project the squad count after the hero passes through this gate.
 
-    Weapon and grenade gates don't change the squad — they get a small
-    fixed bonus so the agent still values them over a missed gate, but
-    less than a real squad-multiplying gate.
+    Mirrors game.py's `_on_apply_gate` so the agent values gates exactly as
+    the game scores them — including the MAX_SQUAD cap (so a clamped ×N can't
+    out-rank a +N at high squad) and the floor at 0 (so a lethal SUB/DIV is
+    representable). Bonus gates (weapon/grenade/freeze/…) don't change the
+    squad, so in Phase 1 they count as a delta of 0 — never preferred over a
+    real squad gain, but harmless next to a weakening gate.
     """
+    if op in gates.BONUS_OPS:
+        return squad
     try:
         v = int(value)
     except (TypeError, ValueError):
         v = 0
     if op == gates.OP_MUL:
-        return max(0, squad * v)
+        return min(MAX_SQUAD, max(0, squad * v))
     if op == gates.OP_ADD:
-        return max(0, squad + v)
+        return min(MAX_SQUAD, squad + v)
     if op == gates.OP_SUB:
         return max(0, squad - v)
     if op == gates.OP_DIV:
         return max(0, squad // max(1, v))
-    if op == gates.OP_WEAPON:
-        return squad + 3
-    if op == gates.OP_GRENADE:
-        return squad + 2
     return squad
 
 
-# --- fitness ---------------------------------------------------------------
+# --- decision + fitness ----------------------------------------------------
 
-def fitness(snapshot: dict | None, target_frac: float) -> float:
-    """Score a candidate target X (as a fraction of the road). Bigger
-    is better, same convention as CoinTex.
+def _gauss(f: float, center: float, sigma: float) -> float:
+    """Single-peaked weight: 1.0 at ``center``, smoothly decaying with
+    distance. Used to pull the target toward a chosen point (a gate center
+    or the gap) rather than treating a whole panel as a flat zone."""
+    d = f - center
+    return math.exp(-(d * d) / (2.0 * sigma * sigma))
+
+
+def _reach(snapshot: dict, gate: dict, target_frac: float) -> float:
+    """Fraction in [0, 1] of how reachable ``target_frac`` is before the
+    pair arrives. 1.0 = comfortably reachable, 0.0 = impossible. Lets a
+    reachable closer gate out-score an unreachable better one.
     """
+    # The pair fires while its center is still ~0.75*GATE_HEIGHT above the
+    # hero row, so the hero has a little less time than dy suggests.
+    dy_px = gate["dy_frac"] * snapshot["stage_h"] - 0.75 * GATE_HEIGHT
+    t = max(0.0, dy_px) / SCROLL_SPEED
+    max_lat_px = HERO_LAT_SPEED * t
+    needed_px = abs(target_frac - snapshot["hero_x_frac"]) * snapshot["road_w"]
+    if needed_px <= 1.0:
+        return 1.0
+    return max(0.0, min(1.0, max_lat_px / needed_px))
+
+
+def _decide(snapshot: dict | None) -> dict | None:
+    """Pick the single attractor for this tick from the nearest gate pair.
+
+    Returns ``None`` when no pair is in range (open running). Otherwise a
+    dict ``{branch, desired_x, mag, sigma}`` describing where the hero
+    should aim:
+
+    * ``positive`` — a side strengthens the squad → that gate's center.
+    * ``neutral``  — best a side can do is hold steady (e.g. a bonus gate
+      opposite a weakening gate) → the neutral gate's center.
+    * ``gap``      — both sides weaken (or both are lethal) → the gap
+      between the gates, a deliberate miss (missing forgoes the effect but
+      never reduces the squad).
+
+    A gate whose outcome is <= 0 is *lethal* (passing it ends the run); it
+    is never chosen, and forces the survivable side or the gap.
+    """
+    if snapshot is None:
+        return None
+    gate = snapshot["gate"]
+    if gate is None:
+        return None
+    squad = snapshot["squad"]
+    hero = snapshot["hero_x_frac"]
+
+    left_c = gate["left_x"] + gate["left_w"] * 0.5
+    right_c = gate["right_x"] + gate["right_w"] * 0.5
+    gap_c = (gate["left_x"] + gate["left_w"] + gate["right_x"]) * 0.5
+
+    left_out = _simulate_gate(squad, gate["left_op"], gate["left_val"])
+    right_out = _simulate_gate(squad, gate["right_op"], gate["right_val"])
+    left_lethal = left_out <= 0
+    right_lethal = right_out <= 0
+    left_delta = LETHAL_SENTINEL if left_lethal else left_out - squad
+    right_delta = LETHAL_SENTINEL if right_lethal else right_out - squad
+
+    # Death override: never aim at a lethal gate.
+    if left_lethal and right_lethal:
+        return {"branch": "gap", "desired_x": gap_c, "mag": 1.0,
+                "sigma": GAP_SIGMA}
+    if left_lethal:
+        return _gate_decision(right_c, right_delta, squad)
+    if right_lethal:
+        return _gate_decision(left_c, left_delta, squad)
+
+    best_delta = max(left_delta, right_delta)
+
+    if best_delta > 0:
+        # Strengthening side wins, but weight each side's gain by how
+        # reachable it is so a reachable smaller gate beats an unreachable
+        # bigger one. Ties → the gate closer to the hero (cheaper, steadier).
+        left_eff = left_delta * _reach(snapshot, gate, left_c) if left_delta > 0 else -1.0
+        right_eff = right_delta * _reach(snapshot, gate, right_c) if right_delta > 0 else -1.0
+        if left_eff > right_eff:
+            center, delta = left_c, left_delta
+        elif right_eff > left_eff:
+            center, delta = right_c, right_delta
+        else:
+            center = left_c if abs(left_c - hero) <= abs(right_c - hero) else right_c
+            delta = best_delta
+        return _gate_decision(center, delta, squad)
+
+    if best_delta == 0:
+        # Best a side can do is hold steady (neutral bonus vs weakening, or
+        # bonus vs bonus). Aim at the neutral side; tie → closer.
+        neutral = []
+        if left_delta == 0:
+            neutral.append(left_c)
+        if right_delta == 0:
+            neutral.append(right_c)
+        center = min(neutral, key=lambda c: abs(c - hero))
+        return {"branch": "neutral", "desired_x": center, "mag": 0.5,
+                "sigma": GATE_SIGMA}
+
+    # Both sides weaken (survivable). Deliberately thread the gap — unless
+    # it's unreachable, in which case enter the less-bad gate (lesser evil).
+    if _reach(snapshot, gate, gap_c) < 0.3:
+        center = left_c if left_delta >= right_delta else right_c
+        delta = max(left_delta, right_delta)
+        return _gate_decision(center, delta, squad)
+    return {"branch": "gap", "desired_x": gap_c, "mag": 1.0, "sigma": GAP_SIGMA}
+
+
+def _gate_decision(center: float, delta: float, squad: int) -> dict:
+    """Build a gate-aimed decision with magnitude scaled by relative gain."""
+    mag = max(0.0, min(3.0, delta / max(1, squad)))
+    branch = "positive" if delta > 0 else "neutral"
+    if delta <= 0:
+        # A weakening-but-survivable gate we're forced into: still pull
+        # toward its center so the pass reads cleanly.
+        mag = max(0.2, 1.0 + delta / max(1, squad))
+        branch = "forced"
+    return {"branch": branch, "desired_x": center, "mag": mag,
+            "sigma": GATE_SIGMA}
+
+
+def fitness(snapshot: dict | None, target_frac: float,
+            decision: "dict | None" = None,
+            prev_frac: "float | None" = None) -> float:
+    """Score a candidate target X (as a fraction of the road). Bigger is
+    better. ``decision`` (from ``_decide``) names the attractor for the
+    current gate pair; ``prev_frac`` is the last applied target (for the
+    anti-jitter stickiness term)."""
     if snapshot is None:
         return 0.0
     score = 0.0
-    squad = snapshot["squad"]
-
-    # Gate reward — the dominant term when a pair is in range.
     gate = snapshot["gate"]
-    if gate is not None:
-        left_outcome  = _simulate_gate(squad, gate["left_op"],  gate["left_val"])
-        right_outcome = _simulate_gate(squad, gate["right_op"], gate["right_val"])
-        # Side check: does the target land inside a gate panel?
-        left_in  = gate["left_x"]  <= target_frac <= gate["left_x"]  + gate["left_w"]
-        right_in = gate["right_x"] <= target_frac <= gate["right_x"] + gate["right_w"]
-        urgency = 1.0 / (gate["dy_frac"] + 0.20)
-        norm = max(1, squad)
-        if left_in:
-            score += (GATE_WEIGHT * STYLE_GATE_MULT
-                      * (left_outcome - squad) * urgency / norm)
-        elif right_in:
-            score += (GATE_WEIGHT * STYLE_GATE_MULT
-                      * (right_outcome - squad) * urgency / norm)
-        else:
-            best = max(left_outcome, right_outcome)
-            # Half-weight penalty: missing a pair is bad but recoverable.
-            score -= (GATE_WEIGHT * STYLE_GATE_MULT
-                      * max(0, best - squad) * urgency / norm * 0.5)
 
-    # Enemy avoidance — closer + same-column = bigger penalty.
+    if gate is not None and decision is not None:
+        urgency = 1.0 / (gate["dy_frac"] + 0.20)
+        peak = _gauss(target_frac, decision["desired_x"], decision["sigma"])
+        if decision["branch"] == "gap":
+            # Deliberate miss: an avoidance behaviour, no reach factor.
+            score += MISS_WEIGHT * STYLE_SAFE_MULT * urgency * peak
+        else:
+            reach = _reach(snapshot, gate, target_frac)
+            score += (GATE_WEIGHT * STYLE_GATE_MULT * urgency
+                      * decision["mag"] * peak * reach)
+    else:
+        # Open stretch: mild centering keeps the hero off the rails.
+        score -= CENTERING_WEIGHT * abs(target_frac - 0.5)
+
+    # Enemy avoidance — closer + same-column = bigger penalty. Enemies
+    # beyond ENEMY_RADIUS contribute nothing (far enemies are ignored).
     for ex, ey in snapshot["enemies"]:
         proximity = 1.0 - min(1.0, ey / ENEMY_LOOKAHEAD)
         lateral_gap = abs(target_frac - ex)
@@ -251,17 +376,11 @@ def fitness(snapshot: dict | None, target_frac: float) -> float:
             severity = 1.0 - lateral_gap / ENEMY_RADIUS
             score -= ENEMY_PENALTY * STYLE_SAFE_MULT * proximity * severity
 
-    # Pickup pull intentionally disabled — see PICKUP_WEIGHT comment.
-    # The block is left in place behind a weight check so it can be
-    # re-enabled cleanly if the tuning is revisited.
-    if PICKUP_WEIGHT > 0.0:
-        for px, py in snapshot["pickups"]:
-            d = abs(target_frac - px) + 0.05
-            score += PICKUP_WEIGHT / d * (1.0 / (py + 0.20))
+    # Anti-jitter: prefer staying near the previous commitment. Too small
+    # to override a gate/enemy decision; enough to break near-ties.
+    if prev_frac is not None:
+        score += STICKINESS * _gauss(target_frac, prev_frac, STICK_SIGMA)
 
-    # Mild centering bias — keeps the hero from drifting to the rail
-    # when nothing else demands a side.
-    score -= CENTERING_WEIGHT * abs(target_frac - 0.5)
     return score
 
 
@@ -279,6 +398,7 @@ class AutoPlayer:
         self.screen = screen
         self._thread: threading.Thread | None = None
         self._stop = False
+        self._prev_frac: float | None = None
 
     def start(self) -> None:
         self.stop()
@@ -313,12 +433,23 @@ class AutoPlayer:
                 time.sleep(RETARGET_DELAY)
                 continue
 
+            # Decide the attractor once per tick, then seed the population
+            # with structured candidates so the GA always *evaluates* the
+            # optimum (the chosen gate center, the gap, etc.) and carries it
+            # forward via elitism — this is what kills the old "random
+            # sampling missed the right target" failure.
+            decision = _decide(snapshot)
+            prev = self._prev_frac
+            seeds = self._seed_candidates(snapshot, decision)
+            candidates = seeds + population
+
             ranked = sorted(
-                population,
-                key=lambda f: fitness(snapshot, f),
+                candidates,
+                key=lambda f: fitness(snapshot, f, decision, prev),
                 reverse=True,
             )
             best_frac = ranked[0]
+            self._prev_frac = best_frac
             target_x = snapshot["road_left"] + best_frac * snapshot["road_w"]
             # Apply on the main thread — _hero_target_x is read in _update,
             # so a cross-thread write would be a race.
@@ -327,6 +458,30 @@ class AutoPlayer:
             )
             population = self._next_generation(ranked)
             time.sleep(RETARGET_DELAY)
+
+    def _seed_candidates(self, snapshot: dict,
+                         decision: "dict | None") -> list[float]:
+        """Structured fractions injected each tick so the GA never misses
+        the true optimum: the chosen attractor, both gate centers, the gap,
+        the current hero X, and the previous target."""
+        seeds: list[float] = []
+        gate = snapshot["gate"]
+        if gate is not None:
+            seeds.append(gate["left_x"] + gate["left_w"] * 0.5)
+            seeds.append(gate["right_x"] + gate["right_w"] * 0.5)
+            seeds.append((gate["left_x"] + gate["left_w"] + gate["right_x"]) * 0.5)
+        if decision is not None:
+            seeds.append(decision["desired_x"])
+        seeds.append(snapshot["hero_x_frac"])
+        if self._prev_frac is not None:
+            seeds.append(self._prev_frac)
+        # Clamp to the road and drop near-duplicates.
+        out: list[float] = []
+        for s in seeds:
+            s = max(0.0, min(1.0, s))
+            if all(abs(s - o) > 1e-4 for o in out):
+                out.append(s)
+        return out
 
     def _apply_target(self, x: float) -> None:
         screen = self.screen
