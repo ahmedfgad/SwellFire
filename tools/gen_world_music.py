@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import wave
+import zlib
 
 import numpy as np
 
@@ -115,7 +116,7 @@ def delay(x: np.ndarray, time_s: float, feedback: float = 0.35,
         echo = buf[i] * feedback
         if i + d < buf.shape[0]:
             buf[i + d] += echo
-        out[i] = x[i] + mix * buf[i + d if i + d < buf.shape[0] else i]
+        out[i] = x[i] + mix * buf[i + d]
     peak = np.max(np.abs(out)) or 1.0
     return out / peak if peak > 1.0 else out
 
@@ -541,12 +542,14 @@ def main():
     ap.add_argument("--only", default="",
                     help="comma list of track keys w/o prefix, e.g. world3,boss")
     args = ap.parse_args()
-    np.random.seed(20260529)   # deterministic drum noise -> reproducible WAVs
     only = {s.strip() for s in args.only.split(",") if s.strip()}
     for fname, builder in TRACKS.items():
         key = fname.replace("bg_music_", "").replace(".wav", "")
         if only and key not in only:
             continue
+        # Per-track deterministic seed derived from the filename so each track's
+        # drum noise is byte-reproducible regardless of --only / render order.
+        np.random.seed(20260529 + (zlib.adler32(fname.encode()) & 0xFFFF))
         raw = builder()
         looped = soft_clip(crossfade_loop(raw, fade_s=0.06))
         path = os.path.join(args.out, fname)
