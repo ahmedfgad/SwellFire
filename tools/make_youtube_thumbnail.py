@@ -19,32 +19,26 @@ OUT = os.path.join(ROOT, "swellfire_media", "youtube_thumbnail_1280x720.png")
 
 def make():
     w, h = 1280, 720
-    img = bk.vertical_gradient((w, h), bk.BG_TOP, bk.BG_BOTTOM).convert("RGBA")
-
-    # Battle scene on the right.
-    scene_h = int(h * 0.96)
-    scene_w = int(scene_h * 0.82)
-    sx0 = w - scene_w - int(w * 0.02)
-    sy0 = int(h * 0.02)
-    bk.compose_battle_scene(img, (sx0, sy0, sx0 + scene_w, sy0 + scene_h),
-                            squad_n=5, boss="enemy_w5", label="×2")
+    img = bk.solid_bg((w, h))
 
     d = ImageDraw.Draw(img)
-    # Huge title (left), heavy shadow for punch.
-    title = bk.load_font(int(h * 0.20))
-    tx, ty = int(w * 0.05), int(h * 0.26)
+    # Big title top-left.
+    title = bk.load_font(int(h * 0.17))
+    tx, ty = int(w * 0.05), int(h * 0.16)
     d.text((tx + 6, ty + 6), "Swellfire", font=title, fill=(0, 0, 0, 210), anchor="lm")
     bk.draw_wordmark(d, (tx, ty), title, anchor="lm")
-    # Tagline.
-    sub = bk.load_font(int(h * 0.075))
-    d.text((tx + 2, int(h * 0.46) + 2), "Grow your squad. Open fire.", font=sub,
-           fill=(4, 20, 24, 200))
-    d.text((tx, int(h * 0.46)), "Grow your squad. Open fire.", font=sub,
+    sub = bk.load_font(int(h * 0.065))
+    d.text((tx + 2, int(h * 0.30) + 2), "Grow your squad. Open fire.", font=sub,
+           fill=(4, 30, 30, 200))
+    d.text((tx, int(h * 0.30)), "Grow your squad. Open fire.", font=sub,
            fill=bk.EMBER["cream"])
-    # Info chip.
-    chip = bk.load_font(int(h * 0.052))
-    d.text((tx, int(h * 0.62)), "60 levels · 6 worlds · 2-player versus",
+    chip = bk.load_font(int(h * 0.05))
+    d.text((tx, int(h * 0.41)), "60 levels · 6 worlds · 2-player versus",
            font=chip, fill=bk.EMBER["gold"])
+
+    # A ×2 gate above a squad firing upward across the bottom.
+    bk.draw_gate_panel(img, w / 2, int(h * 0.56), int(w * 0.26), int(h * 0.10), "×2")
+    bk.draw_squad_row(img, w / 2, int(h * 0.97), n=6, hero_h=int(h * 0.22), fire=True)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     img.convert("RGB").save(OUT)

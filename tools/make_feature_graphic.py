@@ -19,28 +19,24 @@ OUT = os.path.join(ROOT, "swellfire_media", "feature_graphic_1024x500.png")
 
 def make():
     w, h = 1024, 500
-    img = bk.vertical_gradient((w, h), bk.BG_TOP, bk.BG_BOTTOM).convert("RGBA")
+    img = bk.solid_bg((w, h))
 
-    # Battle scene on the right (squad -> x2 gate -> dragon boss).
-    scene_h = int(h * 0.94)
-    scene_w = int(scene_h * 0.82)
-    sx0 = w - scene_w - int(w * 0.02)
-    sy0 = int(h * 0.03)
-    bk.compose_battle_scene(img, (sx0, sy0, sx0 + scene_w, sy0 + scene_h),
-                            squad_n=4, boss="enemy_w5", label="×2")
+    # Right: a ×2 gate above a squad firing upward.
+    gx = int(w * 0.74)
+    bk.draw_gate_panel(img, gx, int(h * 0.46), int(w * 0.30), int(h * 0.15), "×2")
+    bk.draw_squad_row(img, gx, int(h * 0.96), n=3, hero_h=int(h * 0.30), fire=True)
 
     d = ImageDraw.Draw(img)
-    # Title wordmark with shadow (left).
-    wm = bk.load_font(int(h * 0.24))
-    tx, ty = int(w * 0.05), int(h * 0.30)
-    d.text((tx + 4, ty + 4), "Swellfire", font=wm, fill=(4, 20, 24, 200), anchor="lm")
+    # Left: title + tagline + info line.
+    wm = bk.load_font(int(h * 0.19))
+    tx, ty = int(w * 0.04), int(h * 0.27)
+    d.text((tx + 4, ty + 4), "Swellfire", font=wm, fill=(4, 30, 30, 200), anchor="lm")
     bk.draw_wordmark(d, (tx, ty), wm, anchor="lm")
-    # Tagline + info line.
-    tag = bk.load_font(int(h * 0.085))
-    d.text((tx, int(h * 0.55)), "Grow your squad. Open fire.", font=tag,
+    tag = bk.load_font(int(h * 0.072))
+    d.text((tx, int(h * 0.50)), "Grow your squad. Open fire.", font=tag,
            fill=bk.EMBER["cream"])
-    info = bk.load_font(int(h * 0.058))
-    d.text((tx, int(h * 0.74)), "60 levels  ·  6 worlds  ·  2-player versus",
+    info = bk.load_font(int(h * 0.052))
+    d.text((tx, int(h * 0.70)), "60 levels · 6 worlds · 2-player versus",
            font=info, fill=bk.EMBER["gold"])
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

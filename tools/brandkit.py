@@ -2,10 +2,13 @@
 
 Pure Pillow so it runs anywhere the repo does. Every static-graphic generator
 (icon, presplash, feature graphic, YouTube cover, video title cards) imports
-this so the look stays unified: a cool teal background with warm ember/fire
-action, the game's OWN sprites composed into the core-loop scene (a squad of
-soldiers fires tracer rounds up through a glowing multiplier gate at a boss),
-and the "Swellfire" wordmark (gold "Swell" + cream "fire").
+this so the look stays unified, built from the game's OWN sprites:
+
+* the ICON is deliberately simple — a single hero avatar on a solid, harmonious
+  background (`compose_hero_icon`);
+* the larger marketing pieces add a squad of hero avatars firing tracer rounds
+  up through a glowing multiplier gate (`draw_squad_row` + `draw_gate_panel`),
+  with the "Swellfire" wordmark (gold "Swell" + cream "fire").
 """
 
 import math
@@ -13,7 +16,7 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# Warm "ember/fire" action palette (gate, tracers, glow, text accents).
+# Warm "ember/fire" accent palette (gate, tracers, glow, wordmark).
 EMBER = {
     "ember_black": (22, 6, 4),     # #160604
     "blood":       (122, 13, 18),  # #7a0d12
@@ -24,11 +27,11 @@ EMBER = {
     "white":       (255, 255, 255),
 }
 
-# Brand background: a flat, solid light red (no gradient, no shading) per the
-# brief. Light enough that the dark squad sprites still read clearly. Both
-# stops are equal so vertical_gradient() yields a perfectly solid fill.
-BG_TOP = (255, 102, 102)
-BG_BOTTOM = (255, 102, 102)
+# Brand background: a solid, harmonious teal. Dark hero sprites and the warm
+# gold/orange action both pop against it. Both stops equal -> a flat solid fill
+# from vertical_gradient() (no shading).
+BG_TOP = (20, 138, 144)
+BG_BOTTOM = (20, 138, 144)
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -48,7 +51,7 @@ def load_font(size, bold=True):
 
 
 def vertical_gradient(size, top_rgb, bottom_rgb):
-    """RGB image with a smooth vertical gradient top->bottom."""
+    """RGB image with a smooth vertical gradient top->bottom (solid if equal)."""
     w, h = size
     base = Image.new("RGB", size)
     px = base.load()
@@ -60,6 +63,11 @@ def vertical_gradient(size, top_rgb, bottom_rgb):
         for x in range(w):
             px[x, y] = (r, g, b)
     return base
+
+
+def solid_bg(size):
+    """The brand's flat solid background as an RGBA image."""
+    return Image.new("RGBA", size, BG_TOP + (255,))
 
 
 def radial_glow(size, center, radius, color, max_alpha=180):
@@ -126,28 +134,23 @@ def draw_gate_panel(img, cx, cy, w, h, label):
     bx1, by1 = pad + int(w), pad + int(h)
     rad = int(h * 0.34)
 
-    # outer glow
     glow = Image.new("RGBA", tile.size, (0, 0, 0, 0))
     ImageDraw.Draw(glow).rounded_rectangle((bx0, by0, bx1, by1), radius=rad,
                                            fill=(255, 170, 40, 150))
-    glow = glow.filter(ImageFilter.GaussianBlur(h * 0.28))
-    tile.alpha_composite(glow)
+    tile.alpha_composite(glow.filter(ImageFilter.GaussianBlur(h * 0.28)))
 
-    # gradient body (orange top -> gold bottom) clipped to the rounded bar
     grad = vertical_gradient((int(w), int(h)), EMBER["orange"], EMBER["gold"]).convert("RGBA")
     mask = Image.new("L", (int(w), int(h)), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, int(w) - 1, int(h) - 1),
                                            radius=rad, fill=255)
     tile.paste(grad, (bx0, by0), mask)
 
-    # neon border + top highlight
     d.rounded_rectangle((bx0, by0, bx1, by1), radius=rad, outline=EMBER["cream"],
                         width=max(2, int(h * 0.05)))
     d.rounded_rectangle((bx0 + int(h * 0.12), by0 + int(h * 0.12),
                          bx1 - int(h * 0.12), by0 + int(h * 0.34)),
                         radius=int(h * 0.16), fill=(255, 255, 255, 70))
 
-    # label with shadow
     font = load_font(int(h * 0.62))
     d.text((bx0 + w / 2 + 2, by0 + h / 2 + 3), label, font=font,
            fill=(60, 12, 8, 200), anchor="mm")
@@ -181,8 +184,7 @@ def draw_muzzle_burst(img, x, y, r, color=None):
 
 def draw_tracer_round(img, x, y, length, width, angle_deg=0.0, color=None):
     """One realistic tracer round: a blurred orange glow streak + bright gold
-    body capsule + white-hot head, rotated to `angle_deg` (0 = pointing up)
-    and centered at (x, y)."""
+    body capsule + white-hot head, rotated to `angle_deg` (0 = up), at (x, y)."""
     color = color or EMBER["gold"]
     pad = int(width * 4) + 2
     tw = int(width) + pad * 2
@@ -196,7 +198,6 @@ def draw_tracer_round(img, x, y, length, width, angle_deg=0.0, color=None):
                                            radius=width, fill=(255, 140, 36, 200))
     tile.alpha_composite(glow.filter(ImageFilter.GaussianBlur(width * 0.9)))
     d = ImageDraw.Draw(tile)
-    # tracer body fades in from the tail; bright head ball at the top
     d.rounded_rectangle((x0, y_top + length * 0.28, x1, y_bot),
                         radius=width / 2.0, fill=color)
     hr = width * 0.95
@@ -224,54 +225,44 @@ def draw_tracer(img, x_from, y_from, x_to, y_to, n=2, size=None):
     draw_muzzle_burst(img, x_to, y_to, width * 1.7, color=EMBER["white"])
 
 
-def compose_battle_scene(img, box, squad_n=5, boss="enemy_w5", label="×2"):
-    """Compose the core loop from the game's OWN sprites inside `box`:
-    a squad of hero soldiers fires projectile tracers up through a glowing
-    multiplier gate at a boss enemy. `box` = (x0, y0, x1, y1) on an RGBA image."""
+def compose_hero_icon(img, box, hero="hero_blue"):
+    """The simple app icon: one hero avatar, centered on a soft disc with a
+    drop shadow. `box` = (x0, y0, x1, y1) on an RGBA image."""
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
-    cx = x0 + w * 0.5
+    cx, cy = x0 + w * 0.5, y0 + h * 0.5
+    # soft light disc behind the hero for a clean, harmonious focal point
+    disc = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    dr = min(w, h) * 0.46
+    ImageDraw.Draw(disc).ellipse((cx - dr, cy - dr, cx + dr, cy + dr),
+                                 fill=(255, 255, 255, 42))
+    img.alpha_composite(disc.filter(ImageFilter.GaussianBlur(dr * 0.05)))
+    hero_img = load_sprite(hero, height=int(h * 0.76))
+    paste_center(img, hero_img, cx, cy + h * 0.02, shadow=True)
 
-    boss_h = h * 0.30
-    boss_cy = y0 + h * 0.15
-    gate_w, gate_h = w * 0.86, h * 0.17
-    gate_cy = y0 + h * 0.40
-    squad_h = h * 0.30
-    squad_cy = y0 + h * 0.80
 
-    # boss enemy on top (with shadow)
-    paste_center(img, load_sprite(boss, height=boss_h), cx, boss_cy, shadow=True)
-
-    # squad placement (back -> front) + the front rank's muzzles / fire origins
-    sol = load_sprite("hero_blue", height=squad_h)
+def draw_squad_row(img, cx, base_y, n, hero_h, fire=True, hero="hero_blue"):
+    """A row of `n` hero avatars standing on `base_y`. When `fire`, each emits a
+    clean upward tracer streak + a muzzle flash at the gun (no floating impacts).
+    Returns the x positions."""
+    sol = load_sprite(hero, height=int(hero_h))
     sw = sol.width
-    formation = [(0.0, 0.0), (-1.15, 0.55), (1.15, 0.55),
-                 (-2.3, 1.1), (2.3, 1.1), (0.0, 1.05)][:squad_n]
-    soldiers = [(cx + ox * sw, squad_cy + oy * (squad_h * 0.42))
-                for ox, oy in formation]
-    muzzles = [(sxx + sw * 0.22, syy - squad_h * 0.18)
-               for sxx, syy in soldiers[:3]]
-    target = (cx, boss_cy + boss_h * 0.34)
-
-    # tracer streaks (drawn behind the gate so the ×2 label stays crisp) + impact
-    for mx, my in muzzles:
-        draw_tracer(img, mx, my, target[0], target[1], n=2, size=max(4.0, h * 0.022))
-
-    # the glowing multiplier gate
-    draw_gate_panel(img, cx, gate_cy, gate_w, gate_h, label)
-
-    # squad soldiers (back-to-front overlap)
-    for sxx, syy in soldiers:
-        paste_center(img, sol, sxx, syy, shadow=True)
-
-    # muzzle flashes on top, at each firing soldier's gun
-    for mx, my in muzzles:
-        draw_muzzle_burst(img, mx, my, max(6.0, h * 0.030))
+    gap = sw * 1.08
+    xs = [cx + (i - (n - 1) / 2.0) * gap for i in range(n)]
+    for x in xs:
+        paste_center(img, sol, x, base_y - hero_h / 2.0, shadow=True)
+    if fire:
+        width = max(4.0, hero_h * 0.05)
+        for x in xs:
+            mx, my = x + sw * 0.16, base_y - hero_h * 0.52
+            draw_tracer_round(img, mx, my - hero_h * 0.55, hero_h * 0.7, width)
+            draw_muzzle_burst(img, mx, my, max(6.0, hero_h * 0.07))
+    return xs
 
 
-def draw_logo_glyph(img, box, label="×2", squad_n=5, boss="enemy_w5"):
-    """Brand glyph = the core loop rendered from real game sprites."""
-    compose_battle_scene(img, box, squad_n=squad_n, boss=boss, label=label)
+def draw_logo_glyph(img, box, **_kw):
+    """Brand glyph for the icon = the simple hero avatar."""
+    compose_hero_icon(img, box)
 
 
 def draw_wordmark(draw, xy, font, anchor="lm"):

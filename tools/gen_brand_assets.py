@@ -30,36 +30,29 @@ def make_icon():
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1),
                                            radius=int(size * 0.22), fill=255)
     img.paste(bg, (0, 0), mask)
-    # Real-sprite battle scene (tight 3-soldier squad reads at icon size).
-    bk.draw_logo_glyph(img, (int(size * 0.06), int(size * 0.05),
-                             int(size * 0.94), int(size * 0.95)),
-                       squad_n=3)
+    # Simple icon: a single hero avatar on the solid background.
+    bk.compose_hero_icon(img, (int(size * 0.10), int(size * 0.10),
+                               int(size * 0.90), int(size * 0.90)))
     return img
 
 
 def make_presplash():
     w, h = 1920, 1080
-    img = bk.vertical_gradient((w, h), bk.BG_TOP, bk.BG_BOTTOM).convert("RGBA")
-    # Core-loop scene (squad fires up through a ×2 gate at an enemy) up top.
-    scene_h = int(h * 0.64)
-    scene_w = int(scene_h * 0.82)
-    sx = (w - scene_w) // 2
-    bk.draw_logo_glyph(img, (sx, int(h * 0.02), sx + scene_w, int(h * 0.02) + scene_h),
-                       squad_n=6)
-    # Wordmark + tagline below.
+    img = bk.solid_bg((w, h))
     d = ImageDraw.Draw(img)
-    wm_font = bk.load_font(int(h * 0.11))
+    # Title + tagline up top.
+    wm_font = bk.load_font(int(h * 0.135))
     wm_w = d.textlength("Swellfire", font=wm_font)
-    wm_x, wm_y = (w - wm_w) / 2, int(h * 0.74)
-    # drop shadow for legibility on the bright teal
-    d.text((wm_x + 4, wm_y + 4), "Swellfire", font=wm_font,
-           fill=(4, 20, 24, 200), anchor="lm")
+    wm_x, wm_y = (w - wm_w) / 2, int(h * 0.17)
+    d.text((wm_x + 5, wm_y + 5), "Swellfire", font=wm_font,
+           fill=(4, 30, 30, 200), anchor="lm")
     bk.draw_wordmark(d, (wm_x, wm_y), wm_font, anchor="lm")
-    tag_font = bk.load_font(int(h * 0.040))
-    d.text((w / 2 + 2, int(h * 0.86) + 2), "Grow your squad. Open fire.",
-           font=tag_font, fill=(4, 20, 24, 200), anchor="mm")
-    d.text((w / 2, int(h * 0.86)), "Grow your squad. Open fire.",
-           font=tag_font, fill=bk.EMBER["white"], anchor="mm")
+    tag_font = bk.load_font(int(h * 0.046))
+    d.text((w / 2, int(h * 0.30)), "Grow your squad. Open fire.",
+           font=tag_font, fill=bk.EMBER["cream"], anchor="mm")
+    # A ×2 gate above the squad; the heroes fire upward beneath it.
+    bk.draw_gate_panel(img, w / 2, int(h * 0.52), int(w * 0.34), int(h * 0.10), "×2")
+    bk.draw_squad_row(img, w / 2, int(h * 0.965), n=7, hero_h=int(h * 0.20), fire=True)
     return img
 
 
