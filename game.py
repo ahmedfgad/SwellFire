@@ -2318,7 +2318,10 @@ class GameScreen(ui.StyledScreen):
         return False
 
     def _activate_shield(self) -> None:
-        if self.shield_count <= 0 or self._level_ended:
+        if self._level_ended:
+            return
+        if self.shield_count <= 0:
+            self._booster_unavailable("shield")
             return
         # Don't waste a shield if one is already up.
         if self.shield_active_until > self._run_time:
@@ -2331,14 +2334,19 @@ class GameScreen(ui.StyledScreen):
         if self.shield_aura is not None and self.hero is not None:
             self.shield_aura.center = self.hero.center
             self.shield_aura.show()
+        self._float_text("SHIELD!", boosters.BOOSTERS["shield"].hud_color)
         self._add_shake(1.5)
 
     def _activate_reinforce(self) -> None:
         """Burn one reinforcement kit: instantly grow the squad."""
-        if self.reinforce_count <= 0 or self._level_ended:
+        if self._level_ended:
+            return
+        if self.reinforce_count <= 0:
+            self._booster_unavailable("reinforce")
             return
         if self.squad_count >= MAX_SQUAD:
-            return    # don't waste it at a full squad
+            self._booster_unavailable("reinforce", message="SQUAD FULL!")
+            return
         self.reinforce_count -= 1
         self.squad_count = min(MAX_SQUAD,
                                self.squad_count + boosters.REINFORCE_AMOUNT)
@@ -2349,10 +2357,15 @@ class GameScreen(ui.StyledScreen):
                 count=20, speed=360.0, ttl=0.55, size=13.0,
                 frame="runner_blue", rng=self._fire_rng,
             )
+        self._float_text("+{} SQUAD!".format(boosters.REINFORCE_AMOUNT),
+                         boosters.BOOSTERS["reinforce"].hud_color)
         self._add_shake(2.0)
 
     def _activate_freeze(self) -> None:
-        if self.freeze_count <= 0 or self._level_ended:
+        if self._level_ended:
+            return
+        if self.freeze_count <= 0:
+            self._booster_unavailable("freeze")
             return
         if self.freeze_active_until > self._run_time:
             return
@@ -2362,10 +2375,14 @@ class GameScreen(ui.StyledScreen):
         # Frosty pop at the hero + an icy-blue tint over the whole stage for
         # the duration (driven in the update loop) so the freeze is obvious.
         self._booster_burst(0.55, 0.85, 1.0)
+        self._float_text("FREEZE!", boosters.BOOSTERS["freeze"].hud_color)
         self._add_shake(1.5)
 
     def _activate_overdrive(self) -> None:
-        if self.overdrive_count <= 0 or self._level_ended:
+        if self._level_ended:
+            return
+        if self.overdrive_count <= 0:
+            self._booster_unavailable("overdrive")
             return
         if self.overdrive_active_until > self._run_time:
             return
@@ -2378,10 +2395,14 @@ class GameScreen(ui.StyledScreen):
         self._booster_burst(1.0, 0.55, 0.15)
         if self.hero is not None:
             self.hero.flash(duration=0.5, color=(1.0, 0.55, 0.10, 0.6))
+        self._float_text("OVERDRIVE!", boosters.BOOSTERS["overdrive"].hud_color)
         self._add_shake(1.5)
 
     def _activate_magnet(self) -> None:
-        if self.magnet_count <= 0 or self._level_ended:
+        if self._level_ended:
+            return
+        if self.magnet_count <= 0:
+            self._booster_unavailable("magnet")
             return
         if self.magnet_active_until > self._run_time:
             return
@@ -2392,6 +2413,7 @@ class GameScreen(ui.StyledScreen):
         self._booster_burst(0.80, 0.45, 0.95)
         if self.hero is not None:
             self.hero.flash(duration=0.5, color=(0.80, 0.45, 0.95, 0.6))
+        self._float_text("MAGNET!", boosters.BOOSTERS["magnet"].hud_color)
         self._add_shake(1.2)
 
     def _booster_burst(self, r: float, g: float, b: float) -> None:
@@ -2405,6 +2427,39 @@ class GameScreen(ui.StyledScreen):
             count=16, speed=360.0, ttl=0.5, size=12.0,
             frame="particle", rng=self._fire_rng,
         )
+
+    def _float_text(self, text: str, color, cx=None, cy=None) -> None:
+        """In-level pop text — same feel as the shop purchase pop: bold,
+        color-coded, scale-in then rise + fade. Defaults to just above the
+        hero. Added to root_layout so it floats over gameplay."""
+        if cx is None:
+            cx = (self.hero.center_x if self.hero is not None
+                  else (self.stage.center_x if self.stage is not None else 0.0))
+        if cy is None:
+            cy = ((self.hero.center_y + dp(40)) if self.hero is not None
+                  else (self.stage.center_y if self.stage is not None else 0.0))
+        lbl = Label(
+            text="[b]{}[/b]".format(text), font_size=sp(24),
+            color=color, markup=True, bold=True,
+            halign="center", valign="middle",
+            size_hint=(None, None), size=(dp(300), dp(56)),
+        )
+        lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        self.root_layout.add_widget(lbl)
+        lbl.center = (cx, cy)
+        Animation(font_size=sp(30), duration=0.14, t="out_back").start(lbl)
+        rise = (Animation(y=lbl.y + dp(45), duration=0.5, t="out_quad")
+                + Animation(y=lbl.y + dp(105), opacity=0,
+                            duration=0.7, t="in_quad"))
+        rise.bind(on_complete=lambda *_, _w=lbl: (
+            _w.parent.remove_widget(_w) if _w.parent else None))
+        rise.start(lbl)
+
+    def _booster_unavailable(self, booster_id: str, message: str = None) -> None:
+        """Empty-press (or can't-use) feedback: error sfx + a red pop."""
+        name = boosters.BOOSTERS[booster_id].name
+        ui.app().audio.play_sfx("error")
+        self._float_text(message or "No {}!".format(name), (1.0, 0.45, 0.40, 1.0))
 
     def _sync_booster_btn(self, btn, count, base_color, active_until) -> None:
         """Refresh a booster HUD button. While a timed effect is running the
@@ -2435,7 +2490,10 @@ class GameScreen(ui.StyledScreen):
 
     def _detonate_grenade(self) -> None:
         """Burn one grenade: kill every enemy within GRENADE_RADIUS of the hero."""
-        if self.grenade_count <= 0 or self.hero is None or self.enemy_controller is None:
+        if self.hero is None or self.enemy_controller is None or self._level_ended:
+            return
+        if self.grenade_count <= 0:
+            self._booster_unavailable("grenade")
             return
         self.grenade_count -= 1
         hero_cx = self.hero.center_x
@@ -2481,6 +2539,7 @@ class GameScreen(ui.StyledScreen):
             )
         self._add_shake(8.0)
         ui.app().audio.play_sfx("explosion")
+        self._float_text("GRENADE!", boosters.BOOSTERS["grenade"].hud_color)
 
     # --- input ------------------------------------------------------------
 

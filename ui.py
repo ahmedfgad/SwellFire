@@ -948,38 +948,41 @@ class ShopScreen(StyledScreen):
                               color: tuple[float, float, float, float]) -> None:
         """Rising + fading text label that gives visual confirmation of
         what was just purchased. Big, bold, color-coded — readable at a
-        glance even by a younger player."""
-        if card is None:
-            return
-        from kivy.animation import Animation
+        glance even by a younger player.
+
+        Starts at the SCREEN center (not the card — the card lives in the
+        scroll's coordinate space, which previously dropped the label near
+        the top edge) and drifts up slowly with a quick scale-in pop so it's
+        easy to notice."""
         floating = Label(
-            text="[b]{}[/b]".format(text), font_size=sp(28),
+            text="[b]{}[/b]".format(text), font_size=sp(22),
             color=color, markup=True, bold=True,
             halign="center", valign="middle",
-            size_hint=(None, None), size=(dp(280), dp(56)),
+            size_hint=(None, None), size=(dp(320), dp(64)),
         )
         floating.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
-        floating.center = card.center
         self.root_layout.add_widget(floating)
-        # Rise + fade-out over 1.1 s with an ease-out so the start is snappy.
-        anim = Animation(
-            y=floating.y + dp(120),
-            opacity=0,
-            duration=1.1,
-            t="out_quad",
-        )
-        anim.bind(on_complete=lambda *_, _w=floating: (
+        # Center on the screen, then drift up from there.
+        floating.center = self.root_layout.center
+        # Quick scale-in pop (font grows), then a slow rise + late fade so the
+        # text lingers long enough to read.
+        Animation(font_size=sp(32), duration=0.16, t="out_back").start(floating)
+        rise = (Animation(y=floating.y + dp(60), duration=0.9, t="out_quad")
+                + Animation(y=floating.y + dp(150), opacity=0,
+                            duration=0.95, t="in_quad"))
+        rise.bind(on_complete=lambda *_, _w=floating: (
             _w.parent.remove_widget(_w) if _w.parent else None
         ))
-        anim.start(floating)
+        rise.start(floating)
         # Briefly enlarge the card's border to draw the eye.
-        try:
-            from kivy.animation import Animation as _Anim
-            original_rgba = card._border_color.rgba
-            card._border_color.rgba = (color[0], color[1], color[2], 1.0)
-            _Anim(rgba=original_rgba, duration=0.7, t="out_quad").start(card._border_color)
-        except Exception:
-            pass
+        if card is not None:
+            try:
+                original_rgba = card._border_color.rgba
+                card._border_color.rgba = (color[0], color[1], color[2], 1.0)
+                Animation(rgba=original_rgba, duration=0.7,
+                          t="out_quad").start(card._border_color)
+            except Exception:
+                pass
 
 
 class ShopItemCard(ButtonBehavior, BoxLayout):
@@ -1015,8 +1018,11 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         self.weapon_is_equipped = weapon_is_equipped
 
         # Background card (color depends on state) + outer border.
+        self._max_glow = None
         with self.canvas.before:
-            if owned:
+            if self.weapon_is_max:
+                bg_color = (0.20, 0.17, 0.06, 0.95)  # warm gold tint
+            elif owned:
                 bg_color = (0.10, 0.22, 0.16, 0.95)  # green-tinted
             elif squad_locked:
                 bg_color = (0.18, 0.18, 0.22, 0.85)
@@ -1026,11 +1032,14 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                 bg_color = (0.12, 0.18, 0.30, 0.95)
             self._bg_color = Color(*bg_color)
             self._bg = RoundedRectangle(radius=[dp(12)])
-            # Outer border.
+            # Outer border. Maxed weapons do NOT get the green "owned"
+            # rectangle — their "maxed" cue lives inside the element (the
+            # golden glow behind the icon, below). Equipped weapons still
+            # get the gold border (that's the equipped indicator).
             if is_selected:
                 border_rgba = (1.0, 0.85, 0.20, 1.0)
                 border_width = 3.0
-            elif owned:
+            elif owned and not self.weapon_is_max:
                 border_rgba = (0.30, 0.85, 0.45, 1.0)
                 border_width = 2.0
             else:
@@ -1039,6 +1048,11 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
             self._border_color = Color(*border_rgba)
             self._border = Line(rounded_rectangle=[0, 0, 0, 0, dp(12)],
                                 width=border_width)
+            # In-element MAX cue: a soft golden halo framing the weapon icon
+            # (kept within the icon's box so it never touches the border).
+            if self.weapon_is_max:
+                self._max_glow_color = Color(1.0, 0.82, 0.25, 0.0)
+                self._max_glow = RoundedRectangle(radius=[dp(10)])
         self.bind(pos=self._sync_bg, size=self._sync_bg)
 
         # Left: icon (square). Squad upgrades render N soldier figures
@@ -1048,7 +1062,15 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         icon_count = item.squad_target if item.category == "squad" else 1
         icon = ShopIcon(kind=icon_kind, count=icon_count,
                         size_hint_x=None, width=dp(80))
+        self.icon = icon
         self.add_widget(icon)
+        if self._max_glow is not None:
+            icon.bind(pos=self._sync_max_glow, size=self._sync_max_glow)
+            self._sync_max_glow()
+            pulse = (Animation(a=0.55, duration=0.8, t="in_out_sine")
+                     + Animation(a=0.18, duration=0.8, t="in_out_sine"))
+            pulse.repeat = True
+            pulse.start(self._max_glow_color)
 
         # Middle: title (top), description (bottom), state badge (bottom)
         mid = BoxLayout(orientation="vertical", spacing=dp(2),
@@ -1175,8 +1197,8 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         right.add_widget(equip_lbl)
         # Bottom: upgrade chip — "Buy Lv X+1: Yc" / "MAX" / "Need +c"
         if self.weapon_is_max:
-            up_text = "[b]MAX[/b]"
-            up_color = (0.55, 0.95, 0.55, 1.0)
+            up_text = "[b]★ MAX ★[/b]"   # gold star badge
+            up_color = (1.0, 0.85, 0.25, 1.0)
         else:
             if self.weapon_is_equipped:
                 can_pay = app().state.can_afford(self.weapon_next_price)
@@ -1214,6 +1236,17 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         self._border.rounded_rectangle = [
             self.x, self.y, self.width, self.height, dp(12),
         ]
+
+    def _sync_max_glow(self, *_):
+        """Keep the maxed-weapon halo framing the icon (within its box)."""
+        if self._max_glow is None or not hasattr(self, "icon"):
+            return
+        ix, iy = self.icon.pos
+        iw, ih = self.icon.size
+        inset = dp(2)
+        self._max_glow.pos = (ix + inset, iy + inset)
+        self._max_glow.size = (max(0.0, iw - 2 * inset),
+                               max(0.0, ih - 2 * inset))
 
     def on_release(self):
         # For weapons: tap is always actionable (equip if not equipped, OR
