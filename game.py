@@ -464,7 +464,6 @@ class GameScreen(ui.StyledScreen):
         self.boss: boss_module.Boss | None = None
         self.boss_controller: boss_module.BossController | None = None
         self.boss_widget: boss_module.BossWidget | None = None
-        self.boss_hp_bar: boss_module.BossHPBar | None = None
         # Booster inventory. HUD-visible counters; keyboard shortcuts:
         #   G — grenade (clears nearby enemies, damages boss)
         #   S — shield (brief attrition immunity)
@@ -545,28 +544,34 @@ class GameScreen(ui.StyledScreen):
             text="", font_size=sp(14), bold=True, color=(1, 0.88, 0.2, 1),
             halign="center", valign="middle",
             size_hint=(0.55, 0.30),
-            pos_hint={"center_x": 0.5, "center_y": 0.84},
+            # Sits below the always-on progress bar (which is pinned to the
+            # very top of the screen), above the chip row.
+            pos_hint={"center_x": 0.5, "center_y": 0.62},
         )
         self.title_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
         self.top_bar.add_widget(self.title_label)
 
-        # Distance progress bar — sits in the middle band of the top
-        # bar, between the title and the chip row.
+        # Level-progress bar — the single, ALWAYS-visible progress indicator
+        # for every level (distance on normal levels, boss-kill progress on
+        # boss levels). It lives on the root layout (NOT inside `top_bar`) so
+        # the Stats toggle, which dims the band to opacity 0, can never hide
+        # it. Styled like the old boss HP bar: a dark rounded track with a
+        # rounded fill that grows left→right toward 100 %.
         self.dist_bar_holder = FloatLayout(
-            size_hint=(0.55, 0.10),
-            pos_hint={"center_x": 0.5, "center_y": 0.57},
+            size_hint=(0.6, None), height=dp(20),
+            pos_hint={"center_x": 0.5, "top": 0.985},
         )
         with self.dist_bar_holder.canvas.before:
-            Color(1, 1, 1, 0.14)
-            self._dist_bg_rect = RoundedRectangle(radius=[dp(3)])
+            Color(0, 0, 0, 0.55)
+            self._dist_bg_rect = RoundedRectangle(radius=[dp(4)])
             Color(0.40, 0.85, 0.45, 0.95)
-            self._dist_fill_rect = RoundedRectangle(radius=[dp(3)])
+            self._dist_fill_rect = RoundedRectangle(radius=[dp(4)])
         self.dist_bar_holder.bind(
             pos=lambda *_: self._sync_dist_bar(),
             size=lambda *_: self._sync_dist_bar(),
         )
         self._dist_progress = 0.0
-        self.top_bar.add_widget(self.dist_bar_holder)
+        self.root_layout.add_widget(self.dist_bar_holder)
 
         # Stat chip row — Squad / Weapon / Kills / Coins. Lives at the
         # bottom of the top bar (top=0.91 → covers 0.84-0.91), which is
@@ -1318,12 +1323,9 @@ class GameScreen(ui.StyledScreen):
             size_hint=(None, None), size=(boss_w, boss_h),
         )
         self.stage.add_widget(self.boss_widget)
-        self.boss_hp_bar = boss_module.BossHPBar(
-            self.boss,
-            size_hint=(0.6, None), height=dp(22),
-            pos_hint={"center_x": 0.5, "top": 0.99},
-        )
-        self.root_layout.add_widget(self.boss_hp_bar)
+        # No separate HP bar — the unified top progress bar tracks boss-kill
+        # progress, and the boss's body itself shows its health (it turns to
+        # grey "stone" from the head down as HP drops).
         # Controller after widgets so an opening volley can render this frame.
         self.boss_controller = boss_module.BossController(
             self.boss, self.enemy_controller,
@@ -1340,11 +1342,8 @@ class GameScreen(ui.StyledScreen):
             self.boss_widget.stop()
             if self.boss_widget.parent:
                 self.boss_widget.parent.remove_widget(self.boss_widget)
-        if self.boss_hp_bar is not None and self.boss_hp_bar.parent:
-            self.boss_hp_bar.parent.remove_widget(self.boss_hp_bar)
         self.boss = None
         self.boss_widget = None
-        self.boss_hp_bar = None
         self.boss_controller = None
 
     # --- per-frame update -------------------------------------------------
@@ -1948,8 +1947,6 @@ class GameScreen(ui.StyledScreen):
         # 6b. Boss widget + HP bar follow the underlying data each frame.
         if self.boss_widget is not None:
             self.boss_widget.update_from_boss()
-        if self.boss_hp_bar is not None:
-            self.boss_hp_bar.update_from_boss()
         # 6c. Hero hit-flash decay.
         if self.hero is not None:
             self.hero.tick_flash(dt)
@@ -1998,11 +1995,8 @@ class GameScreen(ui.StyledScreen):
                                self.magnet_active_until)
         # Update the standalone 2× COINS power-up indicator (top-center).
         self._update_dc_panel()
-        # Top-bar distance progress (0..1).
-        if self.distance_goal > 0:
-            self._dist_progress = min(1.0, self.distance / self.distance_goal)
-        else:
-            self._dist_progress = 0.0
+        # Top-bar level progress (0..1).
+        self._dist_progress = self._level_progress()
         self._sync_dist_bar()
         # Weapon chip — name + current tier from the shop. Boss levels
         # override the starting weapon mid-level and the host's
@@ -2877,11 +2871,8 @@ class GameScreen(ui.StyledScreen):
                     self._stripe_ys[i] += sh_s
             self._paint_stripes()
 
-        # Sync chips + distance bar from snapshot-driven state.
-        if self.distance_goal > 0:
-            self._dist_progress = min(1.0, self.distance / self.distance_goal)
-        else:
-            self._dist_progress = 0.0
+        # Sync chips + progress bar from snapshot-driven state.
+        self._dist_progress = self._level_progress()
         self._sync_dist_bar()
         if self.squad_chip is not None:
             self.squad_chip.set_value(str(self.squad_count))
@@ -3480,14 +3471,14 @@ class GameScreen(ui.StyledScreen):
 
     def _apply_stats_visibility(self) -> None:
         """Show/hide the top statistics HUD per the Settings toggle (off by
-        default so the band never covers gameplay / the boss). The boss HP
-        bar and booster HUD are separate and stay visible. The distance bar
-        is additionally hidden on boss levels — there the boss HP bar is the
-        real progress and a filling distance bar is misleading."""
+        default so the band never covers gameplay / the boss). The toggle
+        governs ONLY the statistics — the dark band, title, and stat chips.
+        The level-progress bar and the booster HUD are separate and always
+        stay visible (the progress bar is pinned to the very top of the
+        screen, outside this band)."""
         running = ui.app()
         show = bool(running.state.get_setting("show_stats")) \
             if (running and running.state) else False
-        is_boss = bool(self.level_config and self.level_config.get("boss"))
         # Only opacity is toggled (no `disabled`): these hold Labels that
         # never grab touches, so a hidden band must not swallow the drag that
         # steers the squad.
@@ -3495,15 +3486,24 @@ class GameScreen(ui.StyledScreen):
             self.top_bar.opacity = 1.0 if show else 0.0
         if self.chip_row is not None:
             self.chip_row.opacity = 1.0 if show else 0.0
-        if self.dist_bar_holder is not None:
-            self.dist_bar_holder.opacity = 0.0 if (is_boss or not show) else 1.0
+
+    def _level_progress(self) -> float:
+        """Fraction of the level completed (0..1), for the top progress bar.
+
+        On boss levels the objective is to deplete the boss, so progress is
+        the damage dealt (`1 - hp/max_hp`); the guard on ``self.boss`` also
+        covers the multiplayer client, which holds a synced ``Boss`` while a
+        boss is active. Otherwise it is forward distance toward the goal.
+        """
+        if self.boss is not None and self.boss.max_hp > 0:
+            return max(0.0, min(1.0, 1.0 - self.boss.hp / self.boss.max_hp))
+        if self.distance_goal > 0:
+            return min(1.0, self.distance / self.distance_goal)
+        return 0.0
 
     def _sync_dist_bar(self) -> None:
-        """Position the distance progress bar within the top bar.
-
-        Called when the bar holder is resized OR when the progress
-        value advances (so the fill rectangle grows in place).
-        """
+        """Position the level-progress bar (the fill grows in place as the
+        progress value advances, or when the holder is resized)."""
         if self._dist_bg_rect is None:
             return
         x, y = self.dist_bar_holder.pos

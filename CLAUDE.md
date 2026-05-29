@@ -67,6 +67,7 @@ imply full coverage you didn't do.
 - **Atlas UVs**: `SpriteAtlas._build_frames` maps frames with **no vertical flip** (this Kivy/provider loads PIL-row-0 at GL v=0). Don't "restore" a `1 - y/H` flip or `get_region`-derived coords — they sample the empty half and render transparent against the 256×256 atlases.
 - **Gate labels**: `label_text` stays canonical ASCII (synced to MP client, used by logic); the `Gate` widget prettifies for display. Math gates pair only with math gates; bonus gates (grenade/reinforce/freeze/overdrive/magnet/weapon) form rare bonus pairs.
 - **Boss HP** is time-scaled in `_spawn_boss` (`BOSS_TARGET_SECONDS`), not a flat number.
+- **Progress bar / boss health**: one always-visible top progress bar (`dist_bar_holder`, on `root_layout`) shows level progress on every level — `distance/goal` normally, boss-kill progress (`1 − hp/max_hp`) on boss levels (`_level_progress`). The `show_stats` toggle hides only the band/title/chips, never the bar. There is **no** boss HP bar; the boss's health shows on its body — the depleted top slice turns to grey "stone" (`BossWidget._stone_rect`). The stone twins are baked by `tools/gen_boss_stone.py` (`enemy_w{N}_stone.png`); rerun it if the boss PNGs change.
 - Linux audio: run with `SDL_AUDIODRIVER=dummy` (known SDL2 init issue).
 
 ## Verify

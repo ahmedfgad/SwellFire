@@ -10,9 +10,10 @@ Components:
     * `BossController` — runs the per-frame AI: lateral drift toward a
       slowly-changing target X, two alternating attack patterns
       (Volley and Stream), HP / damage / death.
-    * `BossWidget` — an `AtlasSprite` reused at boss-scale (the
-      `enemy_red` frame), plus a separate white overlay we pulse on hit
-      and a "HP" bar drawn above the boss.
+    * `BossWidget` — the boss sprite (a per-world PNG, atlas frame as
+      fallback), plus a white overlay we pulse on hit and a desaturated
+      "stone" overlay that creeps down the body as HP drops (the
+      monster-health indicator — there is no separate HP bar).
 
 M14 swaps the atlas frame for a real boss sprite and may add a third
 attack pattern (a horizontal sweep / charge); the controller already
@@ -24,10 +25,9 @@ from __future__ import annotations
 import random
 
 from kivy.animation import Animation
-from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle
-from kivy.metrics import dp, sp
+from kivy.graphics import Color, Ellipse, Rectangle
+from kivy.metrics import dp
 from kivy.properties import NumericProperty
-from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 import graphics
@@ -268,6 +268,20 @@ class BossWidget(Widget):
             tex = atlas.texture
             u0, v0, u1, v1 = atlas.frame("enemy_red")
             tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
+        # Desaturated "stone" twin of the sprite — overdraws the depleted
+        # top slice of the body as HP drops (the monster-health indicator;
+        # replaces the old top HP bar). Degrades gracefully to "no effect"
+        # if the twin is missing (e.g. a world whose base PNG is absent).
+        self._hp_ratio = 1.0
+        self._stone_rect = None
+        self._stone_full = None
+        stone_tex = None
+        if sprite_path is not None:
+            try:
+                stone_tex = graphics.load_texture(
+                    sprite_path.replace(".png", "_stone.png"))
+            except Exception:
+                stone_tex = None
         with self.canvas:
             # Menacing glow behind the boss (pulsed; reddens in phase 2).
             self._glow_color = Color(1.0, 0.35, 0.20, 0.0)
@@ -275,6 +289,13 @@ class BossWidget(Widget):
             # The sprite. Its own Color tints reddish in phase 2.
             self._sprite_color = Color(1, 1, 1, 1)
             self._rect = Rectangle(texture=tex)
+            # Stone overlay — drawn ABOVE the living sprite (so it replaces
+            # the dead pixels) but BELOW the hit flash (so a hit still
+            # whitens the whole silhouette).
+            if stone_tex is not None:
+                self._stone_color = Color(1, 1, 1, 1)  # twin is already grey
+                self._stone_rect = Rectangle(texture=stone_tex)
+                self._stone_full = tuple(stone_tex.tex_coords)
             # Hit flash — SAME texture so only the silhouette flashes white,
             # not a full rectangle.
             self._flash_color = Color(1, 1, 1, 0)
@@ -310,6 +331,22 @@ class BossWidget(Widget):
         self._rect.size = (w, h)
         self._flash_rect.pos = (x, y)
         self._flash_rect.size = (w, h)
+        if self._stone_rect is not None:
+            # Stone covers the depleted TOP slice — from the head down to the
+            # health line at fraction `r`. The living body shows below it.
+            r = max(0.0, min(1.0, self._hp_ratio))
+            dead = 1.0 - r
+            self._stone_rect.pos = (x, y + h * r)
+            self._stone_rect.size = (w, h * dead)
+            # Sample the matching top slice of the texture. Interpolate along
+            # the quad's own corner v-coords so this is correct regardless of
+            # whether the texture is vertically flipped: the slice's bottom
+            # edge sits at fraction `r` between the displayed bottom and top.
+            u_bl, v_bl, u_br, v_br, u_tr, v_tr, u_tl, v_tl = self._stone_full
+            v_bl_s = v_bl + (v_tl - v_bl) * r
+            v_br_s = v_br + (v_tr - v_br) * r
+            self._stone_rect.tex_coords = (
+                u_bl, v_bl_s, u_br, v_br_s, u_tr, v_tr, u_tl, v_tl)
         gw, gh = w * 1.55, h * 1.45
         self._glow.pos = (cx - gw * 0.5, cy - gh * 0.5 + self.bob)
         self._glow.size = (gw, gh)
@@ -330,6 +367,11 @@ class BossWidget(Widget):
     def update_from_boss(self) -> None:
         self.center_x = self.boss.cx
         self.center_y = self.boss.cy
+        # Health → how much of the body has turned to stone (top-down).
+        self._hp_ratio = (self.boss.hp / self.boss.max_hp
+                          if self.boss.max_hp > 0 else 0.0)
+        if self._stone_rect is not None:
+            self._sync()
         # Map flash_time → alpha (full at FLASH_DURATION, 0 at 0).
         if self.boss.flash_time > 0.0:
             self._flash_color.a = min(0.75, self.boss.flash_time * 6.0)
@@ -342,58 +384,6 @@ class BossWidget(Widget):
         else:
             self._sprite_color.rgb = (1.0, 1.0, 1.0)
             self._glow_color.rgb = (1.0, 0.35, 0.20)
-
-
-class BossHPBar(Widget):
-    """Boss HP bar — drawn near the top of the stage."""
-
-    LABEL_HEIGHT_PCT = 0.55
-
-    def __init__(self, boss: Boss, **kwargs):
-        super().__init__(**kwargs)
-        self.boss = boss
-        with self.canvas.before:
-            Color(0, 0, 0, 0.55)
-            self._bg = RoundedRectangle(radius=[dp(4)])
-            self._fill_color = Color(0.90, 0.30, 0.30, 0.95)
-            self._fill = RoundedRectangle(radius=[dp(4)])
-        self.label = Label(
-            text="BOSS", font_size=sp(13), bold=True, color=(1, 1, 1, 0.95),
-            halign="center", valign="middle",
-        )
-        self.add_widget(self.label)
-        self.bind(pos=self._sync, size=self._sync)
-        self._sync()
-
-    def _sync(self, *_):
-        x, y = self.pos
-        w, h = self.size
-        self._bg.pos = (x, y)
-        self._bg.size = (w, h)
-        self.label.pos = (x, y)
-        self.label.size = (w, h)
-        self.label.text_size = (w, h)
-        self._sync_fill()
-
-    def _sync_fill(self) -> None:
-        x, y = self.pos
-        w, h = self.size
-        if self.boss.max_hp <= 0:
-            ratio = 0.0
-        else:
-            ratio = max(0.0, min(1.0, self.boss.hp / self.boss.max_hp))
-        self._fill.pos = (x, y)
-        self._fill.size = (w * ratio, h)
-        # Shift fill color from green → yellow → red as HP drops.
-        self._fill_color.rgb = (
-            min(1.0, 1.0 - ratio * 0.2 + 0.2),     # red component grows
-            max(0.20, ratio * 0.85),                # green drops
-            0.30,
-        )
-
-    def update_from_boss(self) -> None:
-        self._sync_fill()
-        self.label.text = "BOSS  {} / {}".format(self.boss.hp, self.boss.max_hp)
 
 
 # --- helper: projectile-vs-boss broad-phase ------------------------------
