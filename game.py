@@ -150,6 +150,13 @@ class _HeroMarker(Widget):
         self._ellipse.size = self.size
 
 
+def _dim_color(rgba, factor: float = 0.30):
+    """Darkened, fully-opaque version of an RGBA colour — used as a HUD
+    button background so a same-hue icon stays visible against it."""
+    r, g, b = rgba[0], rgba[1], rgba[2]
+    return [r * factor, g * factor, b * factor, 1.0]
+
+
 class _IconStyledButton(ui.StyledButton):
     """StyledButton with a vector icon drawn in ``canvas.after``.
 
@@ -170,10 +177,21 @@ class _IconStyledButton(ui.StyledButton):
         kwargs.setdefault("font_size", sp(15))
         kwargs.setdefault("bold", True)
         super().__init__(**kwargs)
-        self.icon_kind = icon_kind  # "grenade" | "shield"
+        self.icon_kind = icon_kind  # "grenade" | "shield" | …
+        # While a timed booster is active the button hides its icon and shows
+        # a large remaining-seconds countdown instead (set via
+        # ``set_icon_visible``); guarded so we only redraw on a state change.
+        self._show_icon = True
         self.bind(pos=lambda *_: self._on_resize(),
                   size=lambda *_: self._on_resize())
         self._on_resize()
+
+    def set_icon_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if visible == self._show_icon:
+            return
+        self._show_icon = visible
+        self._draw_icon()
 
     def _on_resize(self) -> None:
         # Constrain text rendering to the button's box; without this the
@@ -196,6 +214,8 @@ class _IconStyledButton(ui.StyledButton):
 
     def _draw_icon(self) -> None:
         self.canvas.after.clear()
+        if not self._show_icon:
+            return
         x, y = self.pos
         w, h = self.size
         if w <= 1 or h <= 1:
@@ -656,10 +676,13 @@ class GameScreen(ui.StyledScreen):
             ("overdrive", 0.50, self._activate_overdrive),
             ("magnet",    0.62, self._activate_magnet),
         ):
-            col = boosters.BOOSTERS[kind].hud_color
+            # Background is a *darkened* version of the booster's hue so the
+            # bright same-hue icon stays clearly visible (a same-color bg made
+            # the icon look hidden); the colour identity is preserved.
             btn = _IconStyledButton(
                 kind,
-                text="0", bg=list(col), font_size=sp(14),
+                text="0", bg=_dim_color(boosters.BOOSTERS[kind].hud_color),
+                font_size=sp(14),
                 size_hint=(0.10, 0.10),
                 pos_hint={"x": x, "y": 0.03},
             )
@@ -1847,14 +1870,16 @@ class GameScreen(ui.StyledScreen):
         self._sync_booster_btn(self.shield_btn, self.shield_count,
                                (0.50, 0.85, 1.00, 1), self.shield_active_until)
         self._sync_booster_btn(self.reinforce_btn, self.reinforce_count,
-                               boosters.REINFORCE.hud_color, None)
+                               _dim_color(boosters.REINFORCE.hud_color), None)
         self._sync_booster_btn(self.freeze_btn, self.freeze_count,
-                               boosters.FREEZE.hud_color, self.freeze_active_until)
+                               _dim_color(boosters.FREEZE.hud_color),
+                               self.freeze_active_until)
         self._sync_booster_btn(self.overdrive_btn, self.overdrive_count,
-                               boosters.OVERDRIVE.hud_color,
+                               _dim_color(boosters.OVERDRIVE.hud_color),
                                self.overdrive_active_until)
         self._sync_booster_btn(self.magnet_btn, self.magnet_count,
-                               boosters.MAGNET.hud_color, self.magnet_active_until)
+                               _dim_color(boosters.MAGNET.hud_color),
+                               self.magnet_active_until)
         # Update the standalone 2× COINS power-up indicator (top-center).
         self._update_dc_panel()
         # Top-bar distance progress (0..1).
@@ -2248,16 +2273,25 @@ class GameScreen(ui.StyledScreen):
         ui.app().audio.play_sfx("gate_pickup")
 
     def _sync_booster_btn(self, btn, count, base_color, active_until) -> None:
-        """Refresh a booster HUD button: count + dim-when-empty, or an
-        ``ACT N.Ns`` countdown while a timed effect is running."""
+        """Refresh a booster HUD button. While a timed effect is running the
+        button hides its icon and shows a large remaining-seconds countdown
+        so the active timer is unmistakable; otherwise it shows the count
+        (dimmed when empty)."""
         if btn is None:
             return
         if active_until is not None and active_until > self._run_time:
-            btn.text = "ACT {:.1f}s".format(active_until - self._run_time)
-            btn.bg = [1.0, 0.85, 0.30, 1]
-            btn.disabled = True
+            btn.set_icon_visible(False)
+            btn.text = "{:.1f}s".format(active_until - self._run_time)
+            btn.font_size = sp(19)
+            btn.valign = "middle"
+            btn.color = [1, 1, 1, 1]
+            btn.bg = [0.12, 0.14, 0.18, 1]    # dark so the countdown pops
+            btn.disabled = False
         else:
+            btn.set_icon_visible(True)
             btn.text = "{}".format(count)
+            btn.font_size = sp(14)
+            btn.valign = "bottom"
             btn.disabled = count <= 0
             btn.bg = list(base_color) if count > 0 else [0.30, 0.30, 0.35, 1]
 
