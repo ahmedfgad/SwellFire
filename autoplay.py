@@ -9,9 +9,11 @@ Ported from CoinTex's autoplay.py with the genre retargeted:
   fraction ``f`` in ``[0, 1]`` across the road.
 
 Phase 1 objectives: steer through the gate that strengthens the squad the
-most, deliberately miss a pair when *both* gates would weaken it, and dodge
-*close* enemies (far enemies are ignored). Coins are not pursued and no
-boosters are activated in this phase.
+most, and deliberately miss a pair when *both* gates would weaken it.
+Enemy avoidance and coin pursuit are intentionally NOT objectives — dodging
+monsters sometimes forced the hero off a strengthening gate onto a weakening
+one, and the squad's auto-fire clears enemies anyway, so the agent steers
+purely on gate selection. No boosters are activated in this phase.
 
 The structure is the same as CoinTex: ``sense()`` snapshots the world,
 ``_decide()`` picks the one attractor for the current gate pair, ``fitness()``
@@ -51,18 +53,12 @@ GATE_HEIGHT = 112.0           # gate panel height (gates.py GATE_HEIGHT)
 
 # Look-ahead windows (as a fraction of the stage height). Gates have the
 # largest window because the player needs to start steering well before
-# the pair arrives; enemies only matter once they're close.
+# the pair arrives.
 GATE_LOOKAHEAD = 1.4
-ENEMY_LOOKAHEAD = 0.9
 
-# Fitness weights. Gate selection dominates enemy avoidance.
-# A gate that strengthens the squad outscores a single enemy directly on
-# the target lane, but a close enemy still pushes the target off-center
-# (or two stacked enemies pull the agent off a marginal gate).
+# Fitness weights. Gate selection is the only steering objective in Phase 1.
 GATE_WEIGHT = 600.0
 MISS_WEIGHT = 300.0           # reward for sitting in the gap when both gates weaken
-ENEMY_PENALTY = 800.0
-ENEMY_RADIUS = 0.14           # frac-of-road "too close" threshold; farther = ignored
 
 # Reward-peak widths (frac-of-road, std-dev of the Gaussian). The gate peak is
 # ~a quarter-gate wide so the target settles near the center; the gap peak is
@@ -160,24 +156,11 @@ def sense(screen) -> dict | None:
                     "dy_frac": dy / stage_h,
                 }
 
-    # --- enemies ahead --------------------------------------------------
-    enemies_ahead: list[tuple[float, float]] = []
-    if screen.enemy_controller is not None:
-        pool = screen.enemy_controller.pool
-        for i in range(len(pool.active)):
-            if not pool.active[i]:
-                continue
-            dy = pool.cy[i] - hero_cy
-            if dy < 0 or dy > stage_h * ENEMY_LOOKAHEAD:
-                continue
-            enemies_ahead.append((
-                _frac_x(pool.cx[i], road_left, road_w),
-                dy / stage_h,
-            ))
-
-    # Pickups/coins are intentionally not sensed in Phase 1 — the autoplayer
-    # steers purely on gates + enemy avoidance. Coins still get collected when
-    # they happen to lie on the chosen path.
+    # Enemies and coins are intentionally not sensed in Phase 1 — the
+    # autoplayer steers purely on gate selection. Enemy avoidance was
+    # dropped because dodging sometimes forced the hero off a strengthening
+    # gate onto a weakening one; the squad's auto-fire clears enemies and
+    # picking the right gates carries the level.
 
     return {
         "hero_x_frac": _frac_x(hero_cx, road_left, road_w),
@@ -186,7 +169,6 @@ def sense(screen) -> dict | None:
         "stage_h":     stage_h,
         "squad":       max(1, screen.squad_count),
         "gate":        next_pair,
-        "enemies":     enemies_ahead,
     }
 
 
@@ -367,17 +349,11 @@ def fitness(snapshot: dict | None, target_frac: float,
         # Open stretch: mild centering keeps the hero off the rails.
         score -= CENTERING_WEIGHT * abs(target_frac - 0.5)
 
-    # Enemy avoidance — closer + same-column = bigger penalty. Enemies
-    # beyond ENEMY_RADIUS contribute nothing (far enemies are ignored).
-    for ex, ey in snapshot["enemies"]:
-        proximity = 1.0 - min(1.0, ey / ENEMY_LOOKAHEAD)
-        lateral_gap = abs(target_frac - ex)
-        if lateral_gap < ENEMY_RADIUS:
-            severity = 1.0 - lateral_gap / ENEMY_RADIUS
-            score -= ENEMY_PENALTY * STYLE_SAFE_MULT * proximity * severity
+    # (Enemy avoidance was removed — see sense(): the agent steers purely on
+    # gate selection so it never gets pushed off a good gate by a monster.)
 
     # Anti-jitter: prefer staying near the previous commitment. Too small
-    # to override a gate/enemy decision; enough to break near-ties.
+    # to override a gate decision; enough to break near-ties.
     if prev_frac is not None:
         score += STICKINESS * _gauss(target_frac, prev_frac, STICK_SIGMA)
 
