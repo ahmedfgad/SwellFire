@@ -2159,7 +2159,11 @@ class GameScreen(ui.StyledScreen):
         # End-of-level coin bonus: 20 for completing + 10 per star (was 50/30
         # before — kills + gates now contribute less so the shop progresses
         # at the right rate when combined with in-level coin pickups).
-        if won:
+        # The level-complete coin bonus is a single-player progression reward
+        # (it's only persisted in single-player below). Applying it in versus
+        # only inflated the host's own displayed coin total *after* the result
+        # was already broadcast to the client, so the two windows disagreed.
+        if won and running.current_mode == "single":
             self._coins_earned += COIN_BONUS_LEVEL_COMPLETE + COIN_BONUS_PER_STAR * stars
 
         # Persist for single-player levels. Multiplayer never touches the save.
@@ -2294,6 +2298,7 @@ class GameScreen(ui.StyledScreen):
             on_roadmap=on_roadmap,
             stats=stats,
             opponent_stats=getattr(self, "_mp_opponent_stats", None),
+            opponent_score=getattr(self, "_mp_opponent_score", None),
         )
         dialog.open()
 
@@ -3228,11 +3233,13 @@ class GameScreen(ui.StyledScreen):
             "t":              "result",
             "local_won":      p2_score > p1_score,
             "local_score":    p2_score,
+            "opponent_score": p1_score,     # client's opponent = host
             "local_stats":    opp_stats,    # client's own = host's opponent
             "opponent_stats": host_stats,
         })
         self._mp_local_won = p1_score >= p2_score
         self._mp_opponent_stats = opp_stats
+        self._mp_opponent_score = p2_score   # host's opponent = client
 
     def _mp_show_result(self, msg: dict) -> None:
         """Both sides: the host has declared the match over. Render the
@@ -3241,6 +3248,7 @@ class GameScreen(ui.StyledScreen):
         """
         won = bool(msg.get("local_won", False))
         score = int(msg.get("local_score", 0))
+        opponent_score = int(msg.get("opponent_score", 0))
         self._level_ended = True
         if self._update_event is not None:
             self._update_event.cancel()
@@ -3265,6 +3273,7 @@ class GameScreen(ui.StyledScreen):
             on_next=None, on_retry=self._exit, on_menu=self._exit,
             stats=local_stats,
             opponent_stats=opponent_stats,
+            opponent_score=opponent_score,
         )
         dialog.open()
 

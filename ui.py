@@ -476,7 +476,12 @@ class LevelResultDialog(ModalView):
 
     def __init__(self, won: bool, stars: int, score: int, level_label: str,
                  *, on_next=None, on_retry, on_menu, on_roadmap=None,
-                 stats=None, opponent_stats=None, **kwargs):
+                 stats=None, opponent_stats=None, opponent_score=None,
+                 **kwargs):
+        # Versus result: a side-by-side comparison, not a single-player
+        # level rating. Stars don't apply (and were rendered inconsistently
+        # host vs client); the title + the Score row carry the outcome.
+        versus = opponent_stats is not None
         # Slightly taller now to fit the stats block + the two-row button area.
         super().__init__(size_hint=(0.80, 0.84), auto_dismiss=False, **kwargs)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
@@ -494,17 +499,18 @@ class LevelResultDialog(ModalView):
         box.add_widget(Label(text=level_label, font_size=sp(16), bold=False,
                              color=(1, 1, 1, 0.85), size_hint_y=0.07))
 
-        if won:
-            star_holder = BoxLayout(orientation="horizontal", size_hint_y=0.16,
-                                    padding=(dp(40), 0, dp(40), 0))
-            star_holder.add_widget(StarRow(stars=stars, size_hint=(1, 1)))
-            box.add_widget(star_holder)
-        else:
-            box.add_widget(Label(
-                text="Your squad fell to the swarm. Try a steadier path through the gates.",
-                font_size=sp(14), color=(1, 1, 1, 0.85),
-                halign="center", valign="middle", size_hint_y=0.16,
-            ))
+        if not versus:
+            if won:
+                star_holder = BoxLayout(orientation="horizontal", size_hint_y=0.16,
+                                        padding=(dp(40), 0, dp(40), 0))
+                star_holder.add_widget(StarRow(stars=stars, size_hint=(1, 1)))
+                box.add_widget(star_holder)
+            else:
+                box.add_widget(Label(
+                    text="Your squad fell to the swarm. Try a steadier path through the gates.",
+                    font_size=sp(14), color=(1, 1, 1, 0.85),
+                    halign="center", valign="middle", size_hint_y=0.16,
+                ))
 
         box.add_widget(Label(text="Score   {}".format(score),
                              font_size=sp(20), bold=True, color=(1, 1, 1, 1),
@@ -518,7 +524,7 @@ class LevelResultDialog(ModalView):
             if opponent_stats:
                 # Versus: 3-column grid with header — Label | YOU | OPP
                 grid = GridLayout(cols=3, spacing=(dp(8), dp(4)),
-                                  size_hint_y=0.36,
+                                  size_hint_y=0.42,
                                   padding=(dp(8), 0, dp(8), 0))
                 grid.add_widget(Label(text="", size_hint_x=0.40))
                 grid.add_widget(Label(text="YOU", font_size=sp(13), bold=True,
@@ -530,6 +536,9 @@ class LevelResultDialog(ModalView):
                                       halign="center", valign="middle",
                                       size_hint_x=0.30))
                 rows = [
+                    ("Score",   score if score is not None else 0,
+                                opponent_score if opponent_score is not None else 0,
+                                (1.0, 0.85, 0.20, 1.0)),
                     ("Coins",   stats.get("coins_total", 0),
                                 opponent_stats.get("coins_total", 0),
                                 (1.0, 0.92, 0.40, 1.0)),
