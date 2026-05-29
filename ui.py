@@ -98,10 +98,10 @@ class ShopIcon(Widget):
         "grenade":       "assets/sprites/icon_grenade.png",
         "shield":        "assets/sprites/icon_shield.png",
         "squad":         "assets/sprites/hero_blue.png",
-        "weapon_pistol": "assets/sprites/hero_blue.png",
-        "weapon_rifle":  "assets/sprites/hero_blue.png",
-        "weapon_shotgun":"assets/sprites/hero_blue.png",
-        "weapon_sniper": "assets/sprites/hero_blue.png",
+        "weapon_pistol": "assets/sprites/icon_weapon_pistol.png",
+        "weapon_rifle":  "assets/sprites/icon_weapon_rifle.png",
+        "weapon_shotgun":"assets/sprites/icon_weapon_shotgun.png",
+        "weapon_sniper": "assets/sprites/icon_weapon_sniper.png",
     }
 
     def __init__(self, kind: str, **kwargs):
@@ -1617,16 +1617,20 @@ class GuideScreen(StyledScreen):
         self.root_layout.add_widget(outer)
 
     def _make_icon(self, kind):
-        if kind == "runner":
-            return graphics.RunnerSprite(size_hint=(None, 1), width=dp(60))
+        # M14 — guide icons now use the real M14 sprites instead of
+        # canvas-drawn placeholders.
+        png_for_kind = {
+            "runner":     "assets/sprites/hero_blue.png",
+            "enemy":      "assets/sprites/enemy_w1_grunt.png",
+            "projectile": "assets/sprites/icon_projectile.png",
+            "coin":       "assets/sprites/icon_coin.png",
+        }
+        # Special inline-drawn icon for "gate" (no asset; renders the
+        # ×2 label on a green pill).
         if kind == "gate":
             return graphics.GateSprite(label="x2", size_hint=(None, 1), width=dp(60))
-        if kind == "enemy":
-            return graphics.EnemySprite(size_hint=(None, 1), width=dp(60))
-        if kind == "projectile":
-            return graphics.Projectile(size_hint=(None, 1), width=dp(60))
-        # coin
-        return graphics.Coin(size_hint=(None, 1), width=dp(60))
+        path = png_for_kind.get(kind, "assets/sprites/hero_blue.png")
+        return graphics.TextureSprite(path, size_hint=(None, 1), width=dp(60))
 
 
 # --- tutorial: step-through text walkthrough (M14 makes it interactive) ----

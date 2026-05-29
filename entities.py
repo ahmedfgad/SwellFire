@@ -575,11 +575,21 @@ class SquadController:
     """
 
     FRAME_NAME = "runner_blue"
-    RUNNER_W = 32.0
-    RUNNER_H = 40.0
-    SPACING_X = 34.0
-    SPACING_Y = 28.0
-    MAX_COLS = 10
+    # Bumped from 32×40 to 48×56 so the soldier sprite (loaded into the
+    # runner_blue atlas slot at 64×64) downscales less and remains
+    # legible in formation.
+    RUNNER_W = 48.0
+    RUNNER_H = 56.0
+    SPACING_X = 50.0
+    SPACING_Y = 42.0
+    MAX_COLS = 8
+    # Followers used to start one ``SPACING_Y`` below the hero centre,
+    # but with a 80-px hero the entire first row landed INSIDE the
+    # hero sprite (and the second row was just barely visible below).
+    # FORMATION_START_OFFSET pushes the front row's centre down by
+    # half the hero's height plus a small gap so the squad reads as
+    # "running behind the hero" rather than "hidden under his feet".
+    FORMATION_START_OFFSET = 60.0
     MUZZLE_OFFSET_Y = RUNNER_H * 0.45
 
     def __init__(self, pool: graphics.EntityPool):
@@ -625,7 +635,8 @@ class SquadController:
             col = slot % cols
             row = slot // cols
             cx[i] = hero_cx + col * spacing_x - row_width * 0.5
-            cy[i] = hero_cy - (row + 1) * spacing_y
+            cy[i] = (hero_cy - self.FORMATION_START_OFFSET
+                    - row * spacing_y)
             slot += 1
 
 
