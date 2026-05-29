@@ -8,13 +8,35 @@ world ends in a boss. Built to mirror the CoinTex project's tooling/structure.
 
 **This game is played by children, who strongly favor lively visuals. Keep the
 game visually interesting and animated at all times.** When you add or change
-*anything* the player can see or trigger, give it visual (and where sensible,
-audio) feedback. Treat a silent, instant, un-animated state change as a bug.
+*anything* the player can see or trigger, give it visual feedback. Treat a
+silent, instant, un-animated state change as a bug.
 
 Apply this to: booster activations and their active state, gate pickups, kills,
 level start/complete, screen and modal transitions, pause, shop purchases,
 unlocks, hits/attrition, and any new feature. Prefer **reusing the existing
 effect primitives** rather than reinventing:
+
+## 🔊 Sound effects are required for user actions
+
+**Every user action must have an appropriate sound effect when applicable** —
+booster activations, gate/weapon swaps, shop buy/upgrade/equip, errors
+(can't-afford / locked), pause, button taps, modal appearances, level
+end. Each *distinct* action should have a *distinct, fitting* cue — don't reuse
+one generic blip for unrelated actions. If an action has **no** suitable sound,
+**generate one** and wire it:
+
+- Add a logical name → filename entry in `audio.py: SFX_FILES`, then play it
+  with `app().audio.play_sfx("<name>")` at the action site.
+- New cues are synthesized by **`tools/gen_sfx.py`** (stdlib only) — add a
+  builder there and run `python tools/gen_sfx.py` to (re)generate the WAV under
+  `assets/sfx/`. Keep them short and tasteful.
+- Missing wav files are silent, not fatal — but that means a forgotten cue
+  fails silently, so verify the file exists and the name is registered.
+- **Restraint for continuous/high-rate events**: don't play a one-shot per
+  bullet or per enemy kill (audio spam); those stay handled by particles/shake.
+  Sound is for *discrete* user actions and notable events.
+
+Prefer **reusing the existing effect primitives** rather than reinventing:
 
 - `entities.ParticleController.burst(x, y, count, speed, ttl, size, frame, rng)` — particle pops.
 - `GameScreen._add_shake(amount)` — screen shake (`_step_shake` decays it).

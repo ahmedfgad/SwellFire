@@ -288,11 +288,16 @@ class InfoDialog(ModalView):
 
 
 def _fade_in_modal(modal, duration: float = 0.18) -> None:
-    """Fade a modal's content in on open instead of popping instantly —
-    a small bit of polish applied to every dialog."""
+    """Fade a modal's content in on open instead of popping instantly, and
+    play the 'a dialog appeared' cue — applied to every dialog."""
     modal.opacity = 0.0
-    modal.bind(on_open=lambda *_: Animation(
-        opacity=1.0, duration=duration, t="out_quad").start(modal))
+
+    def _on_open(*_):
+        Animation(opacity=1.0, duration=duration, t="out_quad").start(modal)
+        running = app()
+        if running is not None and getattr(running, "audio", None):
+            running.audio.play_sfx("ui_open")
+    modal.bind(on_open=_on_open)
 
 
 class PauseDialog(ModalView):
@@ -831,10 +836,10 @@ class ShopScreen(StyledScreen):
                 return
             if next_price is None:
                 # Already MAX — nothing to do.
-                app().audio.play_sfx("hit")
+                app().audio.play_sfx("error")
                 return
             if not state.can_afford(next_price):
-                app().audio.play_sfx("hit")
+                app().audio.play_sfx("error")
                 return
             msg = (
                 "Upgrade [b]{}[/b] to [b]Lv {}[/b]?\n\n"
@@ -877,7 +882,7 @@ class ShopScreen(StyledScreen):
     def _do_equip_weapon(self, weapon_id: str, item, card) -> None:
         state = app().state
         state.equip_weapon(weapon_id)
-        app().audio.play_sfx("gate_pickup")
+        app().audio.play_sfx("weapon_swap")
         self._render()
         self._float_text_from_card(card, "EQUIPPED!", (1.0, 0.85, 0.20, 1.0))
 
@@ -885,37 +890,37 @@ class ShopScreen(StyledScreen):
                            item, card) -> None:
         state = app().state
         if state.upgrade_weapon_tier(weapon_id, target_tier, price):
-            app().audio.play_sfx("gate_pickup")
+            app().audio.play_sfx("upgrade")
             self._pulse_balance(price)
             self._render()
             self._float_text_from_card(card, "Lv {}!".format(target_tier),
                                        (0.55, 0.95, 0.55, 1.0))
         else:
-            app().audio.play_sfx("hit")
+            app().audio.play_sfx("error")
 
     def _do_buy_booster(self, item, card) -> None:
         state = app().state
         if state.purchase_booster(item.booster_id, item.booster_qty, item.price):
-            app().audio.play_sfx("gate_pickup")
+            app().audio.play_sfx("purchase")
             self._pulse_balance(item.price)
             self._render()
             label = "+{} {}".format(item.booster_qty,
                                     item.booster_id.upper())
             self._float_text_from_card(card, label, (0.55, 0.95, 0.55, 1.0))
         else:
-            app().audio.play_sfx("hit")
+            app().audio.play_sfx("error")
 
     def _do_buy_squad(self, item, card) -> None:
         state = app().state
         if state.purchase_squad_bonus(item.squad_target, item.price):
-            app().audio.play_sfx("gate_pickup")
+            app().audio.play_sfx("purchase")
             self._pulse_balance(item.price)
             self._render()
             self._float_text_from_card(card,
                                        "+{} SQUAD".format(item.squad_target),
                                        (0.55, 0.95, 0.55, 1.0))
         else:
-            app().audio.play_sfx("hit")
+            app().audio.play_sfx("error")
 
     def _pulse_balance(self, price: int) -> None:
         """Brief red-flash + scale-up on the coins balance label so the
@@ -1220,7 +1225,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         if not self.can_buy:
             running = app()
             if running is not None and getattr(running, "audio", None):
-                running.audio.play_sfx("hit")
+                running.audio.play_sfx("error")
             from kivy.animation import Animation
             self._border_color.rgba = (1.0, 0.30, 0.30, 1.0)
             Animation(rgba=(1.0, 1.0, 1.0, 0.18),
@@ -1418,7 +1423,7 @@ class LevelNode(ButtonBehavior, Widget):
         running = app()
         if not self.unlocked:
             if running and getattr(running, "audio", None):
-                running.audio.play_sfx("hit")
+                running.audio.play_sfx("error")
             return
         self._on_click(self.level_index)
 

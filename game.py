@@ -2071,9 +2071,11 @@ class GameScreen(ui.StyledScreen):
         elif gate.op == gates.OP_MAGNET:
             self.magnet_count = min(boosters.MAGNET.max_per_run,
                                     self.magnet_count + int(gate.value))
-        # Audio + particle burst at the hero so the pickup reads.
+        # Audio + particle burst at the hero so the pickup reads. Weapon gates
+        # get the weapon-swap cue; everything else the generic pickup blip.
         running = ui.app()
-        running.audio.play_sfx("gate_pickup")
+        running.audio.play_sfx(
+            "weapon_swap" if gate.op == gates.OP_WEAPON else "gate_pickup")
         if self.particle_controller is not None and self.hero is not None:
             self.particle_controller.burst(
                 self.hero.center_x, self.hero.center_y + HERO_H * 0.3,
@@ -2259,12 +2261,14 @@ class GameScreen(ui.StyledScreen):
         if codepoint == "w":
             self.current_weapon_id = weapons.next_id(self.current_weapon_id)
             self._fire_cooldown = 0.0
+            ui.app().audio.play_sfx("weapon_swap")
             return True
         if codepoint in ("1", "2", "3", "4"):
             new_id = weapons.by_index(int(codepoint) - 1)
             if new_id is not None:
                 self.current_weapon_id = new_id
                 self._fire_cooldown = 0.0
+                ui.app().audio.play_sfx("weapon_swap")
                 return True
         if codepoint == "g":
             self._detonate_grenade()
@@ -2294,7 +2298,7 @@ class GameScreen(ui.StyledScreen):
             return
         self.shield_count -= 1
         self.shield_active_until = self._run_time + boosters.SHIELD_DURATION_SEC
-        ui.app().audio.play_sfx("gate_pickup")
+        ui.app().audio.play_sfx("shield")
         # Glowing shield bubble around the hero (prettier than a flat tint);
         # positioned + hidden in the per-frame update.
         if self.shield_aura is not None and self.hero is not None:
@@ -2311,7 +2315,7 @@ class GameScreen(ui.StyledScreen):
         self.reinforce_count -= 1
         self.squad_count = min(MAX_SQUAD,
                                self.squad_count + boosters.REINFORCE_AMOUNT)
-        ui.app().audio.play_sfx("gate_pickup")
+        ui.app().audio.play_sfx("reinforce")
         if self.hero is not None and self.particle_controller is not None:
             self.particle_controller.burst(
                 self.hero.center_x, self.hero.center_y,
@@ -2327,7 +2331,7 @@ class GameScreen(ui.StyledScreen):
             return
         self.freeze_count -= 1
         self.freeze_active_until = self._run_time + boosters.FREEZE_DURATION_SEC
-        ui.app().audio.play_sfx("gate_pickup")
+        ui.app().audio.play_sfx("freeze")
         # Frosty pop at the hero + an icy-blue tint over the whole stage for
         # the duration (driven in the update loop) so the freeze is obvious.
         self._booster_burst(0.55, 0.85, 1.0)
@@ -2342,7 +2346,7 @@ class GameScreen(ui.StyledScreen):
         self.overdrive_active_until = (self._run_time
                                        + boosters.OVERDRIVE_DURATION_SEC)
         self._fire_cooldown = 0.0    # let the surge start firing immediately
-        ui.app().audio.play_sfx("gate_pickup")
+        ui.app().audio.play_sfx("overdrive")
         # Orange flare on the hero so the fire-rate surge reads visually.
         self._booster_burst(1.0, 0.55, 0.15)
         if self.hero is not None:
@@ -2356,7 +2360,7 @@ class GameScreen(ui.StyledScreen):
             return
         self.magnet_count -= 1
         self.magnet_active_until = self._run_time + boosters.MAGNET_DURATION_SEC
-        ui.app().audio.play_sfx("gate_pickup")
+        ui.app().audio.play_sfx("magnet")
         # Purple pulse on the hero as the magnet switches on.
         self._booster_burst(0.80, 0.45, 0.95)
         if self.hero is not None:
@@ -2449,7 +2453,7 @@ class GameScreen(ui.StyledScreen):
                 size=18.0, frame="enemy_red", rng=self._fire_rng,
             )
         self._add_shake(8.0)
-        ui.app().audio.play_sfx("hit")
+        ui.app().audio.play_sfx("explosion")
 
     # --- input ------------------------------------------------------------
 
@@ -3510,6 +3514,7 @@ class GameScreen(ui.StyledScreen):
             return
         self.paused = True
         running = ui.app()
+        running.audio.play_sfx("pause")
         # Silence music while paused (CoinTex pattern).
         try:
             running.audio.stop_music()
