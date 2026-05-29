@@ -97,6 +97,10 @@ class ShopIcon(Widget):
     _PNG_FOR_KIND = {
         "grenade":       "assets/sprites/icon_grenade.png",
         "shield":        "assets/sprites/icon_shield.png",
+        "reinforce":     "assets/sprites/icon_reinforce.png",
+        "freeze":        "assets/sprites/icon_freeze.png",
+        "overdrive":     "assets/sprites/icon_overdrive.png",
+        "magnet":        "assets/sprites/icon_magnet.png",
         "squad":         "assets/sprites/hero_blue.png",
         "weapon_pistol": "assets/sprites/icon_weapon_pistol.png",
         "weapon_rifle":  "assets/sprites/icon_weapon_rifle.png",
