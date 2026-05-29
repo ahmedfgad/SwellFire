@@ -32,9 +32,12 @@ WORLDS = range(1, 7)
 # Pull the luminance toward a cool stone grey rather than pure neutral, and
 # compress the range a touch so the dead part reads as flat/lifeless next to
 # the living, saturated body.
-STONE_TINT = (0.74, 0.77, 0.82)   # cool grey multiplier
-STONE_FLOOR = 0.34                # darkest the stone gets (0..1)
-STONE_CEIL = 0.92                 # brightest the stone gets (0..1)
+# Light, cool, fairly flat grey so the petrified part reads as a pale stone
+# statue that clearly contrasts the vivid living half — visibility is the
+# whole point of the effect, so we bias bright and low-contrast.
+STONE_TINT = (0.82, 0.85, 0.93)   # cool grey multiplier
+STONE_FLOOR = 0.50                # darkest the stone gets (0..1)
+STONE_CEIL = 0.96                 # brightest the stone gets (0..1)
 
 
 def _to_stone(img: Image.Image) -> Image.Image:

@@ -25,7 +25,7 @@ from __future__ import annotations
 import random
 
 from kivy.animation import Animation
-from kivy.graphics import Color, Ellipse, Rectangle
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.properties import NumericProperty
 from kivy.uix.widget import Widget
@@ -275,6 +275,7 @@ class BossWidget(Widget):
         self._hp_ratio = 1.0
         self._stone_rect = None
         self._stone_full = None
+        self._seam_rect = None
         stone_tex = None
         if sprite_path is not None:
             try:
@@ -283,19 +284,20 @@ class BossWidget(Widget):
             except Exception:
                 stone_tex = None
         with self.canvas:
-            # Menacing glow behind the boss (pulsed; reddens in phase 2).
-            self._glow_color = Color(1.0, 0.35, 0.20, 0.0)
-            self._glow = Ellipse()
             # The sprite. Its own Color tints reddish in phase 2.
             self._sprite_color = Color(1, 1, 1, 1)
             self._rect = Rectangle(texture=tex)
             # Stone overlay — drawn ABOVE the living sprite (so it replaces
             # the dead pixels) but BELOW the hit flash (so a hit still
-            # whitens the whole silhouette).
+            # whitens the whole silhouette). A bright "petrification seam"
+            # rides the health line on top of it so the descending boundary
+            # is easy to see even when only a thin slice has turned to stone.
             if stone_tex is not None:
                 self._stone_color = Color(1, 1, 1, 1)  # twin is already grey
                 self._stone_rect = Rectangle(texture=stone_tex)
                 self._stone_full = tuple(stone_tex.tex_coords)
+                self._seam_color = Color(1.0, 0.86, 0.42, 0.0)
+                self._seam_rect = Rectangle(texture=stone_tex)
             # Hit flash — SAME texture so only the silhouette flashes white,
             # not a full rectangle.
             self._flash_color = Color(1, 1, 1, 0)
@@ -310,15 +312,19 @@ class BossWidget(Widget):
         self._start_idle()
 
     def _start_idle(self) -> None:
-        """Looping breathing + bob, and a slow glow pulse."""
+        """Looping breathing + bob, and a shimmer on the petrification seam."""
         body = (Animation(pulse=1.05, bob=dp(7), duration=1.0, t="in_out_sine")
                 + Animation(pulse=0.97, bob=-dp(7), duration=1.0, t="in_out_sine"))
         body.repeat = True
         body.start(self)
-        glow = (Animation(a=0.30, duration=1.0, t="in_out_sine")
-                + Animation(a=0.14, duration=1.0, t="in_out_sine"))
-        glow.repeat = True
-        glow.start(self._glow_color)
+        if self._seam_rect is not None:
+            # The seam's alpha shimmers; it only actually shows once a slice
+            # of the body has petrified (see _sync, which zeroes its size at
+            # full health).
+            seam = (Animation(a=0.95, duration=0.5, t="in_out_sine")
+                    + Animation(a=0.55, duration=0.5, t="in_out_sine"))
+            seam.repeat = True
+            seam.start(self._seam_color)
 
     def _sync(self, *_):
         cx, cy = self.center
@@ -347,9 +353,25 @@ class BossWidget(Widget):
             v_br_s = v_br + (v_tr - v_br) * r
             self._stone_rect.tex_coords = (
                 u_bl, v_bl_s, u_br, v_br_s, u_tr, v_tr, u_tl, v_tl)
-        gw, gh = w * 1.55, h * 1.45
-        self._glow.pos = (cx - gw * 0.5, cy - gh * 0.5 + self.bob)
-        self._glow.size = (gw, gh)
+            # Bright seam: a thin textured band straddling the health line.
+            # Using the stone texture keeps it inside the silhouette (the
+            # alpha masks the transparent corners). Hidden at full health.
+            if self._seam_rect is not None:
+                if dead <= 0.005:
+                    self._seam_rect.size = (0, 0)
+                else:
+                    band = max(dp(4), h * 0.05)
+                    hf = (band * 0.5) / h
+                    f_lo = max(0.0, r - hf)
+                    f_hi = min(1.0, r + hf)
+                    self._seam_rect.pos = (x, y + h * f_lo)
+                    self._seam_rect.size = (w, h * (f_hi - f_lo))
+                    vL_lo = v_bl + (v_tl - v_bl) * f_lo
+                    vL_hi = v_bl + (v_tl - v_bl) * f_hi
+                    vR_lo = v_br + (v_tr - v_br) * f_lo
+                    vR_hi = v_br + (v_tr - v_br) * f_hi
+                    self._seam_rect.tex_coords = (
+                        u_bl, vL_lo, u_br, vR_lo, u_br, vR_hi, u_bl, vL_hi)
 
     def on_hit(self) -> None:
         """Quick squash punch on each damage tick — makes the boss feel like
@@ -362,7 +384,8 @@ class BossWidget(Widget):
     def stop(self) -> None:
         """Cancel looping animations when the boss is torn down."""
         Animation.cancel_all(self, "pulse", "bob", "recoil")
-        Animation.cancel_all(self._glow_color, "a")
+        if self._seam_rect is not None:
+            Animation.cancel_all(self._seam_color, "a")
 
     def update_from_boss(self) -> None:
         self.center_x = self.boss.cx
@@ -377,13 +400,11 @@ class BossWidget(Widget):
             self._flash_color.a = min(0.75, self.boss.flash_time * 6.0)
         else:
             self._flash_color.a = 0.0
-        # Phase 2 "enrage": redden the sprite + push the glow toward hot red.
+        # Phase 2 "enrage": redden the living part of the sprite.
         if self.boss.phase2:
             self._sprite_color.rgb = (1.0, 0.62, 0.58)
-            self._glow_color.rgb = (1.0, 0.18, 0.12)
         else:
             self._sprite_color.rgb = (1.0, 1.0, 1.0)
-            self._glow_color.rgb = (1.0, 0.35, 0.20)
 
 
 # --- helper: projectile-vs-boss broad-phase ------------------------------
