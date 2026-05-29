@@ -66,27 +66,27 @@ ARCHETYPES: dict[int, dict] = {
     # bomber has a fuse + spark, etc.). Sizes unchanged so collision
     # and balance numbers stay the same as M9.
     TYPE_GRUNT: dict(
-        frame="enemy_grunt", size=44.0,
+        frame="enemy_grunt", size=64.0,
         hp_mult=1.0, speed_mult=1.0, chase_mult=1.0,
         spawn_count=1, label="grunt",
     ),
     TYPE_TANK: dict(
-        frame="enemy_tank", size=72.0,
+        frame="enemy_tank", size=92.0,
         hp_mult=8.0, speed_mult=0.55, chase_mult=0.50,
         spawn_count=1, label="tank",
     ),
     TYPE_BOMBER: dict(
-        frame="enemy_bomber", size=50.0,
+        frame="enemy_bomber", size=70.0,
         hp_mult=2.0, speed_mult=1.15, chase_mult=1.0,
         spawn_count=1, label="bomber",
     ),
     TYPE_SPLITTER: dict(
-        frame="enemy_splitter", size=60.0,
+        frame="enemy_splitter", size=78.0,
         hp_mult=4.0, speed_mult=0.85, chase_mult=0.7,
         spawn_count=1, label="splitter",
     ),
     TYPE_SWARMER: dict(
-        frame="enemy_swarmer", size=28.0,
+        frame="enemy_swarmer", size=44.0,
         hp_mult=1.0, speed_mult=1.30, chase_mult=1.20,
         spawn_count=4, label="swarmer",
     ),
@@ -578,18 +578,23 @@ class SquadController:
     # Bumped from 32×40 to 48×56 so the soldier sprite (loaded into the
     # runner_blue atlas slot at 64×64) downscales less and remains
     # legible in formation.
-    RUNNER_W = 48.0
-    RUNNER_H = 56.0
-    SPACING_X = 50.0
-    SPACING_Y = 42.0
-    MAX_COLS = 8
+    # M14 — squad rescaled to fit between hero (at HERO_BOTTOM_FRAC=0.16)
+    # and the bottom of the stage. Earlier sizing pushed the formation
+    # off-screen so the player only saw an empty road. Tighter spacing
+    # and a wider per-row count (12 cols) read as a denser crowd and
+    # keep ~36 followers visible at once.
+    RUNNER_W = 28.0
+    RUNNER_H = 36.0
+    SPACING_X = 30.0
+    SPACING_Y = 28.0
+    MAX_COLS = 12
     # Followers used to start one ``SPACING_Y`` below the hero centre,
     # but with a 80-px hero the entire first row landed INSIDE the
     # hero sprite (and the second row was just barely visible below).
     # FORMATION_START_OFFSET pushes the front row's centre down by
     # half the hero's height plus a small gap so the squad reads as
     # "running behind the hero" rather than "hidden under his feet".
-    FORMATION_START_OFFSET = 60.0
+    FORMATION_START_OFFSET = 48.0
     MUZZLE_OFFSET_Y = RUNNER_H * 0.45
 
     def __init__(self, pool: graphics.EntityPool):

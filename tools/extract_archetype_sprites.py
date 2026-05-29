@@ -1,5 +1,12 @@
 """Extract one sprite per archetype per world from the CraftPix packs.
 
+Some source packs (W1 forest folder 3, W3 industrial) ship sheets whose
+sprites are tiny figures embedded in a wide transparent strip. The
+default bbox crop turns those into a thin line that resizes to a black
+bar. To work around this we provide a ``hue_shift`` overlay so the same
+pair of working sprites can produce 5 visually-distinct archetypes per
+world without depending on a broken extraction pipeline.
+
 Each world gets 5 PNGs at 64x64 in ``assets/sprites/``:
     enemy_w{N}_grunt.png
     enemy_w{N}_swarmer.png
@@ -22,7 +29,7 @@ from __future__ import annotations
 
 import os
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "assets", "raw")
@@ -63,8 +70,32 @@ def _fit(img: Image.Image, target=TARGET) -> Image.Image:
     return canvas
 
 
-def extract(src: str, dest_name: str, grid_cols: int | None = None) -> None:
+def _recolor(img: Image.Image, hue_shift_deg: float) -> Image.Image:
+    """Rotate the hue channel by ``hue_shift_deg`` (0-360) leaving alpha
+    untouched. Used to fake visual variety when the source pack only
+    ships two distinct creatures."""
+    if hue_shift_deg == 0:
+        return img
+    r, g, b, a = img.split()
+    rgb = Image.merge("RGB", (r, g, b))
+    hsv = rgb.convert("HSV")
+    h, s, v = hsv.split()
+    shift = int(round(hue_shift_deg * 255.0 / 360.0)) % 256
+    h = h.point(lambda p: (p + shift) % 256)
+    rgb2 = Image.merge("HSV", (h, s, v)).convert("RGB")
+    r2, g2, b2 = rgb2.split()
+    return Image.merge("RGBA", (r2, g2, b2, a))
+
+
+def extract(src: str, dest_name: str, grid_cols: int | None = None,
+            hue_shift: float = 0.0, scale: float = 1.0) -> None:
     frame = _first_frame(os.path.join(RAW, src), grid_cols=grid_cols)
+    if hue_shift:
+        frame = _recolor(frame, hue_shift)
+    if scale != 1.0:
+        w, h = frame.size
+        frame = frame.resize((max(1, int(w * scale)), max(1, int(h * scale))),
+                             Image.NEAREST)
     out = _fit(frame)
     out.save(os.path.join(OUT, dest_name))
 
@@ -75,9 +106,13 @@ def extract(src: str, dest_name: str, grid_cols: int | None = None) -> None:
 # is a relative path under assets/raw/. ``None`` falls back to ``grunt``.
 WORLD_ARCHETYPES = {
     1: {
+        # Folder 3 has a busted strip layout (figures lost in transparent
+        # gutter), so we synthesize the 5 archetypes from folders 1 and 2
+        # by hue-rotating the working sprites.
         "grunt":    "w1_forest/extracted/1/Idle.png",
         "swarmer":  "w1_forest/extracted/2/Idle.png",
-        "tank":     "w1_forest/extracted/3/Idle.png",
+        # Tank = folder 2 sprite, large, blood-red tint.
+        "tank":     "w1_forest/extracted/2/Idle.png",
         "bomber":   "w1_forest/extracted/2/Idle.png",
         "splitter": "w1_forest/extracted/1/Idle.png",
     },
@@ -89,12 +124,14 @@ WORLD_ARCHETYPES = {
         "splitter": "w2_desert/extracted/3 Scorpio/Scorpio_idle.png",
     },
     3: {
-        # Industrial — use soldier variants + mummy as variety.
-        "grunt":    "soldier/extracted/Soldier_3/Idle.png",
+        # Industrial — earlier the grunt was a soldier silhouette which
+        # the player mistook for the hero. Now every W3 archetype is a
+        # desert creature, hue-rotated so they don't read as W2 reruns.
+        "grunt":    "w2_desert/extracted/5 Mummy/Mummy_idle.png",
         "swarmer":  "w2_desert/extracted/1 Snake/Snake_idle.png",
         "tank":     "w2_desert/extracted/5 Mummy/Mummy_idle.png",
         "bomber":   "w2_desert/extracted/4 Vulture/Vulture_idle.png",
-        "splitter": "soldier/extracted/Soldier_2/Idle.png",
+        "splitter": "w2_desert/extracted/3 Scorpio/Scorpio_idle.png",
     },
     4: {
         # RPG monsters pack has 6 distinct fantasy creatures.
@@ -132,12 +169,31 @@ SOLDIER_GRID_PATHS = {"Idle.png"}
 
 
 def grid_cols_for(src: str) -> int | None:
+    # IMPORTANT: SOLDIER_GRID_PATHS only stores basenames, but lots of
+    # other packs also ship an ``Idle.png``. Scope the soldier check to
+    # the actual ``soldier/`` subtree so we don't accidentally treat the
+    # forest grunt's idle strip as a 7-column soldier sheet (which
+    # collapsed the swarmer to a blank PNG).
     base = os.path.basename(src)
     if base in SLIME_GRID_PATHS:
         return 6
-    if base in SOLDIER_GRID_PATHS:
+    if base in SOLDIER_GRID_PATHS and "soldier/" in src.replace(os.sep, "/"):
         return 7
     return None
+
+
+# Per (world, archetype) -> (hue_shift_deg, scale). Hue rotation gives
+# distinct colour variants; scale > 1 reads as a "big/tank" creature.
+RECOLOR: dict[tuple[int, str], tuple[float, float]] = {
+    (1, "swarmer"):  (210.0, 1.0),  # purple → blue/teal
+    (1, "tank"):     (320.0, 1.4),  # purple → red, larger
+    (1, "bomber"):   ( 90.0, 1.0),  # purple → yellow/lime
+    (1, "splitter"): (170.0, 1.0),  # green  → cyan
+    # W3 industrial — mummy and scorpio are reused with hue rotations
+    # to keep the archetypes legible at a glance.
+    (3, "tank"):     ( 30.0, 1.4),  # mummy tinted warm + scaled up
+    (3, "splitter"): (200.0, 1.0),  # scorpio recoloured cool
+}
 
 
 def main():
@@ -150,8 +206,11 @@ def main():
                 print(f"  {archetype}: MISSING {src}")
                 continue
             dest = f"enemy_w{world}_{archetype}.png"
-            extract(src, dest, grid_cols=grid_cols_for(src))
-            print(f"  {archetype}: {dest}")
+            hue, scale = RECOLOR.get((world, archetype), (0.0, 1.0))
+            extract(src, dest, grid_cols=grid_cols_for(src),
+                    hue_shift=hue, scale=scale)
+            print(f"  {archetype}: {dest}"
+                  + (f" (hue {hue:.0f}°, scale {scale})" if hue or scale != 1.0 else ""))
 
 
 if __name__ == "__main__":

@@ -240,7 +240,11 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # squad. Sim-tuned in the difficulty regression script — the
             # 450 floor was raised from 350 because W3L10 passive was
             # winning in 30 s without picking a single gate.
-            boss_hp = int(round(_lerp(450.0, 1200.0, t))) if is_boss else 0
+            # Boss HP curve bumped (450..1200 → 1100..2800) so the boss
+            # fight lasts noticeably longer than any regular level in
+            # the same world — players were finishing world-end bosses
+            # in ~10-15 s before, defeating the "climax" feel.
+            boss_hp = int(round(_lerp(1100.0, 2800.0, t))) if is_boss else 0
             if is_boss:
                 # Lowered the top end from 3..12 to 2.5..11 so W3-W5 bosses
                 # don't auto-pass passive on starting squad alone.

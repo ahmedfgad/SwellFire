@@ -92,8 +92,18 @@ class Gate(Widget):
             self._glow_color = Color(1, 1, 1, 0.0)
             self._glow = Line(rounded_rectangle=[0, 0, 0, 0, dp(14)], width=6.0)
 
+        # Font size scales down for longer equation labels (W4+ ops like
+        # "x((4+2-4)*1)" overflow the gate at the default sp(30)).
+        if len(label_text) <= 4:
+            label_fs = sp(30)
+        elif len(label_text) <= 7:
+            label_fs = sp(24)
+        elif len(label_text) <= 10:
+            label_fs = sp(20)
+        else:
+            label_fs = sp(17)
         self._label = Label(
-            text=label_text, font_size=sp(30), bold=True, color=(1, 1, 1, 1),
+            text=label_text, font_size=label_fs, bold=True, color=(1, 1, 1, 1),
             halign="center", valign="middle",
         )
         self.add_widget(self._label)
@@ -138,7 +148,17 @@ class Gate(Widget):
         # reads "this one".
         try:
             from kivy.metrics import sp as _sp
-            self._label.font_size = _sp(34)
+            # Mirror the length-based ramp from __init__ but bumped one
+            # tier so the picked gate's label stays readable.
+            text_len = len(self._label.text)
+            if text_len <= 4:
+                self._label.font_size = _sp(34)
+            elif text_len <= 7:
+                self._label.font_size = _sp(28)
+            elif text_len <= 10:
+                self._label.font_size = _sp(23)
+            else:
+                self._label.font_size = _sp(20)
             self._label.bold = True
         except Exception:
             pass
@@ -176,6 +196,11 @@ class GateSpawner:
         self._next_distance = 200.0
         self.allowed_ops: list[str] = list(self.DEFAULT_OPS)
         self.allowed_weapons: list[str] = list(self.DEFAULT_WEAPONS)
+        # World tier (1..6) drives the *equation difficulty* on gate labels.
+        # The numeric effect is unchanged — only the *expression* shown to
+        # the player gets harder per world (W1 = "+5", W6 = "+(2*3-1)").
+        # game.py sets this from the level's world on entry. Default 1 = plain.
+        self.world_tier = 1
         # Pity-gate tracking: GateController updates this counter whenever a
         # pair scrolls past with neither gate consumed (miss).
         self.consecutive_misses = 0
@@ -265,7 +290,129 @@ class GateSpawner:
         value = self._rng.choice(values)
         if op == OP_GRENADE:
             self.grenade_gates_spawned += 1
-        return op, value, fmt(value)
+        # M14 — for value-bearing ops (mul/add/sub/div) replace the plain
+        # number with an expression that *evaluates* to the same value.
+        # The numeric effect of the gate is unchanged; only the label
+        # gets harder to parse as the player advances through worlds.
+        # WEAPON / GRENADE stay literal — those gate's "value" is a tag
+        # (weapon id / 1) not a number a player would do arithmetic on.
+        if op in (OP_MUL, OP_ADD, OP_SUB, OP_DIV):
+            label = self._equation_label(op, value)
+        else:
+            label = fmt(value)
+        return op, value, label
+
+    # --- equation-label generator (M14) ---------------------------------
+
+    def _equation_label(self, op: str, value: int) -> str:
+        """Wrap ``value`` in an expression of increasing complexity based
+        on ``self.world_tier``.
+
+        The expression's *result* equals ``value`` so all downstream
+        gate-effect code (squad multiplication, addition, etc.) keeps
+        working unchanged — only the visible label gets longer. W1
+        prints the raw number; W6 prints multi-op compositions like
+        ``+(2*3-1)``.
+        """
+        op_sym = {OP_MUL: "x", OP_ADD: "+", OP_SUB: "-", OP_DIV: "/"}[op]
+        tier = self.world_tier
+        if tier <= 1:
+            return "{}{}".format(op_sym, value)
+        expr = self._compose_expression(value, tier)
+        if expr is None:
+            return "{}{}".format(op_sym, value)
+        # Wrap in parens so the op symbol still reads left-of-expression.
+        return "{}({})".format(op_sym, expr)
+
+    def _compose_expression(self, target: int, tier: int) -> str | None:
+        """Build a small arithmetic expression that evaluates to ``target``.
+
+        Difficulty (tier):
+            2 — single two-operand op (a+b, a-b, a*b)
+            3 — adds division-friendly pairs (a*b, a*b/c)
+            4 — three-term mixes (a+b-c, a*b+c)
+            5 — four-term mixes
+            6 — four-term + parenthesised inner
+        """
+        rng = self._rng
+        if target == 0:
+            return None
+        # tier 2: two-operand decompositions
+        if tier == 2:
+            forms = []
+            for a in range(1, target + 1):
+                forms.append(("+", a, target - a))
+            for a in range(target + 1, target + 6):
+                forms.append(("-", a, a - target))
+            # only multiplicative if target factorises cleanly
+            for a in range(2, target + 1):
+                if target % a == 0 and a != target:
+                    forms.append(("*", a, target // a))
+            forms = [f for f in forms
+                     if 1 <= f[1] <= 9 and 1 <= f[2] <= 9]
+            if not forms:
+                return None
+            op_sym, a, b = rng.choice(forms)
+            return "{}{}{}".format(a, op_sym, b)
+        # tier 3: prefer mul where possible, else add
+        if tier == 3:
+            options = []
+            for a in range(2, 10):
+                if target % a == 0 and 1 <= target // a <= 9 and a != target:
+                    options.append("{}*{}".format(a, target // a))
+            for a in range(1, min(target, 9)):
+                b = target - a
+                if 1 <= b <= 9:
+                    options.append("{}+{}".format(a, b))
+            for a in range(target + 1, target + 8):
+                b = a - target
+                if 1 <= a <= 12 and 1 <= b <= 9:
+                    options.append("{}-{}".format(a, b))
+            if not options:
+                return None
+            return rng.choice(options)
+        # tier 4: three-term mixes (a+b-c, a*b-c, a+b*c)
+        if tier == 4:
+            forms = []
+            for _ in range(80):
+                a, b, c = rng.randint(2, 9), rng.randint(2, 9), rng.randint(1, 9)
+                if a + b - c == target and a + b - c > 0:
+                    forms.append("{}+{}-{}".format(a, b, c))
+                if a * b - c == target and a * b - c > 0 and a * b <= 81:
+                    forms.append("{}*{}-{}".format(a, b, c))
+                if a + b * c == target and b * c <= 81:
+                    forms.append("{}+{}*{}".format(a, b, c))
+            if not forms:
+                return self._compose_expression(target, 3)
+            return rng.choice(forms)
+        # tier 5: four-term mixes
+        if tier == 5:
+            forms = []
+            for _ in range(120):
+                a, b, c, d = (rng.randint(1, 9), rng.randint(2, 9),
+                              rng.randint(1, 9), rng.randint(1, 6))
+                if a + b * c - d == target and 0 < a + b * c - d:
+                    forms.append("{}+{}*{}-{}".format(a, b, c, d))
+                if a * b + c - d == target and 0 < a * b + c - d:
+                    forms.append("{}*{}+{}-{}".format(a, b, c, d))
+            if not forms:
+                return self._compose_expression(target, 4)
+            return rng.choice(forms)
+        # tier 6+: include a parenthesised sub-expression
+        forms = []
+        for _ in range(160):
+            a, b, c, d = (rng.randint(2, 9), rng.randint(2, 9),
+                          rng.randint(1, 9), rng.randint(1, 6))
+            inner = a + b
+            if (inner - c) * d == target and 0 < (inner - c):
+                forms.append("({}+{}-{})*{}".format(a, b, c, d))
+            if a * (b + c) - d == target and (b + c) <= 18:
+                forms.append("{}*({}+{})-{}".format(a, b, c, d))
+            if a + b * (c - d) == target and (c - d) > 0:
+                forms.append("{}+{}*({}-{})".format(a, b, c, d))
+        if not forms:
+            return self._compose_expression(target, 5)
+        return rng.choice(forms)
 
 
 # --- controller ----------------------------------------------------------

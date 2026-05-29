@@ -104,30 +104,53 @@ class ShopIcon(Widget):
         "weapon_sniper": "assets/sprites/icon_weapon_sniper.png",
     }
 
-    def __init__(self, kind: str, **kwargs):
+    def __init__(self, kind: str, count: int = 1, **kwargs):
         super().__init__(**kwargs)
         self.kind = kind
+        # M14 — for squad upgrades, ``count`` is the number of soldier
+        # silhouettes drawn side by side so "+2" reads as two figures,
+        # "+3" as three, etc.
+        self.count = max(1, int(count))
         with self.canvas:
             Color(1, 1, 1, 1)
-            self._rect = Rectangle()
+            self._rects: list[Rectangle] = [Rectangle()
+                                            for _ in range(self.count)]
         self.bind(pos=self._redraw, size=self._redraw)
         self._redraw()
 
     def _redraw(self, *_):
         path = self._PNG_FOR_KIND.get(self.kind)
         if path is None:
-            # Unknown kind — fall back to a small grey square so the
-            # row still has a visual anchor.
-            self._rect.texture = None
+            for r in self._rects:
+                r.texture = None
             return
-        self._rect.texture = graphics.load_texture(path)
+        tex = graphics.load_texture(path)
         x, y = self.pos
         w, h = self.size
+        n = len(self._rects)
+        # All silhouettes share one square footprint inside the icon;
+        # for n>1 they tile horizontally with a small overlap so 3
+        # soldiers still fit cleanly inside a dp(80) icon.
         side = min(w, h) * 0.95
-        ix = x + (w - side) * 0.5
-        iy = y + (h - side) * 0.5
-        self._rect.pos = (ix, iy)
-        self._rect.size = (side, side)
+        if n == 1:
+            ix = x + (w - side) * 0.5
+            iy = y + (h - side) * 0.5
+            self._rects[0].texture = tex
+            self._rects[0].pos = (ix, iy)
+            self._rects[0].size = (side, side)
+            return
+        # Multi-soldier layout: each figure is scaled down and tiled with
+        # a slight overlap so they read as a group, not a row of icons.
+        scale = 0.78 if n == 2 else 0.62
+        fig_side = side * scale
+        overlap = fig_side * 0.42
+        row_w = fig_side + (n - 1) * (fig_side - overlap)
+        start_x = x + (w - row_w) * 0.5
+        iy = y + (h - fig_side) * 0.5
+        for k, r in enumerate(self._rects):
+            r.texture = tex
+            r.pos = (start_x + k * (fig_side - overlap), iy)
+            r.size = (fig_side, fig_side)
 
     # M14 — old canvas-drawn icons removed; ShopIcon now uses PNG
     # textures from assets/sprites/ via the _PNG_FOR_KIND map above.
@@ -889,9 +912,13 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                                 width=border_width)
         self.bind(pos=self._sync_bg, size=self._sync_bg)
 
-        # Left: icon (square)
+        # Left: icon (square). Squad upgrades render N soldier figures
+        # (one per +N) so "+2" reads as two soldiers and "+3" as three,
+        # matching the in-level formation the purchase actually grows.
         icon_kind = self._icon_kind_for(item)
-        icon = ShopIcon(kind=icon_kind, size_hint_x=None, width=dp(80))
+        icon_count = item.squad_target if item.category == "squad" else 1
+        icon = ShopIcon(kind=icon_kind, count=icon_count,
+                        size_hint_x=None, width=dp(80))
         self.add_widget(icon)
 
         # Middle: title (top), description (bottom), state badge (bottom)

@@ -1119,6 +1119,9 @@ class GameScreen(ui.StyledScreen):
                 self.gate_spawner.max_grenade_gates = int(cfg.get("max_grenade_gates", 0))
             self.gate_spawner.allowed_ops = list(cfg["allowed_ops"])
             self.gate_spawner.allowed_weapons = list(cfg["allowed_weapons"])
+            # M14 — equation-difficulty tier on gate labels follows the
+            # world. Plain numbers on W1, multi-op expressions on W6.
+            self.gate_spawner.world_tier = int(cfg.get("world", 1))
             self.gate_spawner.reset_per_level()
 
         # Boss spawn / teardown.
