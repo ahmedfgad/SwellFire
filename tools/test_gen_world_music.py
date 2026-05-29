@@ -90,6 +90,18 @@ def test_write_and_read_wav(tmp_path="/tmp/gwm_test.wav"):
         assert w.getnframes() == g.SAMPLE_RATE
 
 
+def test_all_tracks_structural():
+    for key, builder in g.TRACKS.items():
+        raw = builder()
+        looped = g.soft_clip(g.crossfade_loop(raw, fade_s=0.06))
+        dur = looped.shape[0] / g.SAMPLE_RATE
+        assert 15.0 <= dur <= 26.0, (key, dur)             # ~20 s loop
+        assert np.all(np.isfinite(looped)), key
+        assert np.max(np.abs(looped)) <= 1.0 + 1e-6, key   # no clipping
+        assert np.max(np.abs(looped)) > 0.3, key           # not silent
+        assert abs(float(looped[-1] - looped[0])) < 0.08, key  # seamless-ish
+
+
 if __name__ == "__main__":
     test_note_freq()
     test_oscillators_shape_and_range()
@@ -100,4 +112,5 @@ if __name__ == "__main__":
     test_seq_places_notes_on_grid()
     test_crossfade_loop_is_seamless()
     test_write_and_read_wav()
-    print("PASS: synth core")
+    test_all_tracks_structural()
+    print("PASS: all tests")
