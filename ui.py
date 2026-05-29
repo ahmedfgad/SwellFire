@@ -475,10 +475,10 @@ class LevelResultDialog(ModalView):
     """Modal shown at level end: title, stars (if won), score, action buttons."""
 
     def __init__(self, won: bool, stars: int, score: int, level_label: str,
-                 *, on_next=None, on_retry, on_menu, stats=None,
-                 opponent_stats=None, **kwargs):
-        # Slightly taller now to fit the stats block.
-        super().__init__(size_hint=(0.80, 0.78), auto_dismiss=False, **kwargs)
+                 *, on_next=None, on_retry, on_menu, on_roadmap=None,
+                 stats=None, opponent_stats=None, **kwargs):
+        # Slightly taller now to fit the stats block + the two-row button area.
+        super().__init__(size_hint=(0.80, 0.84), auto_dismiss=False, **kwargs)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         with box.canvas.before:
             Color(0.10, 0.12, 0.18, 0.98)
@@ -600,18 +600,30 @@ class LevelResultDialog(ModalView):
                               "[b]{}[/b]".format(_format_time(stats.get("time", 0.0))))
                 box.add_widget(grid)
 
-        button_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint_y=0.18)
+        # Two rows so all actions stay big and legible: primary actions
+        # (Next / Retry) on top, navigation (Roadmap / Menu) below.
+        buttons = BoxLayout(orientation="vertical", spacing=dp(10),
+                            size_hint_y=0.30)
+        primary_row = BoxLayout(orientation="horizontal", spacing=dp(12))
         if won and on_next is not None:
             next_btn = StyledButton(text="Next Level", bg=[0.2, 0.7, 0.4, 1])
             next_btn.bind(on_release=lambda *_: self._fire(on_next))
-            button_row.add_widget(next_btn)
+            primary_row.add_widget(next_btn)
         retry_btn = StyledButton(text="Retry", bg=[0.25, 0.5, 0.9, 1])
         retry_btn.bind(on_release=lambda *_: self._fire(on_retry))
-        button_row.add_widget(retry_btn)
+        primary_row.add_widget(retry_btn)
+        buttons.add_widget(primary_row)
+
+        nav_row = BoxLayout(orientation="horizontal", spacing=dp(12))
+        if on_roadmap is not None:
+            roadmap_btn = StyledButton(text="Roadmap", bg=[0.55, 0.4, 0.85, 1])
+            roadmap_btn.bind(on_release=lambda *_: self._fire(on_roadmap))
+            nav_row.add_widget(roadmap_btn)
         menu_btn = StyledButton(text="Menu", bg=[0.45, 0.45, 0.5, 1])
         menu_btn.bind(on_release=lambda *_: self._fire(on_menu))
-        button_row.add_widget(menu_btn)
-        box.add_widget(button_row)
+        nav_row.add_widget(menu_btn)
+        buttons.add_widget(nav_row)
+        box.add_widget(buttons)
         self.add_widget(box)
 
     def _fire(self, callback) -> None:

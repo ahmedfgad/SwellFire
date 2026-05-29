@@ -2248,6 +2248,8 @@ class GameScreen(ui.StyledScreen):
                 self._exit()
             def on_menu():
                 self._exit()
+            # Versus has no single-player roadmap to return to.
+            on_roadmap = None
             level_label = "Versus  -  {}".format(
                 "You Win!" if getattr(self, "_mp_local_won", True)
                 else "Opponent Wins"
@@ -2261,6 +2263,12 @@ class GameScreen(ui.StyledScreen):
 
             def on_menu():
                 running.go("menu")
+
+            # Same effect as the in-level Back button: leave the level and
+            # return to the world roadmap (levelselect). _exit() handles the
+            # GA shutdown + routing for single-player.
+            def on_roadmap():
+                self._exit()
 
         gates_hit = self.gate_controller.applied_total if self.gate_controller else 0
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
@@ -2283,6 +2291,7 @@ class GameScreen(ui.StyledScreen):
         dialog = ui.LevelResultDialog(
             won=won, stars=stars, score=score, level_label=level_label,
             on_next=on_next, on_retry=on_retry, on_menu=on_menu,
+            on_roadmap=on_roadmap,
             stats=stats,
             opponent_stats=getattr(self, "_mp_opponent_stats", None),
         )
