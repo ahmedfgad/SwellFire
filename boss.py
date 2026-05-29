@@ -268,13 +268,16 @@ class BossWidget(Widget):
             tex = atlas.texture
             u0, v0, u1, v1 = atlas.frame("enemy_red")
             tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
-        # Pale "stone" twin of the sprite, drawn over the WHOLE body. Its
-        # alpha rises with lost HP, so the monster cross-fades from its
-        # living colours to grey stone as it dies (the monster-health
-        # indicator; replaces the old top HP bar). Degrades gracefully to
-        # "no effect" if the twin is missing (e.g. a world whose PNG absent).
+        # Pale "stone" twin of the sprite. It's drawn SOLID (alpha 1) but only
+        # over the TOP band of the body — the band's height = the fraction of
+        # HP lost, so a crisp grey "petrification front" slides top→bottom as
+        # the boss dies (the monster-health indicator; replaces the old top HP
+        # bar). Degrades gracefully to "no effect" if the twin is missing
+        # (e.g. a world whose PNG is absent).
         self._hp_ratio = 1.0
         self._stone_rect = None
+        self._front_rect = None
+        self._stone_base_tc = None
         stone_tex = None
         if sprite_path is not None:
             try:
@@ -293,19 +296,28 @@ class BossWidget(Widget):
             if tex_coords is not None:
                 self._rect.tex_coords = tex_coords
                 self._flash_rect.tex_coords = tex_coords
-        # Stone overlay — same geometry/texture as the body, but drawn in
-        # canvas.after (a SEPARATE pass). Drawing it in the main canvas, with
-        # vertices identical to the body rect, gets the second draw rejected
-        # in the game's render path (depth test on the stage) — it renders in
-        # isolation but vanishes in-game. canvas.after sidesteps that, the same
-        # way TextureSprite draws its flash overlay. Alpha 0 at full health →
-        # fully coloured; alpha 1 at death → fully grey.
+        # Stone overlay — drawn in canvas.after (a SEPARATE pass). Drawing it in
+        # the main canvas, with vertices identical to the body rect, gets the
+        # second draw rejected in the game's render path (depth test on the
+        # stage) — it renders in isolation but vanishes in-game. canvas.after
+        # sidesteps that, the same way TextureSprite draws its flash overlay.
+        # The rect is solid grey; _sync crops it (geometry + tex_coords) to the
+        # lost-HP top band. _stone_base_tc is the texture's *full* coords, which
+        # _sync interpolates per-frame — capturing it from the texture keeps the
+        # crop orientation-agnostic (sidesteps the atlas no-flip gotcha).
         if stone_tex is not None:
+            self._stone_base_tc = (tex_coords if tex_coords is not None
+                                   else tuple(stone_tex.tex_coords))
             with self.canvas.after:
-                self._stone_color = Color(1, 1, 1, 0.0)
+                self._stone_color = Color(1, 1, 1, 1.0)
                 self._stone_rect = Rectangle(texture=stone_tex)
                 if tex_coords is not None:
                     self._stone_rect.tex_coords = tex_coords
+                # Glowing "petrification front" — a thin bright line riding the
+                # grey/colour boundary. Lit only mid-wipe (hidden at full HP and
+                # at death). Drawn after the stone so it sits on top.
+                self._front_color = Color(0.7, 0.92, 1.0, 0.0)
+                self._front_rect = Rectangle()
         self.bind(pos=self._sync, size=self._sync,
                   pulse=self._sync, bob=self._sync, recoil=self._sync)
         self.size = (boss.width, boss.height)
@@ -331,10 +343,35 @@ class BossWidget(Widget):
         self._flash_rect.pos = (x, y)
         self._flash_rect.size = (w, h)
         if self._stone_rect is not None:
-            # Stone overlay tracks the whole body; its alpha (set in
-            # update_from_boss) controls how grey the monster is.
-            self._stone_rect.pos = (x, y)
-            self._stone_rect.size = (w, h)
+            # Grey only the TOP band, height = fraction of HP lost. The band's
+            # bottom edge is the petrification front, sliding down as HP drops.
+            lost = max(0.0, min(1.0, 1.0 - self._hp_ratio))
+            band_h = h * lost
+            band_y = y + h * (1.0 - lost)  # = y + h * hp_ratio
+            self._stone_rect.pos = (x, band_y)
+            self._stone_rect.size = (w, band_h)
+            # Crop tex_coords to the same top fraction so the grey silhouette
+            # stays aligned with the body. Interpolate each side's bottom v
+            # toward its top v in *vertex* space (f0=band bottom, f1=top),
+            # leaving u full — works regardless of the texture's flip.
+            bl_u, bl_v, br_u, br_v, tr_u, tr_v, tl_u, tl_v = self._stone_base_tc
+            f0 = 1.0 - lost  # band-bottom fraction up the body
+            self._stone_rect.tex_coords = (
+                bl_u, bl_v + (tl_v - bl_v) * f0,
+                br_u, br_v + (tr_v - br_v) * f0,
+                tr_u, tr_v,
+                tl_u, tl_v,
+            )
+            # Glowing front line at the boundary, lit only mid-wipe. A gentle
+            # flicker rides the breathing pulse for liveliness.
+            fh = dp(3)
+            self._front_rect.pos = (x, band_y - fh * 0.5)
+            self._front_rect.size = (w, fh)
+            if 0.0 < lost < 1.0:
+                self._front_color.a = 0.45 + 0.25 * (self.pulse - 1.0) * 10.0
+                self._front_color.a = max(0.25, min(0.85, self._front_color.a))
+            else:
+                self._front_color.a = 0.0
 
     def on_hit(self) -> None:
         """Quick squash punch on each damage tick — makes the boss feel like
@@ -351,12 +388,11 @@ class BossWidget(Widget):
     def update_from_boss(self) -> None:
         self.center_x = self.boss.cx
         self.center_y = self.boss.cy
-        # Health → how grey the whole body is. alpha = fraction of HP lost,
-        # so the monster cross-fades from colour to stone as it dies.
+        # Health → how far the grey "petrification front" has slid down the
+        # body. _sync turns _hp_ratio into the top-band geometry + tex crop.
         self._hp_ratio = (self.boss.hp / self.boss.max_hp
                           if self.boss.max_hp > 0 else 0.0)
         if self._stone_rect is not None:
-            self._stone_color.a = max(0.0, min(1.0, 1.0 - self._hp_ratio))
             self._sync()
         # Map flash_time → alpha (full at FLASH_DURATION, 0 at 0).
         if self.boss.flash_time > 0.0:
