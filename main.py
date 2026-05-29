@@ -15,49 +15,10 @@ from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.config import Config
 
-# Portrait window on desktop: a tall, narrow playfield like a real auto-runner.
-# Use (almost) the full screen height and derive a slim width from a 9:16 phone
-# aspect so it mirrors the mobile build. Android / iOS use the orientation set in
-# their build configs. Done before any window is created.
-def _detect_screen_height():
-    """Best-effort desktop screen height in px. Tries a few sources so it
-    works whether or not tkinter is installed, and falls back to a
-    phone-ish height when there's no display (headless)."""
-    # 1. tkinter, if present.
-    try:
-        import tkinter
-        _probe = tkinter.Tk()
-        h = _probe.winfo_screenheight()
-        _probe.destroy()
-        if h > 0:
-            return h
-    except Exception:
-        pass
-    # 2. Parse `xrandr` (Linux/X) for the active "*"-marked mode "WxH".
-    try:
-        import subprocess
-        out = subprocess.run(["xrandr"], capture_output=True, text=True,
-                             timeout=2.0).stdout
-        for line in out.splitlines():
-            if "*" in line:
-                res = line.split()[0]  # e.g. "3840x2160"
-                return int(res.split("x")[1])
-    except Exception:
-        pass
-    return 854  # headless / unknown — phone-ish default
-
-
-def _portrait_window_size():
-    aspect = 9.0 / 16.0  # width / height — standard phone portrait
-    screen_h = _detect_screen_height()
-    height = max(640, int(screen_h * 0.92))   # leave room for title bar / taskbar
-    width = int(round(height * aspect))
-    return width, height
-
-
-_WIN_W, _WIN_H = _portrait_window_size()
-Config.set("graphics", "width", str(_WIN_W))
-Config.set("graphics", "height", str(_WIN_H))
+# Lock to landscape on desktop (Android / iOS use the orientation set in their
+# build configs). Done before any window is created.
+Config.set("graphics", "width", "960")
+Config.set("graphics", "height", "540")
 Config.set("graphics", "resizable", "1")
 
 import ui
