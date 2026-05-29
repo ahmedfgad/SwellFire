@@ -32,8 +32,36 @@ def test_adsr_starts_and_ends_quiet():
     assert env.max() > 0.9
 
 
+def test_lowpass_reduces_highs():
+    n = g.SAMPLE_RATE
+    hi = g.osc_sine(8000.0, n)
+    lo = g.osc_sine(200.0, n)
+    fhi = g.lowpass(hi, 800.0)
+    flo = g.lowpass(lo, 800.0)
+    # high tone is attenuated much more than the low tone
+    assert np.max(np.abs(fhi)) < 0.5 * np.max(np.abs(flo))
+
+
+def test_normalize_and_soft_clip_bounds():
+    loud = g.osc_sine(440.0, 1000) * 5.0
+    out = g.soft_clip(loud)
+    assert np.max(np.abs(out)) <= 1.0
+    norm = g.normalize(g.osc_sine(440.0, 1000) * 0.1, peak=0.9)
+    assert abs(np.max(np.abs(norm)) - 0.9) < 1e-3
+
+
+def test_drums_are_finite_and_bounded():
+    for d in (g.kick(), g.snare(), g.hat()):
+        assert d.ndim == 1 and d.shape[0] > 0
+        assert np.all(np.isfinite(d))
+        assert np.max(np.abs(d)) <= 1.0 + 1e-6
+
+
 if __name__ == "__main__":
     test_note_freq()
     test_oscillators_shape_and_range()
     test_adsr_starts_and_ends_quiet()
-    print("PASS: synth core (note/osc/adsr)")
+    test_lowpass_reduces_highs()
+    test_normalize_and_soft_clip_bounds()
+    test_drums_are_finite_and_bounded()
+    print("PASS: synth core")

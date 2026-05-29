@@ -87,3 +87,76 @@ def adsr(n: int, attack=0.01, decay=0.08, sustain=0.7, release=0.12) -> np.ndarr
     if env.shape[0] < n:
         env = np.concatenate([env, np.zeros(n - env.shape[0])])
     return env[:n]
+
+
+def lowpass(x: np.ndarray, cutoff: float, resonance: float = 0.0) -> np.ndarray:
+    """One-pole low-pass (optionally light resonance via a second pass)."""
+    dt = 1.0 / SAMPLE_RATE
+    rc = 1.0 / (2 * np.pi * cutoff)
+    alpha = dt / (rc + dt)
+    y = np.empty_like(x)
+    prev = 0.0
+    for i in range(x.shape[0]):
+        prev = prev + alpha * (x[i] - prev)
+        y[i] = prev
+    if resonance > 0.0:
+        y = y + resonance * (y - lowpass(y, cutoff * 0.5))
+    return y
+
+
+def delay(x: np.ndarray, time_s: float, feedback: float = 0.35,
+          mix: float = 0.3) -> np.ndarray:
+    """Simple feedback delay (echo/space)."""
+    d = max(1, int(time_s * SAMPLE_RATE))
+    out = x.copy()
+    buf = np.zeros(x.shape[0] + d)
+    buf[:x.shape[0]] = x
+    for i in range(x.shape[0]):
+        echo = buf[i] * feedback
+        if i + d < buf.shape[0]:
+            buf[i + d] += echo
+        out[i] = x[i] + mix * buf[i + d if i + d < buf.shape[0] else i]
+    peak = np.max(np.abs(out)) or 1.0
+    return out / peak if peak > 1.0 else out
+
+
+def kick(dur: float = 0.18) -> np.ndarray:
+    n = int(dur * SAMPLE_RATE)
+    t = _t(n)
+    freq = 120.0 * np.exp(-t * 30.0) + 45.0   # pitch sweep down
+    env = np.exp(-t * 18.0)
+    return np.sin(2 * np.pi * np.cumsum(freq) / SAMPLE_RATE) * env
+
+
+def snare(dur: float = 0.16) -> np.ndarray:
+    n = int(dur * SAMPLE_RATE)
+    t = _t(n)
+    noise = np.random.uniform(-1, 1, n)
+    body = np.sin(2 * np.pi * 180.0 * t) * 0.4
+    env = np.exp(-t * 22.0)
+    return lowpass(noise, 6000.0) * 0.8 * env + body * env
+
+
+def hat(dur: float = 0.05) -> np.ndarray:
+    n = int(dur * SAMPLE_RATE)
+    env = np.exp(-_t(n) * 80.0)
+    noise = np.random.uniform(-1, 1, n)
+    return (noise - lowpass(noise, 7000.0)) * env   # crude high-pass
+
+
+def mix(*layers: np.ndarray) -> np.ndarray:
+    """Sum equal/variable-length layers (zero-padded to the longest)."""
+    length = max(l.shape[0] for l in layers)
+    out = np.zeros(length)
+    for l in layers:
+        out[:l.shape[0]] += l
+    return out
+
+
+def normalize(x: np.ndarray, peak: float = 0.9) -> np.ndarray:
+    m = np.max(np.abs(x)) or 1.0
+    return x * (peak / m)
+
+
+def soft_clip(x: np.ndarray) -> np.ndarray:
+    return np.tanh(x)
