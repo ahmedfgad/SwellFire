@@ -1,10 +1,10 @@
-# Menu, navigation and settings screens for GateRunner.
+# Menu, navigation and settings screens for Swellfire.
 #
 # Structure is ported from CoinTex's ui.py: a themed Background widget on every
 # screen, a StyledButton with click feedback, ConfirmDialog / InfoDialog modals,
 # and the eleven Screen subclasses the brief requires (menu, world map, level
 # select, settings, about, guide, tutorial, autoplayer tuning, multiplayer
-# menu, host, join). Content is rewritten for the GateRunner gate-runner /
+# menu, host, join). Content is rewritten for the Swellfire gate-runner /
 # squad-multiplier loop.
 
 import os
@@ -36,7 +36,7 @@ import shop
 
 
 ABOUT_TEXT = (
-    "GateRunner\n"
+    "Swellfire\n"
     "\n"
     "An auto-runner shooter in the squad-multiplier genre. Your character runs "
     "forward on their own; you only steer left and right and choose which gate "
@@ -50,7 +50,7 @@ ABOUT_TEXT = (
     "There are 6 worlds with 10 levels each, 60 levels in total. The further "
     "you go, the denser the spawns and the more punishing the bosses.\n"
     "\n"
-    "GateRunner is built with Python and the Kivy framework. The same codebase "
+    "Swellfire is built with Python and the Kivy framework. The same codebase "
     "runs on Windows, Linux, macOS, Android and iPhone.\n"
     "\n"
     "Tap the Auto button during a level to let a small genetic algorithm play "
@@ -64,7 +64,7 @@ ABOUT_TEXT = (
     "\n"
     "Created by Ahmed Fawzy Gad.\n"
     "Email: ahmed.f.gad@gmail.com\n"
-    "Source code: https://github.com/ahmedfgad/GateRunner"
+    "Source code: https://github.com/ahmedfgad/Swellfire"
 )
 
 
@@ -680,7 +680,7 @@ class MenuScreen(StyledScreen):
 
     def build(self):
         scroll, box = _scroll_panel(size_hint=(0.7, 0.94))
-        box.add_widget(Label(text="GateRunner", font_size=sp(48), bold=True,
+        box.add_widget(Label(text="Swellfire", font_size=sp(48), bold=True,
                              color=[1, 0.85, 0.2, 1],
                              size_hint_y=None, height=TITLE_HEIGHT))
 
@@ -1871,7 +1871,7 @@ class GuideScreen(StyledScreen):
 # --- tutorial: step-through text walkthrough (M14 makes it interactive) ----
 
 TUTORIAL_STEPS = [
-    ("Welcome to GateRunner",
+    ("Welcome to Swellfire",
      "You auto-run forward. Your only job is to steer left and right and "
      "pick which gate to pass through."),
     ("Gates",
@@ -2064,7 +2064,7 @@ class HostScreen(StyledScreen):
 
     Listens on the standard port, shows the local and (best-effort) public
     address, waits for one joiner, then hands off to the gameplay screen.
-    Versus is the only mode in GateRunner, so the game type picker CoinTex
+    Versus is the only mode in Swellfire, so the game type picker CoinTex
     used is omitted — see net.send_start where mode is hard-coded to
     'versus'.
     """
@@ -2123,7 +2123,7 @@ class HostScreen(StyledScreen):
         self.start_btn.disabled = True
         self.start_btn.bg = [0.3, 0.3, 0.35, 1]
         self.status.text = ("Waiting for a player to join.\n"
-                            "If your firewall asks to allow GateRunner, click Allow.")
+                            "If your firewall asks to allow Swellfire, click Allow.")
         self.net = net.NetHost()
         try:
             self.net.start_listening()

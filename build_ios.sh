@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds the GateRunner iOS app with kivy-ios.
+# Builds the Swellfire iOS app with kivy-ios.
 #
 # iOS apps can only be built on a Mac with Xcode. This script stops if it is run
 # anywhere else. It cannot run on Linux.
@@ -20,8 +20,8 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
 PROJECT_DIR="$(pwd)"
 
-APP_TITLE="GateRunner"
-BUNDLE_ID="com.ahmedgad.gaterunner"   # change this if you want a different App Store id
+APP_TITLE="Swellfire"
+BUNDLE_ID="com.ahmedgad.swellfire"   # change this if you want a different App Store id
 IOS_VENV=".ios-venv"
 
 # Stop if this is not a Mac.
@@ -71,9 +71,9 @@ rm -rf "${APP_TITLE}-ios"
 toolchain create "$APP_TITLE" "$PROJECT_DIR"
 
 # Replace the kivy-ios template's Kivy-logo icon and launch screen with the
-# GateRunner artwork. Without this, the installed app shows the Kivy logo on the
+# Swellfire artwork. Without this, the installed app shows the Kivy logo on the
 # home screen and again as the splash screen.
-echo "Applying the GateRunner icon and presplash"
+echo "Applying the Swellfire icon and presplash"
 "$PROJECT_DIR/tools/ios_apply_assets.sh" \
     "${APP_TITLE}-ios" icon.png presplash.png
 

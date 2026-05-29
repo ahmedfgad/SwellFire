@@ -199,7 +199,7 @@ class SimState:
 def main() -> int:
     print("Difficulty sim — 60 levels × {passive, greedy} via GameScreen._update at 60Hz")
     print()
-    app = m.GateRunnerApp()
+    app = m.SwellfireApp()
     sim = SimState(app, level_list=range(1, levels.TOTAL_LEVELS + 1),
                    modes=("passive", "greedy"))
 

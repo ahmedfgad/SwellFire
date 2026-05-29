@@ -1,4 +1,4 @@
-# GateRunner graphics.
+# Swellfire graphics.
 #
 # Top of file: the Mesh-batched renderer that gameplay uses from M3 onwards
 # (atlas loader, parallel-array entity pool, batched-mesh widget that draws

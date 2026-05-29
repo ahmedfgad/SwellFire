@@ -1,4 +1,4 @@
-"""GateRunner level definitions.
+"""Swellfire level definitions.
 
 `build_levels()` generates all 60 levels (6 worlds × 10 levels) procedurally
 from a small set of knobs that ramp with world + in-world index. The

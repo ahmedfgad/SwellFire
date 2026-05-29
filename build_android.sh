@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds the GateRunner Android package, ready to upload to Google Play.
+# Builds the Swellfire Android package, ready to upload to Google Play.
 #
 # What it does:
 #   1. Activates the venv and makes sure buildozer and Cython are installed.
@@ -33,8 +33,8 @@ for arg in "$@"; do
 done
 
 VENV_DIR="venv"
-KEYSTORE_FILE="$PROJECT_DIR/gaterunner-upload.keystore"
-KEYSTORE_ALIAS="gaterunner-upload"
+KEYSTORE_FILE="$PROJECT_DIR/swellfire-upload.keystore"
+KEYSTORE_ALIAS="swellfire-upload"
 ENV_FILE="$PROJECT_DIR/.env"
 
 # Make sure the venv and buildozer are ready.
@@ -91,7 +91,7 @@ if [[ ! -f "$KEYSTORE_FILE" ]]; then
         -alias "$KEYSTORE_ALIAS" \
         -keyalg RSA -keysize 2048 -validity 10000 \
         -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
-        -dname "CN=Ahmed Gad, OU=GateRunner, O=GateRunner, L=Unknown, ST=Unknown, C=US"
+        -dname "CN=Ahmed Gad, OU=Swellfire, O=Swellfire, L=Unknown, ST=Unknown, C=US"
 
     echo "Exporting upload_certificate.pem for Play Console"
     keytool -export -rfc \
@@ -100,7 +100,7 @@ if [[ ! -f "$KEYSTORE_FILE" ]]; then
         -storepass "$KEYSTORE_PASSWORD" \
         -file "$PROJECT_DIR/upload_certificate.pem"
 
-    echo "Back up gaterunner-upload.keystore and .env now. Without them you cannot"
+    echo "Back up swellfire-upload.keystore and .env now. Without them you cannot"
     echo "sign new uploads. See SIGNING.md for details."
 fi
 

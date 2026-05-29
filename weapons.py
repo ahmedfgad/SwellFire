@@ -1,4 +1,4 @@
-"""GateRunner weapon registry.
+"""Swellfire weapon registry.
 
 Each weapon is a small dataclass that the gameplay layer reads to drive
 auto-fire timing, projectile shape and spread. M7's "weapon gate" picks

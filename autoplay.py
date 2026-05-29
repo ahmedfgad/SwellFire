@@ -1,10 +1,10 @@
-"""autoplay.py — Gate Runner auto-player (M12).
+"""autoplay.py — Swellfire auto-player (M12).
 
 Ported from CoinTex's autoplay.py with the genre retargeted:
 
 * CoinTex was 2-D (the player walked freely in a grid), so the GA searched
   over (x, y) target points and fitness was "collect coins / avoid monsters."
-* Gate Runner is effectively 1-D — the world auto-scrolls vertically, the
+* Swellfire is effectively 1-D — the world auto-scrolls vertically, the
   hero only steers horizontally — so the solution space is just a target
   fraction ``f`` in ``[0, 1]`` across the road.
 

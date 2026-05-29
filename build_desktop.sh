@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds Gate Runner as a standalone desktop program with PyInstaller.
+# Builds Swellfire as a standalone desktop program with PyInstaller.
 #
 # PyInstaller builds for the system it runs on. It cannot build a Windows file
 # from Linux or the other way round, so run this on each system you want:
@@ -17,7 +17,7 @@
 #
 # Note: if you run the built program on a machine with no working sound output
 # (some virtual machines), start it with SDL_AUDIODRIVER=dummy to skip audio,
-# for example:  SDL_AUDIODRIVER=dummy ./dist/GateRunner
+# for example:  SDL_AUDIODRIVER=dummy ./dist/Swellfire
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
@@ -40,7 +40,7 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) OS="windows"; VENV_BIN="venv/Scripts"; SEP=";" ;;
     *) echo "Unsupported system: $(uname -s)" >&2; exit 1 ;;
 esac
-echo "Building GateRunner for $OS"
+echo "Building Swellfire for $OS"
 
 # Create the venv the first time, then make sure Kivy and PyInstaller are in it.
 if [[ ! -d "venv" ]]; then
@@ -53,7 +53,7 @@ PY="$VENV_BIN/python"
 "$PY" -m pip install --upgrade pyinstaller
 
 # Start each build clean.
-rm -rf build dist GateRunner.spec
+rm -rf build dist Swellfire.spec
 
 MODE="--onefile"
 [[ "$ONEFILE" -eq 0 ]] && MODE="--onedir"
@@ -61,12 +61,12 @@ MODE="--onefile"
 # Bundle the assets directory (sprite atlases, music, sfx, UI) plus the window
 # icon. PyInstaller finds the Python modules on its own, and Kivy ships its own
 # PyInstaller hooks so its providers are included. --icon makes Windows show the
-# GateRunner logo on the .exe in File Explorer and in the title bar (PyInstaller
+# Swellfire logo on the .exe in File Explorer and in the title bar (PyInstaller
 # converts the .png to .ico through Pillow, which we already require).
 echo "Running PyInstaller ($MODE)"
 "$PY" -m PyInstaller \
     --noconfirm --clean $MODE --windowed \
-    --name GateRunner \
+    --name Swellfire \
     --icon icon.png \
     --add-data "assets${SEP}assets" \
     --add-data "icon.png${SEP}." \
@@ -78,14 +78,14 @@ ls -1 dist/ 2>/dev/null || true
 echo ""
 if [[ "$ONEFILE" -eq 1 ]]; then
     case "$OS" in
-        linux)   echo "Run it with:  ./dist/GateRunner   (a single file you can copy to another Linux PC)" ;;
-        macos)   echo "Open dist/GateRunner.app, or run ./dist/GateRunner from a terminal." ;;
-        windows) echo "Run dist\\GateRunner.exe   (a single file you can copy to another Windows PC)" ;;
+        linux)   echo "Run it with:  ./dist/Swellfire   (a single file you can copy to another Linux PC)" ;;
+        macos)   echo "Open dist/Swellfire.app, or run ./dist/Swellfire from a terminal." ;;
+        windows) echo "Run dist\\Swellfire.exe   (a single file you can copy to another Windows PC)" ;;
     esac
     echo "The first start takes a few seconds while the single file unpacks itself."
 else
     case "$OS" in
-        windows) echo "Share the whole dist\\GateRunner folder; run GateRunner.exe inside it." ;;
-        *)       echo "Share the whole dist/GateRunner folder; run GateRunner inside it." ;;
+        windows) echo "Share the whole dist\\Swellfire folder; run Swellfire.exe inside it." ;;
+        *)       echo "Share the whole dist/Swellfire folder; run Swellfire inside it." ;;
     esac
 fi

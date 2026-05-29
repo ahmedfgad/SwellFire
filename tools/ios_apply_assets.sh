@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Replaces the placeholder Kivy-logo assets in a freshly created kivy-ios
-# Xcode project with the GateRunner logo (home-screen icon) and presplash
+# Xcode project with the Swellfire logo (home-screen icon) and presplash
 # (launch screen). Run after `toolchain create` and before `xcodebuild`.
 #
 # Why this is needed:
@@ -32,14 +32,14 @@ for path in "$PROJ_DIR" "$LOGO" "$PRESPLASH"; do
     fi
 done
 
-echo "Applying GateRunner iOS assets to $PROJ_DIR"
+echo "Applying Swellfire iOS assets to $PROJ_DIR"
 
 # 1. Replace icon.png at the project root with the presplash image. The launch
 #    screen storyboard renders this file. (Step 2 below populates the asset
 #    catalog so the home-screen icon comes from there, not from this file.)
 cp "$PRESPLASH" "$PROJ_DIR/icon.png"
 
-# 2. Populate AppIcon.appiconset from the GateRunner logo. The kivy-ios template
+# 2. Populate AppIcon.appiconset from the Swellfire logo. The kivy-ios template
 #    ships an empty catalog, so without this iOS shows a placeholder icon (or
 #    falls back to icon.png, which is now the presplash and not square).
 APPICON=$(find "$PROJ_DIR" -type d -name AppIcon.appiconset | head -1)
@@ -109,4 +109,4 @@ else
     echo "Launch Screen.storyboard not found - leaving launch screen alone." >&2
 fi
 
-echo "Done applying GateRunner iOS assets."
+echo "Done applying Swellfire iOS assets."

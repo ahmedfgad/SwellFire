@@ -1,4 +1,4 @@
-"""Generate composed background music for Gate Runner (all 8 tracks).
+"""Generate composed background music for Swellfire (all 8 tracks).
 
 Replaces the minimal stdlib placeholders from gen_placeholder_audio.py with
 higher-fidelity, melodic, seamless-looping tracks using a small numpy synth.

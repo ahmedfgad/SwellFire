@@ -1,4 +1,4 @@
-"""Generate the GateRunner sprite atlas (M14 asset pass).
+"""Generate the Swellfire sprite atlas (M14 asset pass).
 
 Writes `assets/atlases/stress.png` (a 256x256 PNG holding ten 64x64
 frames) and `assets/atlases/stress.json` (the frame -> UV-rect map the

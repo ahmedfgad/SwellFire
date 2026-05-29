@@ -1,4 +1,4 @@
-# Saves game progress and settings for GateRunner.
+# Saves game progress and settings for Swellfire.
 # Everything is kept in one JSON file inside the folder the game passes in
 # (the Kivy user_data_dir, which can be written to on all platforms).
 
@@ -45,7 +45,7 @@ DEFAULT_WEAPON_UNLOCKS = {
 # the highest-tier unlocked weapon as the default.
 WEAPON_TIERS = ["pistol", "rifle", "shotgun", "sniper"]
 
-SAVE_NAME = "gaterunner_save.json"
+SAVE_NAME = "swellfire_save.json"
 
 
 class GameState:
@@ -104,7 +104,7 @@ class GameState:
                 data["weapon_unlocks"] = unlocks
                 return data
             except Exception as error:
-                print("GateRunner: could not read save, starting fresh.", error)
+                print("Swellfire: could not read save, starting fresh.", error)
         return data
 
     def save(self):
@@ -115,7 +115,7 @@ class GameState:
                 json.dump(self.data, save_file)
             os.replace(tmp_path, self.path)
         except Exception as error:
-            print("GateRunner: could not save game.", error)
+            print("Swellfire: could not save game.", error)
 
     # progress
     @property

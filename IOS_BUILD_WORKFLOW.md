@@ -1,4 +1,4 @@
-# Building the GateRunner iOS files with GitHub Actions
+# Building the Swellfire iOS files with GitHub Actions
 
 iOS apps must be built on a Mac. This project uses a GitHub Actions workflow to build the app on a Mac in the cloud, so you do not need to own one. The repo is public, so these macOS runners are free.
 
@@ -36,14 +36,14 @@ When the run finishes with a green check mark:
 1. Click the finished run in the **Actions** tab.
 2. Scroll to the **Artifacts** section at the bottom of the run summary page.
 3. You will see two items:
-   - **GateRunner-unsigned-ipa**: download it. It arrives as a zip. Unzip it to get `GateRunner-unsigned.ipa`. This is the file you install on an iPhone.
-   - **GateRunner-xcode-project**: the Xcode project. You only need this if you later decide to publish the game on the App Store from a Mac.
+   - **Swellfire-unsigned-ipa**: download it. It arrives as a zip. Unzip it to get `Swellfire-unsigned.ipa`. This is the file you install on an iPhone.
+   - **Swellfire-xcode-project**: the Xcode project. You only need this if you later decide to publish the game on the App Store from a Mac.
 
 GitHub keeps these artifacts for 30 days. After that, run the workflow again to get fresh files.
 
 ## Install it on an iPhone
 
-Use `GateRunner-unsigned.ipa` with the steps in `IOS_INSTALL.md`.
+Use `Swellfire-unsigned.ipa` with the steps in `IOS_INSTALL.md`.
 
 ## If a run fails
 

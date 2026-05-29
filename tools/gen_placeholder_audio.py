@@ -1,4 +1,4 @@
-"""Generate placeholder audio for GateRunner.
+"""Generate placeholder audio for Swellfire.
 
 Produces the menu track, one per-world track (worlds 1..6), and the SFX bank
 (click, shoot, hit, enemy_death, gate_pickup, coin, level_complete, death,

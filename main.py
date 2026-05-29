@@ -1,4 +1,4 @@
-"""GateRunner — auto-runner shooter in Kivy.
+"""Swellfire — auto-runner shooter in Kivy.
 
 M1: screen scaffolding. All eleven meta screens (menu, world map, level select,
 settings, about, guide, tutorial, autoplayer tuning, multiplayer menu, host,
@@ -49,8 +49,8 @@ def app():
     return App.get_running_app()
 
 
-class GateRunnerApp(App):
-    title = "GateRunner"
+class SwellfireApp(App):
+    title = "Swellfire"
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -157,4 +157,4 @@ class GateRunnerApp(App):
 
 
 if __name__ == "__main__":
-    GateRunnerApp().run()
+    SwellfireApp().run()

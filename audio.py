@@ -8,7 +8,7 @@
 # Pattern is the same as CoinTex's audio.py (Kivy SoundLoader, one menu/world
 # track plus a SFX dict, stop-before-play to avoid stale channels). The
 # difference: AudioManager is created without a state object and is attached
-# to one later via attach_state(state), which suits GateRunner's startup
+# to one later via attach_state(state), which suits Swellfire's startup
 # order (audio module imported before main builds the GameState).
 
 import os

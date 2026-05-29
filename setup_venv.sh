@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sets up everything needed to run and build GateRunner.
+# Sets up everything needed to run and build Swellfire.
 #
 # It does four things:
 #   1. Creates a Python 3.12 virtual environment in ./venv and installs Kivy.

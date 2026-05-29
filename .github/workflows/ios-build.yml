@@ -1,13 +1,13 @@
-# Builds the GateRunner iOS app on a macOS runner with kivy-ios.
+# Builds the Swellfire iOS app on a macOS runner with kivy-ios.
 #
 # iOS apps can only be built on macOS, so this uses a GitHub macOS runner.
 # For a public repository these runners are free.
 #
 # What it produces (download from the run's Artifacts section):
-#   1. GateRunner-unsigned-ipa   an unsigned app file for sideloading with AltStore
+#   1. Swellfire-unsigned-ipa   an unsigned app file for sideloading with AltStore
 #                                or Sideloadly. Those tools sign it with your own
 #                                Apple ID. See IOS_INSTALL.md.
-#   2. GateRunner-xcode-project  the Xcode project. Open it on a Mac to set your
+#   2. Swellfire-xcode-project  the Xcode project. Open it on a Mac to set your
 #                                team, Archive, and upload to the App Store.
 #
 # The app is not signed here, so the build needs no Apple account and no secrets.
@@ -78,12 +78,12 @@ jobs:
           ls -R ios_app
 
       - name: Create the Xcode project
-        run: toolchain create GateRunner ios_app
+        run: toolchain create Swellfire ios_app
 
       # kivy-ios's template puts the Kivy logo in icon.png and ships an empty
       # AppIcon.appiconset, so the home-screen icon and launch screen both
-      # default to the Kivy logo. Replace them with the GateRunner artwork.
-      - name: Apply the GateRunner icon and presplash
+      # default to the Kivy logo. Replace them with the Swellfire artwork.
+      - name: Apply the Swellfire icon and presplash
         run: |
           PROJ_DIR=$(ls -d *-ios | head -1)
           tools/ios_apply_assets.sh "$PROJ_DIR" icon.png presplash.png
@@ -102,7 +102,7 @@ jobs:
           xcodebuild -list -project "$XCODEPROJ" || true
 
       # kivy-ios writes its own default name, bundle id and version into the app
-      # Info.plist, and allows every orientation. Set the GateRunner values here
+      # Info.plist, and allows every orientation. Set the Swellfire values here
       # so the built app matches the Android app and stays landscape only.
       - name: Set the app metadata
         run: |
@@ -110,13 +110,13 @@ jobs:
           if [ -z "$PLIST" ]; then PLIST=$(find "$PROJ_DIR" -name "*-Info.plist" | head -1); fi
           echo "Editing $PLIST"
           PB=/usr/libexec/PlistBuddy
-          $PB -c "Set :CFBundleIdentifier com.ahmedgad.gaterunner" "$PLIST"
-          $PB -c "Set :CFBundleDisplayName GateRunner" "$PLIST" || $PB -c "Add :CFBundleDisplayName string GateRunner" "$PLIST"
-          $PB -c "Set :CFBundleName GateRunner" "$PLIST" || true
+          $PB -c "Set :CFBundleIdentifier com.ahmedgad.swellfire" "$PLIST"
+          $PB -c "Set :CFBundleDisplayName Swellfire" "$PLIST" || $PB -c "Add :CFBundleDisplayName string Swellfire" "$PLIST"
+          $PB -c "Set :CFBundleName Swellfire" "$PLIST" || true
           $PB -c "Set :CFBundleShortVersionString 1.0" "$PLIST" || $PB -c "Add :CFBundleShortVersionString string 1.0" "$PLIST"
           $PB -c "Set :CFBundleVersion 10000" "$PLIST" || $PB -c "Add :CFBundleVersion string 10000" "$PLIST"
           # The 2-player feature talks to a nearby device over the local network.
-          $PB -c "Add :NSLocalNetworkUsageDescription string 'GateRunner uses the local network to play with a nearby device.'" "$PLIST" || true
+          $PB -c "Add :NSLocalNetworkUsageDescription string 'Swellfire uses the local network to play with a nearby device.'" "$PLIST" || true
           $PB -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
           $PB -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
           $PB -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
@@ -154,35 +154,35 @@ jobs:
           rm -rf Payload
           mkdir Payload
           cp -R "$APP" Payload/
-          zip -r -y GateRunner-unsigned.ipa Payload >/dev/null
-          ls -lh GateRunner-unsigned.ipa
+          zip -r -y Swellfire-unsigned.ipa Payload >/dev/null
+          ls -lh Swellfire-unsigned.ipa
 
       - name: Zip the Xcode project
-        run: zip -r -y GateRunner-xcode-project.zip "$PROJ_DIR" >/dev/null
+        run: zip -r -y Swellfire-xcode-project.zip "$PROJ_DIR" >/dev/null
 
       - name: Upload the unsigned .ipa
         uses: actions/upload-artifact@v4
         with:
-          name: GateRunner-unsigned-ipa
-          path: GateRunner-unsigned.ipa
+          name: Swellfire-unsigned-ipa
+          path: Swellfire-unsigned.ipa
           retention-days: 30
 
       - name: Upload the Xcode project
         uses: actions/upload-artifact@v4
         with:
-          name: GateRunner-xcode-project
-          path: GateRunner-xcode-project.zip
+          name: Swellfire-xcode-project
+          path: Swellfire-xcode-project.zip
           retention-days: 30
 
       - name: Write a run summary
         run: |
           {
-            echo "## GateRunner iOS build"
+            echo "## Swellfire iOS build"
             echo ""
             echo "Two files are ready in the Artifacts section of this run."
             echo ""
-            echo "- GateRunner-unsigned-ipa: an unsigned app file. Install it on an iPhone with AltStore or Sideloadly, which sign it with your own Apple ID. See IOS_INSTALL.md."
-            echo "- GateRunner-xcode-project: the Xcode project. Open it on a Mac to set your team, Archive, and upload to the App Store."
+            echo "- Swellfire-unsigned-ipa: an unsigned app file. Install it on an iPhone with AltStore or Sideloadly, which sign it with your own Apple ID. See IOS_INSTALL.md."
+            echo "- Swellfire-xcode-project: the Xcode project. Open it on a Mac to set your team, Archive, and upload to the App Store."
             echo ""
             echo "The app was not signed here, so no Apple account or secrets were needed."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -37,7 +37,7 @@ Module layout inside `tools/gen_world_music.py` (top → bottom):
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/pip install numpy
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/pip install numpy
 ```
 Expected: `Successfully installed numpy-<version>` (or "already satisfied").
 
@@ -54,7 +54,7 @@ pillow>=10.0.0
 - [ ] **Step 3: Create `tools/gen_world_music.py` with constants + a stub so it imports**
 
 ```python
-"""Generate composed background music for Gate Runner (all 8 tracks).
+"""Generate composed background music for Swellfire (all 8 tracks).
 
 Replaces the minimal stdlib placeholders from gen_placeholder_audio.py with
 higher-fidelity, melodic, seamless-looping tracks using a small numpy synth.
@@ -89,14 +89,14 @@ def bars_for(bpm: float, beats_per_bar: int = 4) -> int:
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python -c "import sys; sys.path.insert(0,'tools'); import gen_world_music as g; print('ok', g.SAMPLE_RATE, g.bars_for(120))"
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python -c "import sys; sys.path.insert(0,'tools'); import gen_world_music as g; print('ok', g.SAMPLE_RATE, g.bars_for(120))"
 ```
 Expected: `ok 44100 10`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add requirements-tools.txt tools/gen_world_music.py
 git commit -m "Add music-gen tooling dep + module skeleton"
 ```
@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py
 ```
 Expected: FAIL — `AttributeError: module 'gen_world_music' has no attribute 'note_freq'`
 
@@ -229,14 +229,14 @@ def adsr(n: int, attack=0.01, decay=0.08, sustain=0.7, release=0.12) -> np.ndarr
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py
 ```
 Expected: `PASS: synth core (note/osc/adsr)`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add tools/gen_world_music.py tools/test_gen_world_music.py
 git commit -m "Music gen: note freq, band-limited oscillators, ADSR"
 ```
@@ -286,7 +286,7 @@ And change the final print to `print("PASS: synth core")`.
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: FAIL — `module 'gen_world_music' has no attribute 'lowpass'`
 
 - [ ] **Step 3: Implement filter, delay, drums, mix/master in `tools/gen_world_music.py`**
@@ -367,13 +367,13 @@ def soft_clip(x: np.ndarray) -> np.ndarray:
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: `PASS: synth core`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add tools/gen_world_music.py tools/test_gen_world_music.py
 git commit -m "Music gen: low-pass, delay, drums, mix/normalize/soft-clip"
 ```
@@ -430,7 +430,7 @@ Add to `__main__`:
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: FAIL — `has no attribute 'seconds_to_samples'`
 
 - [ ] **Step 3: Implement sequencer, crossfade, WAV I/O in `tools/gen_world_music.py`**
@@ -489,13 +489,13 @@ def write_wav(path: str, x: np.ndarray) -> None:
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: `PASS: synth core` (all asserts pass; final print still runs)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add tools/gen_world_music.py tools/test_gen_world_music.py
 git commit -m "Music gen: beat sequencer, loop crossfade, WAV writer"
 ```
@@ -675,7 +675,7 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python -c "
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python -c "
 import sys; sys.path.insert(0,'tools'); import numpy as np, gen_world_music as g
 for k,b in g.TRACKS.items():
     buf=b(); assert buf.ndim==1 and buf.shape[0]>g.SAMPLE_RATE*15, k
@@ -688,7 +688,7 @@ Expected: one `ok …` line per track and `ALL BUILDERS OK`. (If a builder error
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add tools/gen_world_music.py
 git commit -m "Music gen: per-track builders, registry, driver"
 ```
@@ -723,13 +723,13 @@ Change final print to `print("PASS: all tests")`.
 
 - [ ] **Step 2: Run to verify it passes** (builders already exist from Task 5)
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: `PASS: all tests`. If any track fails an assert (clipping/silent/seam), tune that builder's gains or fade and re-run.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add tools/test_gen_world_music.py
 git commit -m "Music gen: structural tests for all 8 tracks"
 ```
@@ -746,7 +746,7 @@ git commit -m "Music gen: structural tests for all 8 tracks"
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/gen_world_music.py
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/gen_world_music.py
 ```
 Expected: 8 `wrote …` lines, each with `peak<1.0`, small `loopΔ` (< 0.08), ~1.5–1.9 MB; total ≈ 14 MB.
 
@@ -754,7 +754,7 @@ Expected: 8 `wrote …` lines, each with `peak<1.0`, small `loopΔ` (< 0.08), ~1
 
 Run:
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && venv/bin/python -c "
+cd /home/ahmed-gad/projects/Swellfire && venv/bin/python -c "
 import wave, os
 for f in sorted(os.listdir('assets/music')):
     if not f.endswith('.wav'): continue
@@ -792,7 +792,7 @@ generator but no longer produces the shipped music.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/ahmed-gad/projects/GateRunner
+cd /home/ahmed-gad/projects/Swellfire
 git add assets/music/*.wav assets/music/README.md
 git commit -m "Replace all background music with composed numpy-synth tracks"
 ```
@@ -807,7 +807,7 @@ git commit -m "Replace all background music with composed numpy-synth tracks"
 
 Run (needs a display):
 ```bash
-cd /home/ahmed-gad/projects/GateRunner && SDL_AUDIODRIVER=dummy venv/bin/python main.py
+cd /home/ahmed-gad/projects/Swellfire && SDL_AUDIODRIVER=dummy venv/bin/python main.py
 ```
 > Note: `SDL_AUDIODRIVER=dummy` lets the app boot on Linux but produces **no
 > audible sound**. Use it to confirm the tracks **load without error** and the
@@ -820,7 +820,7 @@ dummy driver.)
 
 - [ ] **Step 2: Final full test run**
 
-Run: `cd /home/ahmed-gad/projects/GateRunner && venv/bin/python tools/test_gen_world_music.py`
+Run: `cd /home/ahmed-gad/projects/Swellfire && venv/bin/python tools/test_gen_world_music.py`
 Expected: `PASS: all tests`
 
 ---

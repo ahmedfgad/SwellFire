@@ -1,12 +1,12 @@
 [app]
 
 # Title of the application.
-title = GateRunner
+title = Swellfire
 
 # Package name and domain. Together they form the application id
-# com.ahmedgad.gaterunner. Keep these consistent across builds or Google Play
+# com.ahmedgad.swellfire. Keep these consistent across builds or Google Play
 # will treat the build as a different app.
-package.name = gaterunner
+package.name = swellfire
 package.domain = com.ahmedgad
 
 # Folder that holds main.py.

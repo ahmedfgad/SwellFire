@@ -1,4 +1,4 @@
-# Networking for GateRunner 2-player games.
+# Networking for Swellfire 2-player games.
 #
 # One device hosts a game and another joins it using the host's IP address. The
 # host runs the real game and is in charge of it. The joining device sends its

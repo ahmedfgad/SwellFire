@@ -1,8 +1,8 @@
-# GateRunner
+# Swellfire
 
-GateRunner is a cross-platform mobile game written in Python with the [Kivy](https://kivy.org) framework. It is an auto-runner shooter in the squad-multiplier genre: your character runs forward automatically, you steer left and right, gates multiply or shrink your squad, and waves of enemies fall to a hail of auto-fire from the crowd.
+Swellfire is a cross-platform mobile game written in Python with the [Kivy](https://kivy.org) framework. It is an auto-runner shooter in the squad-multiplier genre: your character runs forward automatically, you steer left and right, gates multiply or shrink your squad, and waves of enemies fall to a hail of auto-fire from the crowd.
 
-It is the second cross-platform Kivy game by Ahmed Gad, following [CoinTex](https://github.com/ahmedfgad/CoinTex). GateRunner mirrors CoinTex's build, packaging and screen-flow tooling — the same one codebase runs on Windows, Linux, macOS, Android and iPhone.
+It is the second cross-platform Kivy game by Ahmed Gad, following [CoinTex](https://github.com/ahmedfgad/CoinTex). Swellfire mirrors CoinTex's build, packaging and screen-flow tooling — the same one codebase runs on Windows, Linux, macOS, Android and iPhone.
 
 > **Status: under construction.** The build tooling, project layout and meta-screen scaffolding are in place (milestone M0). Gameplay, audio, levels and assets land in milestones M1–M15 — see [the plan](#plan-and-milestones).
 
@@ -62,11 +62,11 @@ Each milestone leaves a runnable desktop build:
 
 ## Run from source
 
-You need Python 3.12. GateRunner is developed against Kivy 2.3.1.
+You need Python 3.12. Swellfire is developed against Kivy 2.3.1.
 
 ```
-git clone https://github.com/ahmedfgad/GateRunner.git
-cd GateRunner
+git clone https://github.com/ahmedfgad/Swellfire.git
+cd Swellfire
 python -m pip install -r requirements.txt
 python main.py
 ```
@@ -100,7 +100,7 @@ iOS apps must be built on a Mac. You do not need to own one: the GitHub Actions 
 ./build_desktop.sh --onedir   # a folder that starts faster
 ```
 
-On Windows, run it inside Git Bash or MSYS2 to get `dist\GateRunner.exe`. On Linux you get `dist/GateRunner` and on macOS `dist/GateRunner.app`. A Windows `.exe` cannot be built from Linux, since PyInstaller does not cross build.
+On Windows, run it inside Git Bash or MSYS2 to get `dist\Swellfire.exe`. On Linux you get `dist/Swellfire` and on macOS `dist/Swellfire.app`. A Windows `.exe` cannot be built from Linux, since PyInstaller does not cross build.
 
 ## Project layout
 
