@@ -1,0 +1,5 @@
+# Dev/build-time tooling deps for the scripts under tools/ (asset + audio
+# pipeline). NOT shipped in the mobile build (buildozer.spec stays
+# python3,kivy) — these only run on the workstation to (re)generate assets.
+numpy>=1.26
+pillow>=10.0.0
