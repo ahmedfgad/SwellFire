@@ -40,10 +40,6 @@ def make_icon():
 def make_presplash():
     w, h = 1920, 1080
     img = bk.vertical_gradient((w, h), bk.BG_TOP, bk.BG_BOTTOM).convert("RGBA")
-    # Subtle warm glow only behind the action band (don't wash the teal).
-    glow = bk.radial_glow((w, h), (w // 2, int(h * 0.36)), int(h * 0.30),
-                          bk.EMBER["orange"], max_alpha=70)
-    img.alpha_composite(glow)
     # Core-loop scene (squad fires up through a ×2 gate at an enemy) up top.
     scene_h = int(h * 0.64)
     scene_w = int(scene_h * 0.82)

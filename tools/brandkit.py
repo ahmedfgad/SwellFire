@@ -24,12 +24,11 @@ EMBER = {
     "white":       (255, 255, 255),
 }
 
-# Brand background: cool teal -> bright aqua. Chosen so the dark squad sprites
-# AND the warm gold/orange action (gate, tracers, dragon) both pop via
-# complementary contrast. The "fire" identity lives in the action, not the
-# backdrop; the bright bottom keeps the dark soldiers clearly readable.
-BG_TOP = (10, 46, 60)
-BG_BOTTOM = (34, 184, 174)
+# Brand background: a flat, solid light red (no gradient, no shading) per the
+# brief. Light enough that the dark squad sprites still read clearly. Both
+# stops are equal so vertical_gradient() yields a perfectly solid fill.
+BG_TOP = (255, 102, 102)
+BG_BOTTOM = (255, 102, 102)
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -232,10 +231,6 @@ def compose_battle_scene(img, box, squad_n=5, boss="enemy_w5", label="×2"):
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
     cx = x0 + w * 0.5
-
-    # warm glow behind the action
-    img.alpha_composite(radial_glow(img.size, (int(cx), int(y0 + h * 0.62)),
-                                    int(h * 0.5), EMBER["orange"], 90))
 
     boss_h = h * 0.30
     boss_cy = y0 + h * 0.15
