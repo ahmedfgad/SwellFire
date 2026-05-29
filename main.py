@@ -9,17 +9,33 @@ M3-M13 — see the plan at /home/ahmed-gad/.claude/plans/.
 """
 
 import os
+import sys
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.config import Config
+from kivy.resources import resource_add_path
 
 # Lock to landscape on desktop (Android / iOS use the orientation set in their
 # build configs). Done before any window is created.
 Config.set("graphics", "width", "960")
 Config.set("graphics", "height", "540")
 Config.set("graphics", "resizable", "1")
+
+# Asset root. When frozen by PyInstaller the bundled assets are unpacked under
+# the onefile extraction dir (sys._MEIPASS); in dev they live next to this file.
+# Register it on Kivy's resource search path so every relative "assets/..." path
+# resolves regardless of the current working directory. Without this, sprite
+# PNGs (CoreImage) and music/sfx (SoundLoader) are looked up via resource_find,
+# whose default search path is the cwd — so the packaged binary crashes the
+# moment it's launched from any directory other than the one containing assets/
+# (resource_find -> None -> Kivy's load_from_filename(None) -> AttributeError).
+if getattr(sys, "frozen", False):
+    ASSET_ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+else:
+    ASSET_ROOT = os.path.dirname(os.path.abspath(__file__))
+resource_add_path(ASSET_ROOT)
 
 import ui
 import levels
@@ -53,7 +69,7 @@ class GateRunnerApp(App):
         # State first so AudioManager can read settings on attach.
         storage_dir = self.user_data_dir or os.path.dirname(os.path.abspath(__file__))
         self.state = GameState(storage_dir)
-        asset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+        asset_dir = os.path.join(ASSET_ROOT, "assets")
         self.audio = AudioManager(asset_dir)
         self.audio.attach_state(self.state)
 

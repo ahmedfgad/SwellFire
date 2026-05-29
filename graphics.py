@@ -18,6 +18,7 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line, Mesh
 from kivy.core.image import Image as CoreImage
+from kivy.resources import resource_find
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 from kivy.metrics import dp, sp
@@ -59,7 +60,7 @@ class SpriteAtlas:
         self.texture.min_filter = "nearest"
         self.texture.mag_filter = "nearest"
 
-        with open(json_path) as f:
+        with open(resource_find(json_path) or json_path) as f:
             meta = json.load(f)
         # name -> (u0, v0, u1, v1) in the atlas texture's normalized space.
         self._frames: dict[str, tuple[float, float, float, float]] = {}
@@ -110,7 +111,7 @@ class SpriteAtlas:
         self.texture = self._image.texture
         self.texture.min_filter = "nearest"
         self.texture.mag_filter = "nearest"
-        with open(json_path) as f:
+        with open(resource_find(json_path) or json_path) as f:
             meta = json.load(f)
         self._frames = {}
         self._frame_px = {}
