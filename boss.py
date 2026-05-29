@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import random
 
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.animation import Animation
+from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
+from kivy.properties import NumericProperty
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
@@ -232,7 +234,19 @@ class BossController:
 # --- widgets -------------------------------------------------------------
 
 class BossWidget(Widget):
-    """The boss's visual: scaled enemy_red sprite + white flash overlay."""
+    """The boss's visual: a sprite that breathes, bobs, glows, recoils on
+    hit, and flashes in its own silhouette (not a white box).
+
+    Animated knobs (all visual-only — collision uses ``Boss.aabb`` from the
+    data, never the widget size):
+        ``pulse``  — slow breathing scale (looping idle)
+        ``bob``    — gentle vertical idle drift (looping)
+        ``recoil`` — transient squash punched on each hit
+    """
+
+    pulse = NumericProperty(1.0)
+    bob = NumericProperty(0.0)
+    recoil = NumericProperty(1.0)
 
     def __init__(self, boss: Boss, atlas: graphics.SpriteAtlas,
                  sprite_path: str | None = None, **kwargs):
@@ -245,27 +259,73 @@ class BossWidget(Widget):
         """
         super().__init__(**kwargs)
         self.boss = boss
+        # Resolve the sprite texture (+ tex_coords for the atlas fallback) so
+        # the hit flash can reuse them and flash only the monster's pixels.
+        if sprite_path is not None:
+            tex = graphics.load_texture(sprite_path)
+            tex_coords = None
+        else:
+            tex = atlas.texture
+            u0, v0, u1, v1 = atlas.frame("enemy_red")
+            tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
         with self.canvas:
-            Color(1, 1, 1, 1)
-            if sprite_path is not None:
-                self._rect = Rectangle(texture=graphics.load_texture(sprite_path))
-            else:
-                u0, v0, u1, v1 = atlas.frame("enemy_red")
-                self._rect = Rectangle(
-                    texture=atlas.texture,
-                    tex_coords=(u0, v0, u1, v0, u1, v1, u0, v1),
-                )
+            # Menacing glow behind the boss (pulsed; reddens in phase 2).
+            self._glow_color = Color(1.0, 0.35, 0.20, 0.0)
+            self._glow = Ellipse()
+            # The sprite. Its own Color tints reddish in phase 2.
+            self._sprite_color = Color(1, 1, 1, 1)
+            self._rect = Rectangle(texture=tex)
+            # Hit flash — SAME texture so only the silhouette flashes white,
+            # not a full rectangle.
             self._flash_color = Color(1, 1, 1, 0)
-            self._flash_rect = Rectangle()
-        self.bind(pos=self._sync, size=self._sync)
+            self._flash_rect = Rectangle(texture=tex)
+            if tex_coords is not None:
+                self._rect.tex_coords = tex_coords
+                self._flash_rect.tex_coords = tex_coords
+        self.bind(pos=self._sync, size=self._sync,
+                  pulse=self._sync, bob=self._sync, recoil=self._sync)
         self.size = (boss.width, boss.height)
         self._sync()
+        self._start_idle()
+
+    def _start_idle(self) -> None:
+        """Looping breathing + bob, and a slow glow pulse."""
+        body = (Animation(pulse=1.05, bob=dp(7), duration=1.0, t="in_out_sine")
+                + Animation(pulse=0.97, bob=-dp(7), duration=1.0, t="in_out_sine"))
+        body.repeat = True
+        body.start(self)
+        glow = (Animation(a=0.30, duration=1.0, t="in_out_sine")
+                + Animation(a=0.14, duration=1.0, t="in_out_sine"))
+        glow.repeat = True
+        glow.start(self._glow_color)
 
     def _sync(self, *_):
-        self._rect.pos = self.pos
-        self._rect.size = self.size
-        self._flash_rect.pos = self.pos
-        self._flash_rect.size = self.size
+        cx, cy = self.center
+        s = self.pulse * self.recoil
+        w = self.width * s
+        h = self.height * s
+        x = cx - w * 0.5
+        y = cy - h * 0.5 + self.bob
+        self._rect.pos = (x, y)
+        self._rect.size = (w, h)
+        self._flash_rect.pos = (x, y)
+        self._flash_rect.size = (w, h)
+        gw, gh = w * 1.55, h * 1.45
+        self._glow.pos = (cx - gw * 0.5, cy - gh * 0.5 + self.bob)
+        self._glow.size = (gw, gh)
+
+    def on_hit(self) -> None:
+        """Quick squash punch on each damage tick — makes the boss feel like
+        it's reacting to fire. Combined with the silhouette flash + the
+        particle burst/shake fired from the game loop."""
+        Animation.cancel_all(self, "recoil")
+        (Animation(recoil=0.88, duration=0.05)
+         + Animation(recoil=1.0, duration=0.16, t="out_back")).start(self)
+
+    def stop(self) -> None:
+        """Cancel looping animations when the boss is torn down."""
+        Animation.cancel_all(self, "pulse", "bob", "recoil")
+        Animation.cancel_all(self._glow_color, "a")
 
     def update_from_boss(self) -> None:
         self.center_x = self.boss.cx
@@ -275,6 +335,13 @@ class BossWidget(Widget):
             self._flash_color.a = min(0.75, self.boss.flash_time * 6.0)
         else:
             self._flash_color.a = 0.0
+        # Phase 2 "enrage": redden the sprite + push the glow toward hot red.
+        if self.boss.phase2:
+            self._sprite_color.rgb = (1.0, 0.62, 0.58)
+            self._glow_color.rgb = (1.0, 0.18, 0.12)
+        else:
+            self._sprite_color.rgb = (1.0, 1.0, 1.0)
+            self._glow_color.rgb = (1.0, 0.35, 0.20)
 
 
 class BossHPBar(Widget):

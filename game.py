@@ -1332,8 +1332,10 @@ class GameScreen(ui.StyledScreen):
         )
 
     def _teardown_boss(self) -> None:
-        if self.boss_widget is not None and self.boss_widget.parent:
-            self.boss_widget.parent.remove_widget(self.boss_widget)
+        if self.boss_widget is not None:
+            self.boss_widget.stop()
+            if self.boss_widget.parent:
+                self.boss_widget.parent.remove_widget(self.boss_widget)
         if self.boss_hp_bar is not None and self.boss_hp_bar.parent:
             self.boss_hp_bar.parent.remove_widget(self.boss_hp_bar)
         self.boss = None
@@ -1862,8 +1864,11 @@ class GameScreen(ui.StyledScreen):
                                  _self=self):
                     _pc.burst(hit_x, hit_y, count=4, speed=200.0, ttl=0.30,
                               size=10.0, frame="particle", rng=_rng)
-                    # M11: bigger shake when the boss is reeling.
+                    # M11: bigger shake when the boss is reeling + a squash
+                    # punch on the sprite so the boss visibly reacts.
                     _self._add_shake(0.9)
+                    if _self.boss_widget is not None:
+                        _self.boss_widget.on_hit()
                     if died:
                         # Big celebratory burst at the boss center on kill.
                         if _self.boss is not None:
