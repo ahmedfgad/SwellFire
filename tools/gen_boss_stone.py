@@ -32,13 +32,13 @@ WORLDS = range(1, 7)
 # Pull the luminance toward a cool stone grey rather than pure neutral, and
 # compress the range a touch so the dead part reads as flat/lifeless next to
 # the living, saturated body.
-# TRUE neutral grey (R=G=B, no hue) in a fairly dark, compressed band. The
-# point of the effect is unmistakable visibility: a desaturated-but-tinted
-# grey of similar brightness still reads as "colored", so we strip hue
-# entirely and bias dark, giving a stark stone-statue that clearly contrasts
-# the vivid living half. Only `lum` modulates the value (kept for form).
-STONE_FLOOR = 0.34                # darkest the stone gets (0..1)
-STONE_CEIL = 0.52                 # brightest the stone gets (0..1)
+# TRUE neutral grey (R=G=B, no hue) in a LIGHT, compressed band. The monster
+# cross-fades to this as it dies, so the petrified state must read clearly
+# against the game's DARK background — hence a pale, bright grey rather than a
+# dark one (dark grey camouflages against the dark stage). Only `lum`
+# modulates the value, to keep a little form.
+STONE_FLOOR = 0.60                # darkest the stone gets (0..1)
+STONE_CEIL = 0.82                 # brightest the stone gets (0..1)
 
 
 def _to_stone(img: Image.Image) -> Image.Image:

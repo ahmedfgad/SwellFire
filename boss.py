@@ -268,14 +268,13 @@ class BossWidget(Widget):
             tex = atlas.texture
             u0, v0, u1, v1 = atlas.frame("enemy_red")
             tex_coords = (u0, v0, u1, v0, u1, v1, u0, v1)
-        # Desaturated "stone" twin of the sprite — overdraws the depleted
-        # top slice of the body as HP drops (the monster-health indicator;
-        # replaces the old top HP bar). Degrades gracefully to "no effect"
-        # if the twin is missing (e.g. a world whose base PNG is absent).
+        # Pale "stone" twin of the sprite, drawn over the WHOLE body. Its
+        # alpha rises with lost HP, so the monster cross-fades from its
+        # living colours to grey stone as it dies (the monster-health
+        # indicator; replaces the old top HP bar). Degrades gracefully to
+        # "no effect" if the twin is missing (e.g. a world whose PNG absent).
         self._hp_ratio = 1.0
         self._stone_rect = None
-        self._stone_full = None
-        self._seam_rect = None
         stone_tex = None
         if sprite_path is not None:
             try:
@@ -287,17 +286,6 @@ class BossWidget(Widget):
             # The sprite. Its own Color tints reddish in phase 2.
             self._sprite_color = Color(1, 1, 1, 1)
             self._rect = Rectangle(texture=tex)
-            # Stone overlay — drawn ABOVE the living sprite (so it replaces
-            # the dead pixels) but BELOW the hit flash (so a hit still
-            # whitens the whole silhouette). A bright "petrification seam"
-            # rides the health line on top of it so the descending boundary
-            # is easy to see even when only a thin slice has turned to stone.
-            if stone_tex is not None:
-                self._stone_color = Color(1, 1, 1, 1)  # twin is already grey
-                self._stone_rect = Rectangle(texture=stone_tex)
-                self._stone_full = tuple(stone_tex.tex_coords)
-                self._seam_color = Color(1.0, 0.86, 0.42, 0.0)
-                self._seam_rect = Rectangle(texture=stone_tex)
             # Hit flash — SAME texture so only the silhouette flashes white,
             # not a full rectangle.
             self._flash_color = Color(1, 1, 1, 0)
@@ -305,6 +293,19 @@ class BossWidget(Widget):
             if tex_coords is not None:
                 self._rect.tex_coords = tex_coords
                 self._flash_rect.tex_coords = tex_coords
+        # Stone overlay — same geometry/texture as the body, but drawn in
+        # canvas.after (a SEPARATE pass). Drawing it in the main canvas, with
+        # vertices identical to the body rect, gets the second draw rejected
+        # in the game's render path (depth test on the stage) — it renders in
+        # isolation but vanishes in-game. canvas.after sidesteps that, the same
+        # way TextureSprite draws its flash overlay. Alpha 0 at full health →
+        # fully coloured; alpha 1 at death → fully grey.
+        if stone_tex is not None:
+            with self.canvas.after:
+                self._stone_color = Color(1, 1, 1, 0.0)
+                self._stone_rect = Rectangle(texture=stone_tex)
+                if tex_coords is not None:
+                    self._stone_rect.tex_coords = tex_coords
         self.bind(pos=self._sync, size=self._sync,
                   pulse=self._sync, bob=self._sync, recoil=self._sync)
         self.size = (boss.width, boss.height)
@@ -312,19 +313,11 @@ class BossWidget(Widget):
         self._start_idle()
 
     def _start_idle(self) -> None:
-        """Looping breathing + bob, and a shimmer on the petrification seam."""
+        """Looping breathing + bob."""
         body = (Animation(pulse=1.05, bob=dp(7), duration=1.0, t="in_out_sine")
                 + Animation(pulse=0.97, bob=-dp(7), duration=1.0, t="in_out_sine"))
         body.repeat = True
         body.start(self)
-        if self._seam_rect is not None:
-            # The seam's alpha shimmers; it only actually shows once a slice
-            # of the body has petrified (see _sync, which zeroes its size at
-            # full health).
-            seam = (Animation(a=0.95, duration=0.5, t="in_out_sine")
-                    + Animation(a=0.55, duration=0.5, t="in_out_sine"))
-            seam.repeat = True
-            seam.start(self._seam_color)
 
     def _sync(self, *_):
         cx, cy = self.center
@@ -338,40 +331,10 @@ class BossWidget(Widget):
         self._flash_rect.pos = (x, y)
         self._flash_rect.size = (w, h)
         if self._stone_rect is not None:
-            # Stone covers the depleted TOP slice — from the head down to the
-            # health line at fraction `r`. The living body shows below it.
-            r = max(0.0, min(1.0, self._hp_ratio))
-            dead = 1.0 - r
-            self._stone_rect.pos = (x, y + h * r)
-            self._stone_rect.size = (w, h * dead)
-            # Sample the matching top slice of the texture. Interpolate along
-            # the quad's own corner v-coords so this is correct regardless of
-            # whether the texture is vertically flipped: the slice's bottom
-            # edge sits at fraction `r` between the displayed bottom and top.
-            u_bl, v_bl, u_br, v_br, u_tr, v_tr, u_tl, v_tl = self._stone_full
-            v_bl_s = v_bl + (v_tl - v_bl) * r
-            v_br_s = v_br + (v_tr - v_br) * r
-            self._stone_rect.tex_coords = (
-                u_bl, v_bl_s, u_br, v_br_s, u_tr, v_tr, u_tl, v_tl)
-            # Bright seam: a thin textured band straddling the health line.
-            # Using the stone texture keeps it inside the silhouette (the
-            # alpha masks the transparent corners). Hidden at full health.
-            if self._seam_rect is not None:
-                if dead <= 0.005:
-                    self._seam_rect.size = (0, 0)
-                else:
-                    band = max(dp(4), h * 0.05)
-                    hf = (band * 0.5) / h
-                    f_lo = max(0.0, r - hf)
-                    f_hi = min(1.0, r + hf)
-                    self._seam_rect.pos = (x, y + h * f_lo)
-                    self._seam_rect.size = (w, h * (f_hi - f_lo))
-                    vL_lo = v_bl + (v_tl - v_bl) * f_lo
-                    vL_hi = v_bl + (v_tl - v_bl) * f_hi
-                    vR_lo = v_br + (v_tr - v_br) * f_lo
-                    vR_hi = v_br + (v_tr - v_br) * f_hi
-                    self._seam_rect.tex_coords = (
-                        u_bl, vL_lo, u_br, vR_lo, u_br, vR_hi, u_bl, vL_hi)
+            # Stone overlay tracks the whole body; its alpha (set in
+            # update_from_boss) controls how grey the monster is.
+            self._stone_rect.pos = (x, y)
+            self._stone_rect.size = (w, h)
 
     def on_hit(self) -> None:
         """Quick squash punch on each damage tick — makes the boss feel like
@@ -384,16 +347,16 @@ class BossWidget(Widget):
     def stop(self) -> None:
         """Cancel looping animations when the boss is torn down."""
         Animation.cancel_all(self, "pulse", "bob", "recoil")
-        if self._seam_rect is not None:
-            Animation.cancel_all(self._seam_color, "a")
 
     def update_from_boss(self) -> None:
         self.center_x = self.boss.cx
         self.center_y = self.boss.cy
-        # Health → how much of the body has turned to stone (top-down).
+        # Health → how grey the whole body is. alpha = fraction of HP lost,
+        # so the monster cross-fades from colour to stone as it dies.
         self._hp_ratio = (self.boss.hp / self.boss.max_hp
                           if self.boss.max_hp > 0 else 0.0)
         if self._stone_rect is not None:
+            self._stone_color.a = max(0.0, min(1.0, 1.0 - self._hp_ratio))
             self._sync()
         # Map flash_time → alpha (full at FLASH_DURATION, 0 at 0).
         if self.boss.flash_time > 0.0:
