@@ -75,7 +75,7 @@ if [ -n "$STORY" ]; then
     cat > "$STORY" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="21507" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
-    <device id="retina6_12" orientation="landscape" appearance="light"/>
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="21505"/>
@@ -87,11 +87,11 @@ if [ -n "$STORY" ]; then
             <objects>
                 <viewController id="01J-lp-oVM" sceneMemberID="viewController">
                     <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
-                        <rect key="frame" x="0.0" y="0.0" width="852" height="393"/>
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" fixedFrame="YES" image="icon.png" translatesAutoresizingMaskIntoConstraints="NO" id="pre-im-vw1">
-                                <rect key="frame" x="0.0" y="0.0" width="852" height="393"/>
+                                <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                                 <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                             </imageView>
                         </subviews>
@@ -107,6 +107,22 @@ if [ -n "$STORY" ]; then
 EOF
 else
     echo "Launch Screen.storyboard not found - leaving launch screen alone." >&2
+fi
+
+# 4. Lock the app to portrait. The kivy-ios template Info.plist allows all
+#    orientations, so the game would rotate on device. Rewrite the supported
+#    interface orientations (iPhone and iPad) to portrait-only.
+PLIST=$(find "$PROJ_DIR" -maxdepth 2 -name "*-Info.plist" | head -1)
+if [ -n "$PLIST" ]; then
+    PB=/usr/libexec/PlistBuddy
+    for KEY in "UISupportedInterfaceOrientations" "UISupportedInterfaceOrientations~ipad"; do
+        "$PB" -c "Delete :$KEY" "$PLIST" 2>/dev/null || true
+        "$PB" -c "Add :$KEY array" "$PLIST"
+        "$PB" -c "Add :$KEY:0 string UIInterfaceOrientationPortrait" "$PLIST"
+    done
+    echo "Locked iOS app to portrait in $(basename "$PLIST")"
+else
+    echo "Info.plist not found - leaving orientation alone." >&2
 fi
 
 echo "Done applying Swellfire iOS assets."

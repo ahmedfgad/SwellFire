@@ -36,7 +36,7 @@ presplash.filename = %(source.dir)s/presplash.png
 icon.filename = %(source.dir)s/icon.png
 
 # Screen orientation.
-orientation = landscape
+orientation = portrait
 
 # Run the app full screen.
 fullscreen = 1

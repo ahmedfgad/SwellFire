@@ -42,4 +42,4 @@ This might ask you to restart your device.
 
 With a free Apple ID the app works for 7 days. This is an Apple rule, not a limit of the game. When Swellfire stops opening, connect the phone to the computer and do the steps again to refresh it.
 
-Swellfire plays in landscape, so turn the phone sideways.
+Swellfire plays in portrait, so hold the phone upright.

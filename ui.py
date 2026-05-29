@@ -76,7 +76,7 @@ def app():
 #
 # Fixed dp() sizes — proportional size_hint_y on every child of a vertical
 # layout means the children squeeze below readable height on short screens
-# (Android landscape, iOS, a resized Linux window). Use these constants for
+# (small Android phones, iOS, a resized Linux window). Use these constants for
 # anything in a stack so the layout stays usable.
 
 BTN_HEIGHT = dp(52)

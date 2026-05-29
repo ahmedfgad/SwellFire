@@ -17,10 +17,10 @@ from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.config import Config
 from kivy.resources import resource_add_path
 
-# Lock to landscape on desktop (Android / iOS use the orientation set in their
+# Lock to portrait on desktop (Android / iOS use the orientation set in their
 # build configs). Done before any window is created.
-Config.set("graphics", "width", "960")
-Config.set("graphics", "height", "540")
+Config.set("graphics", "width", "540")
+Config.set("graphics", "height", "960")
 Config.set("graphics", "resizable", "1")
 
 # Asset root. When frozen by PyInstaller the bundled assets are unpacked under
