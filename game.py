@@ -419,6 +419,8 @@ class GameScreen(ui.StyledScreen):
         self.opponent_squad = 1
         self.opponent_kills = 0
         self.opponent_coins = 0
+        self.opponent_coins_pickups = 0   # p2 ground coins (for client pop)
+        self._mp_prev_coin_pickup = 0     # client: last-seen p2 ground total
         self.opponent_alive = True
         # Opponent's auto-fire cooldown + coin remainder. Mirrors the
         # host-side ``_fire_cooldown`` / ``_coin_remainder`` fields but
@@ -1117,6 +1119,8 @@ class GameScreen(ui.StyledScreen):
         self.opponent_squad = 1
         self.opponent_kills = 0
         self.opponent_coins = 0
+        self.opponent_coins_pickups = 0   # p2 ground coins (for client pop)
+        self._mp_prev_coin_pickup = 0     # client: last-seen p2 ground total
         self.opponent_alive = True
         self.opponent_weapon_id = DEFAULT_WEAPON_ID
         self.opponent_grenade_count = 0
@@ -1471,6 +1475,11 @@ class GameScreen(ui.StyledScreen):
                     x, y, count=10, speed=320.0, ttl=0.40,
                     size=10.0, frame="particle", rng=self._fire_rng,
                 )
+            # Rising "+N" pop at the coin (ground pickups only — progress
+            # coins from kills/gates/completion get no pop), same style as
+            # the shop purchase animation.
+            self._float_text("+{}".format(coins), (1.0, 0.90, 0.30, 1.0),
+                             cx=x, cy=y)
             ui.app().audio.play_sfx("coin")
         else:    # PICKUP_DOUBLE_COIN
             duration = entities.PickupController.DOUBLE_COIN_DURATION_SEC
@@ -2794,6 +2803,7 @@ class GameScreen(ui.StyledScreen):
                 "squad": self.opponent_squad,
                 "kills": self.opponent_kills,
                 "coins": self.opponent_coins,
+                "cpk":   self.opponent_coins_pickups,
                 "alive": self.opponent_alive,
             },
             "dist":  round(self.distance, 1),
@@ -2955,6 +2965,14 @@ class GameScreen(ui.StyledScreen):
         self.squad_count    = int(p2.get("squad", self.squad_count))
         self.kills_total    = int(p2.get("kills", self.kills_total))
         self._coins_earned  = int(p2.get("coins", self._coins_earned))
+        # Ground-coin pop for the client's own player: the host sends p2's
+        # ground-pickup running total ("cpk"); any increase = a coin the
+        # client just grabbed → pop "+N" at the client's hero.
+        cpk = int(p2.get("cpk", self._mp_prev_coin_pickup))
+        if cpk > self._mp_prev_coin_pickup and self.hero is not None:
+            self._float_text("+{}".format(cpk - self._mp_prev_coin_pickup),
+                             (1.0, 0.90, 0.30, 1.0))
+        self._mp_prev_coin_pickup = cpk
         self.opponent_squad = int(p1.get("squad", self.opponent_squad))
         self.opponent_kills = int(p1.get("kills", self.opponent_kills))
         self.opponent_coins = int(p1.get("coins", self.opponent_coins))
@@ -3372,6 +3390,9 @@ class GameScreen(ui.StyledScreen):
             if self.opponent_double_coin_until > self._run_time:
                 coins *= 2
             self.opponent_coins += coins
+            # Ground-coin tally for p2 so the client device can pop its own
+            # "+N" (the snapshot's total mixes in progress coins).
+            self.opponent_coins_pickups += coins
         else:    # PICKUP_DOUBLE_COIN
             duration = entities.PickupController.DOUBLE_COIN_DURATION_SEC
             self.opponent_double_coin_until = self._run_time + duration
