@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import random
 
+from kivy.animation import Animation
 from kivy.graphics import Color, Line, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.uix.label import Label
@@ -44,6 +45,25 @@ OP_SUB = "sub"
 OP_DIV = "div"          # divide squad by N (÷2, ÷4) — devastating at low squad
 OP_WEAPON = "weapon"
 OP_GRENADE = "grenade"
+
+# Squad-altering "math" ops vs one-off "bonus" pickups. A gate pair is drawn
+# entirely from one group: an equation/atomic-math gate always faces another
+# math gate (a real ×2-vs-+5 decision), and weapon/grenade gates form their
+# own occasional bonus pairs — never a math-gate-vs-trivial-gate non-choice.
+MATH_OPS = (OP_MUL, OP_ADD, OP_SUB, OP_DIV)
+BONUS_OPS = (OP_WEAPON, OP_GRENADE)
+
+# Leading-operator glyphs — proper math symbols read far faster than the ASCII
+# "x", "-", "/" the label strings carry. The label_text stays ASCII (synced to
+# the multiplayer client, used by gameplay logic); only the *display* is pretty.
+OP_GLYPH = {OP_MUL: "×", OP_ADD: "+", OP_SUB: "−", OP_DIV: "÷"}
+# In-expression ASCII operator -> display glyph.
+_EXPR_GLYPH = {"+": "+", "-": "−", "*": "×", "/": "÷"}
+# Operators get a single bright accent so the eye segments operands from
+# operators instantly; operands stay white.
+OP_ACCENT_HEX = "ffcf33"                       # amber, for markup
+OP_ACCENT_RGBA = (1.0, 0.81, 0.20, 1.0)        # amber, for plain Color
+_OUTLINE_RGBA = (0.0, 0.0, 0.0, 1.0)           # dark outline for legibility
 
 
 # Translucent op colors so the gate reads even against bright backgrounds.
@@ -92,23 +112,98 @@ class Gate(Widget):
             self._glow_color = Color(1, 1, 1, 0.0)
             self._glow = Line(rounded_rectangle=[0, 0, 0, 0, dp(14)], width=6.0)
 
-        # Font size scales down for longer equation labels (W4+ ops like
-        # "x((4+2-4)*1)" overflow the gate at the default sp(30)).
-        if len(label_text) <= 4:
-            label_fs = sp(30)
-        elif len(label_text) <= 7:
-            label_fs = sp(24)
-        elif len(label_text) <= 10:
-            label_fs = sp(20)
+        # Emphasis pulse fires once as the pair nears the decision zone.
+        self._emphasized = False
+
+        # Math gates render as two lines — a big operator glyph on top and
+        # the value/expression below — so "which operation" reads instantly
+        # and only the arithmetic is left to the player. Bonus gates
+        # (weapon / grenade) are not arithmetic, so they render as one
+        # centered name label.
+        self._is_math = op in MATH_OPS
+        if self._is_math:
+            self._op_label = Label(
+                text=OP_GLYPH.get(op, "?"), font_size=sp(40), bold=True,
+                color=OP_ACCENT_RGBA, halign="center", valign="middle",
+                outline_width=2, outline_color=_OUTLINE_RGBA,
+            )
+            body = self._strip_leading_op(label_text)
+            self._expr_label = Label(
+                text=self._pretty_expr(body), markup=True,
+                font_size=self._expr_font_size(body), bold=True,
+                color=(1, 1, 1, 1), halign="center", valign="middle",
+                outline_width=2, outline_color=_OUTLINE_RGBA,
+            )
+            self.add_widget(self._op_label)
+            self.add_widget(self._expr_label)
+            self._labels = [self._op_label, self._expr_label]
         else:
-            label_fs = sp(17)
-        self._label = Label(
-            text=label_text, font_size=label_fs, bold=True, color=(1, 1, 1, 1),
-            halign="center", valign="middle",
-        )
-        self.add_widget(self._label)
+            fs = sp(30) if len(label_text) <= 7 else sp(24)
+            self._name_label = Label(
+                text=label_text, font_size=fs, bold=True, color=(1, 1, 1, 1),
+                halign="center", valign="middle",
+                outline_width=2, outline_color=_OUTLINE_RGBA,
+            )
+            self.add_widget(self._name_label)
+            self._labels = [self._name_label]
         self.bind(pos=self._sync, size=self._sync)
         self._sync()
+
+    # --- display helpers -------------------------------------------------
+
+    @staticmethod
+    def _strip_leading_op(label_text: str) -> str:
+        """Drop the leading op symbol the spawner prepends ("x", "+", "-",
+        "/") so only the value/expression remains; the operator is shown
+        separately as the big top glyph."""
+        if label_text and label_text[0] in "x+-/":
+            return label_text[1:]
+        return label_text
+
+    @staticmethod
+    def _pretty_expr(body: str) -> str:
+        """Turn an ASCII expression body into spaced, glyph-and-color markup.
+
+        Strips one redundant outer paren wrap, swaps ``* / -`` for ``× ÷ −``,
+        spaces operands apart, and tints every operator amber so the eye
+        segments structure at a glance. Operands stay white (the Label's base
+        color). ``+5`` -> ``5``; ``(1+4+3)`` -> ``1 + 4 + 3``;
+        ``((4+2-4)*1)`` -> ``( 4 + 2 − 4 ) × 1``.
+        """
+        if len(body) >= 2 and body[0] == "(" and body[-1] == ")":
+            depth = 0
+            wraps = True
+            for i, ch in enumerate(body):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0 and i != len(body) - 1:
+                        wraps = False
+                        break
+            if wraps:
+                body = body[1:-1]
+        out = []
+        for ch in body:
+            if ch in _EXPR_GLYPH:
+                out.append(" [color={}][b]{}[/b][/color] ".format(
+                    OP_ACCENT_HEX, _EXPR_GLYPH[ch]))
+            elif ch in "()":
+                out.append(" {} ".format(ch))
+            else:
+                out.append(ch)
+        return " ".join("".join(out).split())
+
+    @staticmethod
+    def _expr_font_size(body: str):
+        n = len(body)
+        if n <= 2:
+            return sp(34)
+        if n <= 5:
+            return sp(30)
+        if n <= 9:
+            return sp(26)
+        return sp(22)
 
     def _sync(self, *_):
         self._bg.pos = self.pos
@@ -119,9 +214,31 @@ class Gate(Widget):
             self.x - dp(4), self.y - dp(4),
             self.width + dp(8), self.height + dp(8), dp(14),
         ]
-        self._label.pos = self.pos
-        self._label.size = self.size
-        self._label.text_size = self.size
+        if self._is_math:
+            # Operator on the top band, expression on the bottom band.
+            op_h = self.height * 0.50
+            self._op_label.pos = (self.x, self.y + self.height * 0.46)
+            self._op_label.size = (self.width, op_h)
+            self._op_label.text_size = (self.width, op_h)
+            expr_h = self.height * 0.46
+            self._expr_label.pos = (self.x, self.y + self.height * 0.02)
+            self._expr_label.size = (self.width, expr_h)
+            self._expr_label.text_size = (self.width, expr_h)
+        else:
+            self._name_label.pos = self.pos
+            self._name_label.size = self.size
+            self._name_label.text_size = self.size
+
+    def emphasize(self) -> None:
+        """One-shot attention cue as the pair enters the decision zone: a
+        gentle pulse on the primary glyph. Fires once per gate."""
+        if self._emphasized or self.consumed:
+            return
+        self._emphasized = True
+        lbl = self._op_label if self._is_math else self._name_label
+        base = lbl.font_size
+        (Animation(font_size=base * 1.18, duration=0.22, t="out_quad")
+         + Animation(font_size=base, duration=0.22, t="in_quad")).start(lbl)
 
     def mark_consumed(self, dim: bool = True) -> None:
         """Mark this gate as part of a resolved pair.
@@ -134,6 +251,8 @@ class Gate(Widget):
         if dim:
             self._color.a = 0.30      # fade so the player sees they took it
             self._border_color.a = 0.30
+            for lbl in self._labels:
+                lbl.opacity = 0.45
 
     def mark_selected(self) -> None:
         """Highlight this gate as the player's pick — bright glow + bigger
@@ -144,24 +263,12 @@ class Gate(Widget):
         self._color.a = min(1.0, OP_COLORS[self.op][3] + 0.18)
         self._border_color.rgba = (1.0, 0.92, 0.35, 1.0)
         self._glow_color.rgba = (1.0, 0.92, 0.35, 0.85)
-        # Slightly larger label so even at small panel size the picked gate
-        # reads "this one".
-        try:
-            from kivy.metrics import sp as _sp
-            # Mirror the length-based ramp from __init__ but bumped one
-            # tier so the picked gate's label stays readable.
-            text_len = len(self._label.text)
-            if text_len <= 4:
-                self._label.font_size = _sp(34)
-            elif text_len <= 7:
-                self._label.font_size = _sp(28)
-            elif text_len <= 10:
-                self._label.font_size = _sp(23)
-            else:
-                self._label.font_size = _sp(20)
-            self._label.bold = True
-        except Exception:
-            pass
+        # Cancel any in-flight emphasis pulse, then bump labels a tier so the
+        # picked gate reads "this one" even after it scrolls past.
+        for lbl in self._labels:
+            Animation.cancel_all(lbl, "font_size")
+            lbl.font_size = lbl.font_size * 1.14
+            lbl.bold = True
 
 
 # --- spawner -------------------------------------------------------------
@@ -170,7 +277,8 @@ class GateSpawner:
     """Spawns gate pairs at a fixed distance interval."""
 
     INTERVAL_PX = 600.0          # distance between pairs
-    GATE_HEIGHT = 88.0
+    GATE_HEIGHT = 112.0          # taller so the two-line op/expression layout
+                                 # and the larger type read at a glance
     GATE_GAP_PX = 64.0           # gap between the two gates so the choice
                                  # reads visually — was 24 px, which looked
                                  # like one wide panel from a distance
@@ -184,6 +292,11 @@ class GateSpawner:
     # Keeps a player who missed gates by RNG from falling into an
     # unrecoverable squad=1 spiral.
     PITY_AFTER_MISSES = 2
+    # Chance a (non-pity) pair is a weapon/grenade "bonus" pair rather than a
+    # math pair — kept low so most pairs are mental-math decisions. Bonus
+    # pairs only spawn when ≥2 distinct bonus choices are actually available
+    # (and within the grenade cap); otherwise the pair falls back to math.
+    BONUS_PAIR_CHANCE = 0.12
 
     def __init__(self, controller: "GateController", seed: int | None = None):
         self.controller = controller
@@ -232,43 +345,69 @@ class GateSpawner:
         left_x = x_min + self.LATERAL_MARGIN
         right_x = left_x + gate_w + self.GATE_GAP_PX
 
-        # Pity floor: if the player has missed the last few pairs, force at
-        # least one safe op (MUL or ADD) so they can recover.
+        # Math ops always pair with math ops (a real ×2-vs-+5 decision);
+        # weapon/grenade gates form their own occasional bonus pairs and never
+        # sit opposite a math gate.
+        math_pool = [op for op in self.allowed_ops if op in MATH_OPS]
+        if len(math_pool) < 2:
+            math_pool = [OP_MUL, OP_ADD, OP_SUB]
+
+        # Pity floor: if the player has missed the last few pairs, force a
+        # math pair with at least one safe op (MUL or ADD) so they recover.
         force_safe = self.consecutive_misses >= self.PITY_AFTER_MISSES
         if force_safe:
-            safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops]
-            if not safe_pool:
-                safe_pool = [OP_MUL, OP_ADD]   # never let pity become a no-op
-            op_a = self._rng.choice(safe_pool)
-            # Reuse the regular value-pick path by going through _pick_op
-            # with a constrained op list.
-            saved_ops = self.allowed_ops
-            self.allowed_ops = [op_a]
-            op_a, value_a, label_a = self._pick_op(exclude_op=None)
-            self.allowed_ops = saved_ops
-            # Reset the counter so we don't keep stacking pity gates.
+            safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops] \
+                or [OP_MUL, OP_ADD]
+            op_a, value_a, label_a = self._pick_op(exclude_op=None, allowed=safe_pool)
+            op_b, value_b, label_b = self._pick_op(exclude_op=op_a, allowed=math_pool)
             self.consecutive_misses = 0
         else:
-            op_a, value_a, label_a = self._pick_op(exclude_op=None)
-        op_b, value_b, label_b = self._pick_op(exclude_op=op_a)
+            bonus_pair = None
+            if self._rng.random() < self.BONUS_PAIR_CHANCE:
+                bonus_pair = self._build_bonus_pair()
+            if bonus_pair is not None:
+                (op_a, value_a, label_a), (op_b, value_b, label_b) = bonus_pair
+            else:
+                op_a, value_a, label_a = self._pick_op(exclude_op=None, allowed=math_pool)
+                op_b, value_b, label_b = self._pick_op(exclude_op=op_a, allowed=math_pool)
         self.controller.spawn_pair(
             (left_x,  y_top, gate_w, gate_h, op_a, value_a, label_a),
             (right_x, y_top, gate_w, gate_h, op_b, value_b, label_b),
         )
         return True
 
-    def _pick_op(self, exclude_op: str | None):
-        """Pick an op + value + display label. Avoids a pair with two
-        identical ops, which would be a non-choice for the player.
+    def _build_bonus_pair(self):
+        """Build two distinct weapon/grenade specs, or None if fewer than two
+        bonus choices are available (e.g. one weapon and the grenade cap hit).
+
+        Distinctness is by (op, value): weapon-vs-weapon with different ids is
+        a real "which gun" choice; weapon-vs-grenade is "gun or a grenade".
+        """
+        candidates: list[tuple] = []
+        if (OP_GRENADE in self.allowed_ops
+                and self.grenade_gates_spawned < self.max_grenade_gates):
+            candidates.append((OP_GRENADE, 1, "GRENADE x1"))
+        if OP_WEAPON in self.allowed_ops:
+            for w in (self.allowed_weapons or self.DEFAULT_WEAPONS):
+                candidates.append((OP_WEAPON, w, w.upper()))
+        if len(candidates) < 2:
+            return None
+        a, b = self._rng.sample(candidates, 2)
+        for spec in (a, b):
+            if spec[0] == OP_GRENADE:
+                self.grenade_gates_spawned += 1
+        return a, b
+
+    def _pick_op(self, exclude_op: str | None, allowed: "list[str] | None" = None):
+        """Pick an op + value + display label from ``allowed`` (defaults to
+        the spawner's full pool). Avoids repeating ``exclude_op`` so a pair is
+        always a genuine choice. Math ops get an equation label; bonus ops a
+        literal one.
 
         Reward magnitudes are intentionally tight: ×2 only (no ×3), ADD
         capped at 7, SUB up to 7, GRENADE always 1. The cumulative effect
         across many gates makes the level passable; no single gate carries
         the run.
-
-        `grenade` is hard-capped per level via `max_grenade_gates` so
-        grenades stay a rare resource. Once the cap is hit, the spawner
-        retries with grenade removed from the pool.
         """
         op_table = {
             OP_MUL:     ([2],              lambda v: "x{}".format(v)),
@@ -279,13 +418,15 @@ class GateSpawner:
                          lambda v: v.upper()),
             OP_GRENADE: ([1],              lambda v: "GRENADE x{}".format(v)),
         }
-        allowed = [op for op in self.allowed_ops if op != exclude_op and op in op_table]
-        if not allowed:
-            allowed = [op for op in self.DEFAULT_OPS if op != exclude_op]
-        # Grenade cap enforcement.
-        if self.grenade_gates_spawned >= self.max_grenade_gates and OP_GRENADE in allowed:
-            allowed = [op for op in allowed if op != OP_GRENADE] or allowed
-        op = self._rng.choice(allowed)
+        pool = allowed if allowed is not None else self.allowed_ops
+        cand = [op for op in pool if op != exclude_op and op in op_table]
+        if not cand:
+            cand = [op for op in pool if op in op_table] or [OP_MUL, OP_ADD]
+        # Grenade cap enforcement (only matters if grenade is in the pool).
+        if (self.grenade_gates_spawned >= self.max_grenade_gates
+                and OP_GRENADE in cand and len(cand) > 1):
+            cand = [op for op in cand if op != OP_GRENADE]
+        op = self._rng.choice(cand)
         values, fmt = op_table[op]
         value = self._rng.choice(values)
         if op == OP_GRENADE:
@@ -421,6 +562,8 @@ class GateController:
     """Tracks live gate pairs and runs the pass-through tick."""
 
     DESPAWN_BELOW_PX = 80.0    # pair removed once it scrolls this far past the floor
+    EMPHASIZE_LEAD = 2.0       # gate-heights above the hero at which a pair's
+                               # approach pulse fires
 
     def __init__(self, stage_widget):
         self.stage = stage_widget
@@ -457,6 +600,13 @@ class GateController:
 
             pair_consumed = any(g.consumed for g in pair)
             if not pair_consumed:
+                # Approach cue: once the pair drops within a short lead of the
+                # hero, pulse each gate's glyph so the eye lands on the choice
+                # right as it matters. emphasize() self-guards to fire once.
+                lead = pair[0].y - hero_cy
+                if -pair[0].height <= lead <= pair[0].height * self.EMPHASIZE_LEAD:
+                    for g in pair:
+                        g.emphasize()
                 # The pair's logical Y line is the bottom edge — the moment
                 # the gate panel has scrolled to the hero's row.
                 pair_line_y = pair[0].y + pair[0].height * 0.5
