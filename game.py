@@ -182,83 +182,34 @@ class _IconStyledButton(ui.StyledButton):
             self.text_size = (self.width, self.height)
         self._draw_icon()
 
+    # M14 — pre-loaded icon textures (one per icon_kind). Loaded on
+    # first use so we don't pay the CoreImage cost during app start.
+    _ICON_PATHS = {
+        "grenade": "assets/sprites/icon_grenade.png",
+        "shield":  "assets/sprites/icon_shield.png",
+    }
+
     def _draw_icon(self) -> None:
         self.canvas.after.clear()
         x, y = self.pos
         w, h = self.size
         if w <= 1 or h <= 1:
             return
-        cx = x + w * 0.5
+        path = self._ICON_PATHS.get(self.icon_kind)
+        if path is None:
+            return
+        # Position the icon in the upper portion of the button —
+        # roughly the top 60 %. Square aspect ratio.
+        side = min(w * 0.66, h * 0.55)
+        ix = x + (w - side) * 0.5
+        iy = y + h * 0.36
         with self.canvas.after:
-            if self.icon_kind == "grenade":
-                # Dark green pineapple-style body.
-                body_r = min(w * 0.22, h * 0.18)
-                body_cy = y + h * 0.66
-                Color(0.14, 0.30, 0.22, 1.0)
-                Ellipse(pos=(cx - body_r, body_cy - body_r),
-                        size=(body_r * 2, body_r * 2))
-                # Brass cap (small rectangle straddling the top of the body).
-                cap_w = body_r * 0.85
-                cap_h = body_r * 0.40
-                Color(0.55, 0.42, 0.18, 1.0)
-                Rectangle(pos=(cx - cap_w * 0.5, body_cy + body_r * 0.85),
-                          size=(cap_w, cap_h))
-                # Fuse spark — bright yellow ellipse above the cap.
-                spark_r = body_r * 0.32
-                Color(1.0, 0.88, 0.25, 1.0)
-                Ellipse(pos=(cx - spark_r, body_cy + body_r * 0.85 + cap_h),
-                        size=(spark_r * 2, spark_r * 2))
-                # Body highlight (small lighter ellipse off-centre).
-                Color(0.55, 0.75, 0.55, 0.55)
-                hl_w = body_r * 0.6
-                hl_h = body_r * 0.35
-                Ellipse(pos=(cx - body_r * 0.55, body_cy + body_r * 0.10),
-                        size=(hl_w, hl_h))
-            elif self.icon_kind == "shield":
-                # Shield silhouette — rounded rectangle taller than wide,
-                # with stronger rounding on the bottom corners to evoke
-                # the classic shield drop-shape.
-                shield_w = min(w * 0.50, h * 0.34)
-                shield_h = shield_w * 1.28
-                shield_x = cx - shield_w * 0.5
-                shield_cy = y + h * 0.60
-                shield_y = shield_cy - shield_h * 0.5
-                # Outline / drop shadow underneath.
-                Color(0.10, 0.14, 0.20, 0.55)
-                RoundedRectangle(
-                    pos=(shield_x + dp(1), shield_y - dp(1)),
-                    size=(shield_w, shield_h),
-                    radius=[
-                        (shield_w * 0.35, shield_w * 0.35),
-                        (shield_w * 0.35, shield_w * 0.35),
-                        (shield_w * 0.55, shield_w * 0.55),
-                        (shield_w * 0.55, shield_w * 0.55),
-                    ],
-                )
-                # Shield body itself.
-                Color(1.0, 1.0, 1.0, 0.96)
-                RoundedRectangle(
-                    pos=(shield_x, shield_y),
-                    size=(shield_w, shield_h),
-                    radius=[
-                        (shield_w * 0.35, shield_w * 0.35),
-                        (shield_w * 0.35, shield_w * 0.35),
-                        (shield_w * 0.55, shield_w * 0.55),
-                        (shield_w * 0.55, shield_w * 0.55),
-                    ],
-                )
-                # Horizontal accent stripe + centre dot — reads as a
-                # crest mark without needing fine line work.
-                stripe_h = shield_h * 0.10
-                Color(0.18, 0.42, 0.85, 1.0)
-                Rectangle(
-                    pos=(shield_x + shield_w * 0.10,
-                         shield_cy - stripe_h * 0.5),
-                    size=(shield_w * 0.80, stripe_h),
-                )
-                dot_r = shield_w * 0.14
-                Ellipse(pos=(cx - dot_r, shield_cy - dot_r),
-                        size=(dot_r * 2, dot_r * 2))
+            Color(1, 1, 1, 1)
+            Rectangle(
+                texture=graphics.load_texture(path),
+                pos=(ix, iy),
+                size=(side, side),
+            )
 
 
 class _StatChip(FloatLayout):
@@ -716,8 +667,13 @@ class GameScreen(ui.StyledScreen):
 
         if self.particle_renderer is not None:
             self.particle_renderer.set_tint(mix(0.50))
+        # Enemies are now per-world sprites (the atlas swaps in the
+        # world's monster art on entry), so no extra accent tint is
+        # needed — and the previous 0.85-white mix was washing the
+        # real sprites out toward white circles. Reset to identity so
+        # the actual art reads cleanly.
         if self.enemy_renderer is not None:
-            self.enemy_renderer.set_tint(mix(0.85))
+            self.enemy_renderer.set_tint((1.0, 1.0, 1.0, 1.0))
 
     def on_enter(self):
         running = ui.app()
@@ -1179,8 +1135,13 @@ class GameScreen(ui.StyledScreen):
             cx=boss_cx, cy=boss_cy,
             width=boss_w, height=boss_h,
         )
+        # M14 — pass the world's main enemy PNG as the boss sprite so
+        # the boss reads as a scaled-up version of the world's threat.
+        boss_world = getattr(self, "_atlas_world", 1)
+        boss_sprite = "assets/sprites/enemy_w{}.png".format(boss_world)
         self.boss_widget = boss_module.BossWidget(
             self.boss, self._atlas,
+            sprite_path=boss_sprite,
             size_hint=(None, None), size=(boss_w, boss_h),
         )
         self.stage.add_widget(self.boss_widget)
@@ -1823,7 +1784,13 @@ class GameScreen(ui.StyledScreen):
         running_app = ui.app()
         tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                 if running_app and running_app.state else 1)
-        weapon_label = "{}  Lv{}".format(weapon_name, tier)
+        # Tier indicator: 1-4 filled diamonds (gold) followed by 0-3
+        # empty diamonds — visual at-a-glance tier read that doesn't
+        # need the player to parse "Lv3" each time.
+        tier = max(1, min(4, tier))
+        # Bracket-style tier indicator — single line, fits the chip
+        # width regardless of font support for special Unicode glyphs.
+        weapon_label = "{} [{}/4]".format(weapon_name, tier)
 
         # Stat chips.
         if self.squad_chip is not None:
@@ -2504,7 +2471,11 @@ class GameScreen(ui.StyledScreen):
             running_app = ui.app()
             tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                     if running_app and running_app.state else 1)
-            self.weapon_chip.set_value("{}  Lv{}".format(weapon_name, tier))
+            tier = max(1, min(4, tier))
+            pips = "*" * tier + "." * (4 - tier)
+            tier = max(1, min(4, tier))
+            self.weapon_chip.set_value(
+                "{} [{}/4]".format(weapon_name, tier))
 
         # First-tick handshake: tell the host which weapon the client
         # equipped from their own shop. Host uses it as the opponent's

@@ -1,28 +1,10 @@
 {
-  "atlas_width": 128,
-  "atlas_height": 128,
+  "atlas_width": 256,
+  "atlas_height": 256,
   "frames": {
     "runner_blue": {
       "x": 0,
       "y": 0,
-      "w": 64,
-      "h": 64
-    },
-    "enemy_red": {
-      "x": 64,
-      "y": 0,
-      "w": 64,
-      "h": 64
-    },
-    "projectile": {
-      "x": 0,
-      "y": 64,
-      "w": 64,
-      "h": 64
-    },
-    "particle": {
-      "x": 64,
-      "y": 64,
       "w": 64,
       "h": 64
     },
@@ -33,38 +15,56 @@
       "h": 64
     },
     "enemy_swarmer": {
-      "x": 64,
+      "x": 128,
       "y": 0,
       "w": 64,
       "h": 64
     },
     "enemy_tank": {
-      "x": 64,
+      "x": 192,
       "y": 0,
       "w": 64,
       "h": 64
     },
     "enemy_bomber": {
-      "x": 64,
-      "y": 0,
-      "w": 64,
-      "h": 64
-    },
-    "enemy_splitter": {
-      "x": 64,
-      "y": 0,
-      "w": 64,
-      "h": 64
-    },
-    "coin": {
       "x": 0,
       "y": 64,
       "w": 64,
       "h": 64
     },
-    "double_coin": {
+    "enemy_splitter": {
       "x": 64,
       "y": 64,
+      "w": 64,
+      "h": 64
+    },
+    "projectile": {
+      "x": 128,
+      "y": 64,
+      "w": 64,
+      "h": 64
+    },
+    "particle": {
+      "x": 192,
+      "y": 64,
+      "w": 64,
+      "h": 64
+    },
+    "coin": {
+      "x": 0,
+      "y": 128,
+      "w": 64,
+      "h": 64
+    },
+    "double_coin": {
+      "x": 64,
+      "y": 128,
+      "w": 64,
+      "h": 64
+    },
+    "enemy_red": {
+      "x": 64,
+      "y": 0,
       "w": 64,
       "h": 64
     }

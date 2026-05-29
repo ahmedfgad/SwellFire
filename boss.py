@@ -234,16 +234,27 @@ class BossController:
 class BossWidget(Widget):
     """The boss's visual: scaled enemy_red sprite + white flash overlay."""
 
-    def __init__(self, boss: Boss, atlas: graphics.SpriteAtlas, **kwargs):
+    def __init__(self, boss: Boss, atlas: graphics.SpriteAtlas,
+                 sprite_path: str | None = None, **kwargs):
+        """Boss visual.
+
+        ``sprite_path`` (M14) — optional per-PNG override that bypasses
+        the atlas's ``enemy_red`` frame so the boss can use a larger,
+        more detailed sprite than the 64-px atlas frame. Falls back to
+        the atlas frame when not provided (legacy path).
+        """
         super().__init__(**kwargs)
         self.boss = boss
-        u0, v0, u1, v1 = atlas.frame("enemy_red")
         with self.canvas:
             Color(1, 1, 1, 1)
-            self._rect = Rectangle(
-                texture=atlas.texture,
-                tex_coords=(u0, v0, u1, v0, u1, v1, u0, v1),
-            )
+            if sprite_path is not None:
+                self._rect = Rectangle(texture=graphics.load_texture(sprite_path))
+            else:
+                u0, v0, u1, v1 = atlas.frame("enemy_red")
+                self._rect = Rectangle(
+                    texture=atlas.texture,
+                    tex_coords=(u0, v0, u1, v0, u1, v1, u0, v1),
+                )
             self._flash_color = Color(1, 1, 1, 0)
             self._flash_rect = Rectangle()
         self.bind(pos=self._sync, size=self._sync)

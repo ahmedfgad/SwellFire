@@ -86,135 +86,51 @@ ROW_SPACING = dp(12)
 
 
 class ShopIcon(Widget):
-    """Canvas-drawn icon per shop-item category, so each row visually
-    advertises what it is without needing atlas frames at this size."""
+    """Per-item shop icon. M14 — switched from canvas-drawn primitives
+    to real PNG sprites so the shop UI matches the in-level art.
+
+    Each ``kind`` maps to a PNG under ``assets/sprites/`` (see
+    ``_PNG_FOR_KIND``); the widget renders the texture full-bleed in
+    the centre of its bounds.
+    """
+
+    _PNG_FOR_KIND = {
+        "grenade":       "assets/sprites/icon_grenade.png",
+        "shield":        "assets/sprites/icon_shield.png",
+        "squad":         "assets/sprites/hero_blue.png",
+        "weapon_pistol": "assets/sprites/hero_blue.png",
+        "weapon_rifle":  "assets/sprites/hero_blue.png",
+        "weapon_shotgun":"assets/sprites/hero_blue.png",
+        "weapon_sniper": "assets/sprites/hero_blue.png",
+    }
 
     def __init__(self, kind: str, **kwargs):
         super().__init__(**kwargs)
         self.kind = kind
         with self.canvas:
-            self._instructions = []
+            Color(1, 1, 1, 1)
+            self._rect = Rectangle()
         self.bind(pos=self._redraw, size=self._redraw)
         self._redraw()
 
     def _redraw(self, *_):
-        self.canvas.clear()
+        path = self._PNG_FOR_KIND.get(self.kind)
+        if path is None:
+            # Unknown kind — fall back to a small grey square so the
+            # row still has a visual anchor.
+            self._rect.texture = None
+            return
+        self._rect.texture = graphics.load_texture(path)
         x, y = self.pos
         w, h = self.size
-        size = min(w, h)
-        cx = x + w / 2
-        cy = y + h / 2
-        with self.canvas:
-            kind = self.kind
-            if kind.startswith("weapon_"):
-                weapon_id = kind.split("_", 1)[1]
-                self._draw_weapon(weapon_id, cx, cy, size)
-            elif kind == "grenade":
-                self._draw_grenade(cx, cy, size)
-            elif kind == "shield":
-                self._draw_shield(cx, cy, size)
-            elif kind == "squad":
-                self._draw_squad(cx, cy, size)
-            else:
-                Color(0.5, 0.5, 0.55, 0.6)
-                Ellipse(pos=(cx - size * 0.3, cy - size * 0.3),
-                        size=(size * 0.6, size * 0.6))
+        side = min(w, h) * 0.95
+        ix = x + (w - side) * 0.5
+        iy = y + (h - side) * 0.5
+        self._rect.pos = (ix, iy)
+        self._rect.size = (side, side)
 
-    def _draw_weapon(self, weapon_id, cx, cy, size):
-        # Color-codes per weapon tier; shape suggests a barrel.
-        colors = {
-            "pistol":  (0.55, 0.55, 0.65, 1),   # grey
-            "rifle":   (0.30, 0.70, 0.40, 1),   # green
-            "shotgun": (0.95, 0.50, 0.20, 1),   # orange
-            "sniper":  (0.75, 0.35, 0.95, 1),   # purple
-        }
-        c = colors.get(weapon_id, (0.6, 0.6, 0.6, 1))
-        Color(*c)
-        # Body (rectangle)
-        RoundedRectangle(
-            pos=(cx - size * 0.36, cy - size * 0.10),
-            size=(size * 0.55, size * 0.22),
-            radius=[size * 0.05],
-        )
-        # Grip
-        RoundedRectangle(
-            pos=(cx - size * 0.28, cy - size * 0.34),
-            size=(size * 0.18, size * 0.30),
-            radius=[size * 0.04],
-        )
-        # Barrel
-        Color(0.20, 0.20, 0.24, 1)
-        Rectangle(
-            pos=(cx + size * 0.16, cy - size * 0.04),
-            size=(size * 0.22, size * 0.10),
-        )
-
-    def _draw_grenade(self, cx, cy, size):
-        # Round body in dark green, top fuse, accent stripe.
-        Color(0.18, 0.58, 0.30, 1)
-        Ellipse(
-            pos=(cx - size * 0.32, cy - size * 0.38),
-            size=(size * 0.64, size * 0.64),
-        )
-        Color(0.0, 0.0, 0.0, 0.50)
-        Rectangle(
-            pos=(cx - size * 0.28, cy + size * 0.06),
-            size=(size * 0.56, size * 0.05),
-        )
-        Color(0.45, 0.45, 0.48, 1)
-        Rectangle(
-            pos=(cx - size * 0.04, cy + size * 0.22),
-            size=(size * 0.08, size * 0.12),
-        )
-        Color(1.0, 0.85, 0.20, 1)
-        Ellipse(
-            pos=(cx - size * 0.06, cy + size * 0.30),
-            size=(size * 0.12, size * 0.10),
-        )
-
-    def _draw_shield(self, cx, cy, size):
-        # Shield silhouette in blue.
-        Color(0.30, 0.65, 1.0, 1)
-        # Shield body — wider at top, tapering at bottom.
-        from kivy.graphics import Triangle
-        # Use two triangles + ellipse to fake a shield shape.
-        Ellipse(
-            pos=(cx - size * 0.30, cy - size * 0.10),
-            size=(size * 0.60, size * 0.55),
-        )
-        Triangle(points=[
-            cx - size * 0.30, cy + size * 0.05,
-            cx + size * 0.30, cy + size * 0.05,
-            cx, cy - size * 0.42,
-        ])
-        # White cross detail.
-        Color(1, 1, 1, 0.9)
-        Rectangle(
-            pos=(cx - size * 0.04, cy - size * 0.20),
-            size=(size * 0.08, size * 0.35),
-        )
-        Rectangle(
-            pos=(cx - size * 0.18, cy + size * 0.02),
-            size=(size * 0.36, size * 0.08),
-        )
-
-    def _draw_squad(self, cx, cy, size):
-        # Stylized 3-runner grouping (small blue figures).
-        Color(0.25, 0.65, 0.95, 1)
-        for k, ofx in enumerate((-0.22, 0.0, 0.22)):
-            Ellipse(
-                pos=(cx + size * ofx - size * 0.10,
-                     cy - size * 0.05),
-                size=(size * 0.20, size * 0.32),
-            )
-            # Head
-            Color(1.0, 0.85, 0.65, 1)
-            Ellipse(
-                pos=(cx + size * ofx - size * 0.07,
-                     cy + size * 0.22),
-                size=(size * 0.14, size * 0.14),
-            )
-            Color(0.25, 0.65, 0.95, 1)
+    # M14 — old canvas-drawn icons removed; ShopIcon now uses PNG
+    # textures from assets/sprites/ via the _PNG_FOR_KIND map above.
 
 
 def _scroll_panel(*, size_hint=(0.72, 0.94),
