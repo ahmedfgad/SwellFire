@@ -73,6 +73,18 @@ class SwellfireApp(App):
         self.audio = AudioManager(asset_dir)
         self.audio.attach_state(self.state)
 
+        # Brand the window/taskbar with the Swellfire icon (Linux/Win/Mac).
+        # Use ASSET_ROOT so it resolves in a frozen build too (CLAUDE.md path
+        # gotcha); skip silently if the file is missing.
+        from kivy.core.window import Window
+        icon_path = os.path.join(ASSET_ROOT, "icon.png")
+        if os.path.exists(icon_path):
+            self.icon = icon_path
+            try:
+                Window.set_icon(icon_path)
+            except Exception:
+                pass
+
         self.sm = ScreenManager(transition=FadeTransition(duration=0.25))
         self.sm.add_widget(ui.MenuScreen(name="menu"))
         self.sm.add_widget(ui.WorldMapScreen(name="worldmap"))
