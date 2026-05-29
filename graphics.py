@@ -60,25 +60,42 @@ class SpriteAtlas:
 
         with open(json_path) as f:
             meta = json.load(f)
-        self.atlas_w = float(meta["atlas_width"])
-        self.atlas_h = float(meta["atlas_height"])
-        # name -> (u0, v0, u1, v1) where v=0 is the bottom of the texture.
+        # name -> (u0, v0, u1, v1) in the atlas texture's normalized space.
         self._frames: dict[str, tuple[float, float, float, float]] = {}
         # Pixel-space (x, y, w, h) per frame with y measured top-down,
         # as ``Texture.get_region`` expects. Used by ``frame_region`` to
         # carve out a sub-texture for AtlasSprite.
         self._frame_px: dict[str, tuple[int, int, int, int]] = {}
         self._region_cache: dict[str, "Texture"] = {}
+        self._build_frames(meta)
+
+    def _build_frames(self, meta: dict) -> None:
+        """Populate ``_frames`` / ``_frame_px`` from a parsed atlas JSON.
+
+        ``_frames`` maps a name to ``(u0, v0, u1, v1)`` where ``v0`` is the v
+        the renderer puts on the sprite's bottom edge and ``v1`` on the top.
+
+        These atlases load with PIL row 0 at GL ``v=0`` — i.e. **no** vertical
+        flip (verified by reading back ``Texture.pixels``: the frames packed at
+        PIL ``y=0`` light up at GL ``v∈[0, h/H]``, while sampling ``v=1-…``
+        hits the empty top of the texture). The original loader, and Kivy's own
+        ``get_region``, both assume the flipped layout, so against the 256×256
+        atlases every top-packed frame (enemies, squad runner, projectiles,
+        particles) sampled transparent pixels and drew nothing. We therefore
+        map directly: a frame at PIL ``(x, y, w, h)`` occupies GL
+        ``v∈[y/H, (y+h)/H]``. To keep the sprite upright the renderer's top
+        edge (``v1``) takes the smaller v (PIL-top) and the bottom edge
+        (``v0``) the larger v (PIL-bottom).
+        """
+        self.atlas_w = float(meta["atlas_width"])
+        self.atlas_h = float(meta["atlas_height"])
         for name, rect in meta["frames"].items():
-            x = float(rect["x"])
-            y = float(rect["y"])
-            w = float(rect["w"])
-            h = float(rect["h"])
+            x = float(rect["x"]); y = float(rect["y"])
+            w = float(rect["w"]); h = float(rect["h"])
             u0 = x / self.atlas_w
             u1 = (x + w) / self.atlas_w
-            # Flip y axis from PIL (top-left) to GL (bottom-left).
-            v0 = 1.0 - (y + h) / self.atlas_h
-            v1 = 1.0 - y / self.atlas_h
+            v0 = (y + h) / self.atlas_h
+            v1 = y / self.atlas_h
             self._frames[name] = (u0, v0, u1, v1)
             self._frame_px[name] = (int(x), int(y), int(w), int(h))
 
@@ -94,21 +111,10 @@ class SpriteAtlas:
         self.texture.mag_filter = "nearest"
         with open(json_path) as f:
             meta = json.load(f)
-        self.atlas_w = float(meta["atlas_width"])
-        self.atlas_h = float(meta["atlas_height"])
         self._frames = {}
         self._frame_px = {}
         self._region_cache = {}
-        for name, rect in meta["frames"].items():
-            x = float(rect["x"]); y = float(rect["y"])
-            w = float(rect["w"]); h = float(rect["h"])
-            self._frames[name] = (
-                x / self.atlas_w,
-                1.0 - (y + h) / self.atlas_h,
-                (x + w) / self.atlas_w,
-                1.0 - y / self.atlas_h,
-            )
-            self._frame_px[name] = (int(x), int(y), int(w), int(h))
+        self._build_frames(meta)
 
     def frame(self, name: str) -> tuple[float, float, float, float]:
         return self._frames[name]

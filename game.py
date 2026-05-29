@@ -794,23 +794,6 @@ class GameScreen(ui.StyledScreen):
                 self.squad_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
             )
             self.stage.add_widget(self.squad_renderer)
-            # M14 — BatchedRenderer silently dropped the squad mesh draws
-            # on this Kivy version (data + UVs verified correct, but
-            # nothing reached the screen). Fall back to a pool of
-            # TextureSprite widgets that we show/hide and reposition
-            # from the formation each frame. Hero / boss / opponent
-            # already use TextureSprite, so the path is proven.
-            self.squad_sprites: list[graphics.TextureSprite] = []
-            for _ in range(MAX_SQUAD - 1):
-                sprite = graphics.TextureSprite(
-                    HERO_SPRITE_PATH,
-                    size_hint=(None, None),
-                    size=(entities.SquadController.RUNNER_W,
-                          entities.SquadController.RUNNER_H),
-                )
-                sprite.opacity = 0   # hidden until formation populates
-                self.stage.add_widget(sprite)
-                self.squad_sprites.append(sprite)
 
         # M13 — opponent's squad followers. Same pool size + the same
         # SquadController formation, but the renderer carries a red
@@ -1010,13 +993,6 @@ class GameScreen(ui.StyledScreen):
         self.squad_pool = None
         self.squad_controller = None
         self.squad_renderer = None
-        # M14 — squad TextureSprite fallback widgets. Detach from stage
-        # so a retry starts with a clean slate; without this the last
-        # run's soldier formation would persist behind the new hero.
-        for sprite in getattr(self, "squad_sprites", []) or []:
-            if sprite.parent:
-                sprite.parent.remove_widget(sprite)
-        self.squad_sprites = []
         self.opponent_squad_pool = None
         self.opponent_squad_controller = None
         self.opponent_squad_renderer = None
@@ -1575,25 +1551,10 @@ class GameScreen(ui.StyledScreen):
             self.squad_controller.update_formation(
                 self.hero.center_x, self.hero.center_y,
             )
-            # M14 — drive the visible squad sprites from the pool
-            # state. Pool entries (cx, cy, hw, hh) are the source of
-            # truth; the sprites just mirror them. opacity is the
-            # cheapest show/hide knob.
-            if getattr(self, "squad_sprites", None):
-                pool = self.squad_pool
-                sprite_i = 0
-                for i in range(pool.capacity):
-                    if not pool.active[i]:
-                        continue
-                    if sprite_i >= len(self.squad_sprites):
-                        break
-                    s = self.squad_sprites[sprite_i]
-                    s.center_x = pool.cx[i]
-                    s.center_y = pool.cy[i]
-                    s.opacity = 1.0
-                    sprite_i += 1
-                for k in range(sprite_i, len(self.squad_sprites)):
-                    self.squad_sprites[k].opacity = 0
+            # The squad renders through ``squad_renderer`` (BatchedRenderer)
+            # in a single mesh draw — the pool's (cx, cy, hw, hh) are the
+            # source of truth and ``squad_renderer.rebuild()`` picks them up
+            # each frame.
         # M13 — also drive opponent's squad on the host so the player can
         # see the other crowd grow / shrink as the opponent picks gates.
         if (role == "host"
