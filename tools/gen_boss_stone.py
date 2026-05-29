@@ -32,12 +32,13 @@ WORLDS = range(1, 7)
 # Pull the luminance toward a cool stone grey rather than pure neutral, and
 # compress the range a touch so the dead part reads as flat/lifeless next to
 # the living, saturated body.
-# Light, cool, fairly flat grey so the petrified part reads as a pale stone
-# statue that clearly contrasts the vivid living half — visibility is the
-# whole point of the effect, so we bias bright and low-contrast.
-STONE_TINT = (0.82, 0.85, 0.93)   # cool grey multiplier
-STONE_FLOOR = 0.50                # darkest the stone gets (0..1)
-STONE_CEIL = 0.96                 # brightest the stone gets (0..1)
+# TRUE neutral grey (R=G=B, no hue) in a fairly dark, compressed band. The
+# point of the effect is unmistakable visibility: a desaturated-but-tinted
+# grey of similar brightness still reads as "colored", so we strip hue
+# entirely and bias dark, giving a stark stone-statue that clearly contrasts
+# the vivid living half. Only `lum` modulates the value (kept for form).
+STONE_FLOOR = 0.34                # darkest the stone gets (0..1)
+STONE_CEIL = 0.52                 # brightest the stone gets (0..1)
 
 
 def _to_stone(img: Image.Image) -> Image.Image:
@@ -52,15 +53,11 @@ def _to_stone(img: Image.Image) -> Image.Image:
             r, g, b, a = px[x, y]
             if a == 0:
                 continue  # keep the silhouette's transparent pixels
-            # Rec.601 luminance, then compress into [FLOOR, CEIL].
+            # Rec.601 luminance, compressed into [FLOOR, CEIL], emitted as a
+            # neutral grey (R=G=B) — no hue at all.
             lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
-            lum = STONE_FLOOR + lum * span
-            opx[x, y] = (
-                int(max(0, min(255, lum * STONE_TINT[0] * 255))),
-                int(max(0, min(255, lum * STONE_TINT[1] * 255))),
-                int(max(0, min(255, lum * STONE_TINT[2] * 255))),
-                a,
-            )
+            v = int(max(0, min(255, (STONE_FLOOR + lum * span) * 255)))
+            opx[x, y] = (v, v, v, a)
     return out
 
 
