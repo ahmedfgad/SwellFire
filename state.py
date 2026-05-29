@@ -10,6 +10,10 @@ import os
 DEFAULT_SETTINGS = {
     "music_on": True,
     "sfx_on": True,
+    # Stats HUD (squad/weapon/kills/coins + distance bar). Off by default so
+    # the top band never covers gameplay (notably the boss); the player can
+    # turn it on in Settings.
+    "show_stats": False,
     "volume": 1.0,            # 0.0 to 1.0
     "ga_style": "balanced",   # auto player: cautious | balanced | aggressive
     "ga_speed": "normal",     # auto player: slow | normal | fast

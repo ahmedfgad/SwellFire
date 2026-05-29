@@ -385,6 +385,7 @@ class GameScreen(ui.StyledScreen):
         self.kills_chip = None
         self.coins_chip = None
         self.top_bar = None
+        self.chip_row = None
         self.dist_bar_holder = None
         self._top_bar_rect = None
         self._dist_bg_rect = None
@@ -1028,6 +1029,11 @@ class GameScreen(ui.StyledScreen):
             tint_world = 1
         self._apply_world_tint(tint_world)
 
+        # Stats HUD visibility (Settings toggle; also hides the distance bar
+        # on boss levels). Done after the level config is applied so the
+        # boss-level check is accurate.
+        self._apply_stats_visibility()
+
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
         Clock.schedule_once(self._reset, 0)
@@ -1274,18 +1280,25 @@ class GameScreen(ui.StyledScreen):
         boss_h = 160.0
         boss_cx = sx + sw * 0.5
         boss_cy = sy + sh * 0.82
-        # Time-scaled HP: a maxed squad (≥ MAX_SHOOTERS_PER_SHOT) firing the
-        # boss's reference weapon at its current tier takes ~BOSS_TARGET_SECONDS
-        # to deplete this. Floored by the sim-tuned cfg value so a weak build
-        # never gets a trivially short boss.
+        # Time-scaled HP: sized to the firepower the player ACTUALLY brings to
+        # the fight — the boss-level starting squad firing the reference weapon
+        # at its current tier — so the fight lasts ~BOSS_TARGET_SECONDS.
+        #
+        # NOTE: the squad now targets the boss directly (see the fire loop), so
+        # this DPS estimate is what really lands. The earlier formula used the
+        # squad *cap* (22) as the reference, which — combined with the squad
+        # only targeting minions — made the boss take ~80s × (cap/actual) ≈
+        # many minutes and effectively unwinnable. Use the real spawn squad.
         running = ui.app()
-        ref_weapon = weapons.get(cfg.get("starting_weapon", DEFAULT_WEAPON_ID))
-        tier = (running.state.get_weapon_tier(cfg.get("starting_weapon",
-                DEFAULT_WEAPON_ID)) if running and running.state else 1)
-        ref_dps = (MAX_SHOOTERS_PER_SHOT * ref_weapon.fire_rate
+        wid = cfg.get("starting_weapon", DEFAULT_WEAPON_ID)
+        ref_weapon = weapons.get(wid)
+        tier = (running.state.get_weapon_tier(wid)
+                if running and running.state else 1)
+        ref_squad = max(1, min(MAX_SHOOTERS_PER_SHOT,
+                               int(cfg.get("starting_squad", 1))))
+        ref_dps = (ref_squad * ref_weapon.fire_rate
                    * weapons.tier_damage(ref_weapon, tier))
-        boss_hp = max(int(cfg.get("boss_hp", 100)),
-                      int(round(BOSS_TARGET_SECONDS * ref_dps)))
+        boss_hp = max(600, int(round(BOSS_TARGET_SECONDS * ref_dps)))
         self.boss = boss_module.Boss(
             max_hp=boss_hp,
             cx=boss_cx, cy=boss_cy,
@@ -1752,13 +1765,22 @@ class GameScreen(ui.StyledScreen):
             weapon = weapons.get(self.current_weapon_id)
             self._fire_cooldown -= dt
             if self._fire_cooldown <= 0.0:
-                target = entities.find_nearest_enemy(
-                    self.hero.center_x, self.hero.center_y, self.enemy_controller,
-                )
-                if target >= 0:
-                    ep = self.enemy_pool
-                    target_x = ep.cx[target]
-                    target_y = ep.cy[target]
+                # On boss levels aim at the boss itself so squad fire actually
+                # depletes it (shots travel up, clearing minions in the column
+                # on the way); otherwise aim at the most urgent minion.
+                if self.boss is not None and self.boss.alive:
+                    target_x, target_y, has_target = self.boss.cx, self.boss.cy, True
+                else:
+                    _ti = entities.find_nearest_enemy(
+                        self.hero.center_x, self.hero.center_y, self.enemy_controller,
+                    )
+                    if _ti >= 0:
+                        target_x = self.enemy_pool.cx[_ti]
+                        target_y = self.enemy_pool.cy[_ti]
+                        has_target = True
+                    else:
+                        has_target = False
+                if has_target:
                     # Shooter positions: hero muzzle + every active follower's muzzle.
                     hero_muzzle = (self.hero.center_x, self.hero.center_y + MUZZLE_OFFSET_Y)
                     positions = [hero_muzzle]
@@ -3370,6 +3392,26 @@ class GameScreen(ui.StyledScreen):
             return
         self._top_bar_rect.pos = self.top_bar.pos
         self._top_bar_rect.size = self.top_bar.size
+
+    def _apply_stats_visibility(self) -> None:
+        """Show/hide the top statistics HUD per the Settings toggle (off by
+        default so the band never covers gameplay / the boss). The boss HP
+        bar and booster HUD are separate and stay visible. The distance bar
+        is additionally hidden on boss levels — there the boss HP bar is the
+        real progress and a filling distance bar is misleading."""
+        running = ui.app()
+        show = bool(running.state.get_setting("show_stats")) \
+            if (running and running.state) else False
+        is_boss = bool(self.level_config and self.level_config.get("boss"))
+        # Only opacity is toggled (no `disabled`): these hold Labels that
+        # never grab touches, so a hidden band must not swallow the drag that
+        # steers the squad.
+        if self.top_bar is not None:
+            self.top_bar.opacity = 1.0 if show else 0.0
+        if self.chip_row is not None:
+            self.chip_row.opacity = 1.0 if show else 0.0
+        if self.dist_bar_holder is not None:
+            self.dist_bar_holder.opacity = 0.0 if (is_boss or not show) else 1.0
 
     def _sync_dist_bar(self) -> None:
         """Position the distance progress bar within the top bar.

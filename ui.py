@@ -1622,6 +1622,10 @@ class SettingsScreen(StyledScreen):
         self.sfx_btn.bind(on_release=lambda *_: self._toggle("sfx_on"))
         box.add_widget(self.sfx_btn)
 
+        self.stats_btn = StyledButton(size_hint_y=None, height=BTN_HEIGHT)
+        self.stats_btn.bind(on_release=lambda *_: self._toggle("show_stats"))
+        box.add_widget(self.stats_btn)
+
         vol_row = BoxLayout(orientation="horizontal", spacing=dp(10),
                             size_hint_y=None, height=BTN_HEIGHT)
         vol_row.add_widget(Label(text="Volume", font_size=sp(18),
@@ -1667,6 +1671,9 @@ class SettingsScreen(StyledScreen):
         on = running.state.get_setting("sfx_on")
         self.sfx_btn.text = "Sound effects: {}".format("On" if on else "Off")
         self.sfx_btn.bg = [0.2, 0.7, 0.4, 1] if on else [0.5, 0.5, 0.55, 1]
+        on = running.state.get_setting("show_stats")
+        self.stats_btn.text = "Stats bar: {}".format("On" if on else "Off")
+        self.stats_btn.bg = [0.2, 0.7, 0.4, 1] if on else [0.5, 0.5, 0.55, 1]
 
     def _toggle(self, key):
         running = app()
