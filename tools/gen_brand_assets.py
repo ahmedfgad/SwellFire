@@ -23,38 +23,47 @@ MEDIA = os.path.join(ROOT, "swellfire_media")
 def make_icon():
     size = 512
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    # Rounded-square ember background.
-    bg = bk.vertical_gradient((size, size), bk.EMBER["red"], bk.EMBER["ember_black"])
+    # Rounded-square teal background (bright bottom so the dark squad pops).
+    bg = bk.vertical_gradient((size, size), bk.BG_TOP, bk.BG_BOTTOM)
     bg = bg.convert("RGBA")
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1),
                                            radius=int(size * 0.22), fill=255)
     img.paste(bg, (0, 0), mask)
-    # Glyph centered.
-    bk.draw_logo_glyph(img, (int(size * 0.16), int(size * 0.10),
-                             int(size * 0.84), int(size * 0.90)))
+    # Real-sprite battle scene (tight 3-soldier squad reads at icon size).
+    bk.draw_logo_glyph(img, (int(size * 0.06), int(size * 0.05),
+                             int(size * 0.94), int(size * 0.95)),
+                       squad_n=3)
     return img
 
 
 def make_presplash():
     w, h = 1920, 1080
-    img = bk.vertical_gradient((w, h), bk.EMBER["blood"], bk.EMBER["ember_black"]).convert("RGBA")
-    glow = bk.radial_glow((w, h), (w // 2, int(h * 0.42)), int(h * 0.5),
-                          bk.EMBER["orange"], max_alpha=120)
+    img = bk.vertical_gradient((w, h), bk.BG_TOP, bk.BG_BOTTOM).convert("RGBA")
+    # Subtle warm glow only behind the action band (don't wash the teal).
+    glow = bk.radial_glow((w, h), (w // 2, int(h * 0.36)), int(h * 0.30),
+                          bk.EMBER["orange"], max_alpha=70)
     img.alpha_composite(glow)
-    # Glyph above center.
-    gh = int(h * 0.52)
-    gw = gh
-    gx = (w - gw) // 2
-    bk.draw_logo_glyph(img, (gx, int(h * 0.06), gx + gw, int(h * 0.06) + gh))
+    # Core-loop scene (squad fires up through a ×2 gate at an enemy) up top.
+    scene_h = int(h * 0.64)
+    scene_w = int(scene_h * 0.82)
+    sx = (w - scene_w) // 2
+    bk.draw_logo_glyph(img, (sx, int(h * 0.02), sx + scene_w, int(h * 0.02) + scene_h),
+                       squad_n=6)
     # Wordmark + tagline below.
     d = ImageDraw.Draw(img)
     wm_font = bk.load_font(int(h * 0.11))
     wm_w = d.textlength("Swellfire", font=wm_font)
-    bk.draw_wordmark(d, ((w - wm_w) / 2, int(h * 0.74)), wm_font, anchor="lm")
+    wm_x, wm_y = (w - wm_w) / 2, int(h * 0.74)
+    # drop shadow for legibility on the bright teal
+    d.text((wm_x + 4, wm_y + 4), "Swellfire", font=wm_font,
+           fill=(4, 20, 24, 200), anchor="lm")
+    bk.draw_wordmark(d, (wm_x, wm_y), wm_font, anchor="lm")
     tag_font = bk.load_font(int(h * 0.040))
+    d.text((w / 2 + 2, int(h * 0.86) + 2), "Grow your squad. Open fire.",
+           font=tag_font, fill=(4, 20, 24, 200), anchor="mm")
     d.text((w / 2, int(h * 0.86)), "Grow your squad. Open fire.",
-           font=tag_font, fill=bk.EMBER["cream"], anchor="mm")
+           font=tag_font, fill=bk.EMBER["white"], anchor="mm")
     return img
 
 
