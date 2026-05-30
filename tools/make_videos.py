@@ -1,0 +1,117 @@
+"""Build Swellfire's videos (portrait, the game is portrait).
+
+  long  -> swellfire_autoplay_1080p.mp4   (2 levels per world, autoplayer-driven)
+
+Captures gameplay at 540x960 (fast under the Xvfb software-GL display) and
+ffmpeg-upscales to 1080x1920; rebuilds each segment's soundtrack from the game's
+OWN wav files via tools/mix_audio; frames an intro/outro logo card. Heavy:
+captures thousands of frames. Run: `venv/bin/python tools/make_videos.py long`
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import wave
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import numpy as np
+
+from tools import capture_run, mix_audio, video_core, title_cards
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+MEDIA = os.path.join(ROOT, "swellfire_media")
+WORK = os.path.join(ROOT, "build", "video_work")
+MUSIC_DIR = os.path.join(ROOT, "assets", "music")
+SFX_DIR = os.path.join(ROOT, "assets", "sfx")
+
+FPS = 30
+CAP = "540x960"          # capture size (fast); upscaled on encode
+OUT_SIZE = (1080, 1920)  # portrait 1080p
+
+WORLD_NAMES = {1: "Meadow", 2: "Desert", 3: "Industrial",
+               4: "Snowfield", 5: "Volcano", 6: "Cosmos"}
+
+
+def _segments():
+    """Two regular levels per world (autoplayer plays these well; bosses wipe
+    the small starting squad too fast to film). (label, level, warmup, frames)."""
+    segs = []
+    for wi in range(1, 7):
+        base = (wi - 1) * 10
+        for ln in (base + 2, base + 4):
+            in_world = ln - base
+            label = "World {} · {} — Level {}".format(wi, WORLD_NAMES[wi], in_world)
+            segs.append((label, ln, 60, 150))   # 60-frame warmup, 5s @30fps
+    return segs
+
+
+def _silence(path, seconds):
+    with wave.open(path, "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(np.zeros(int(44100 * seconds), np.int16).tobytes())
+
+
+def _capture_segment(level, warmup, frames, framedir, audio_json):
+    args = ["--level", level, "--out", framedir, "--audio", audio_json,
+            "--size", CAP, "--fps", FPS, "--warmup", warmup, "--frames", frames]
+    subprocess.run(capture_run.capture_cmd(args), cwd=ROOT,
+                   env=capture_run.capture_env(), check=True, timeout=900)
+
+
+def _card_clip(work, name, seconds, caption, out_mp4):
+    cdir = os.path.join(work, name)
+    n = title_cards.card_frames(cdir, seconds, FPS, OUT_SIZE, caption=caption)
+    sil = os.path.join(work, name + ".wav")
+    _silence(sil, n / FPS)
+    video_core.encode_clip(cdir, sil, out_mp4, fps=FPS, size=OUT_SIZE)
+    shutil.rmtree(cdir, ignore_errors=True)
+
+
+def build_long():
+    os.makedirs(MEDIA, exist_ok=True)
+    if os.path.isdir(WORK):
+        shutil.rmtree(WORK, ignore_errors=True)
+    os.makedirs(WORK, exist_ok=True)
+    clips = []
+
+    intro = os.path.join(WORK, "00_intro.mp4")
+    _card_clip(WORK, "intro", 2.5, "Grow your squad. Open fire.", intro)
+    clips.append(intro)
+
+    for i, (label, level, warmup, frames) in enumerate(_segments()):
+        framedir = os.path.join(WORK, "f%02d" % i)
+        audio_json = os.path.join(WORK, "a%02d.json" % i)
+        print("capturing segment %d/%d: %s" % (i + 1, len(_segments()), label))
+        _capture_segment(level, warmup, frames, framedir, audio_json)
+        for fn in sorted(os.listdir(framedir)):
+            title_cards.overlay_lower_third(os.path.join(framedir, fn), label)
+        wav = os.path.join(WORK, "a%02d.wav" % i)
+        mix_audio.build_mix(audio_json, frames / FPS, wav, MUSIC_DIR, SFX_DIR)
+        seg_mp4 = os.path.join(WORK, "seg%02d.mp4" % i)
+        video_core.encode_clip(framedir, wav, seg_mp4, fps=FPS, size=OUT_SIZE)
+        clips.append(seg_mp4)
+        shutil.rmtree(framedir, ignore_errors=True)
+
+    outro = os.path.join(WORK, "zz_outro.mp4")
+    _card_clip(WORK, "outro", 3.0, "60 levels · 6 worlds · 2-player versus", outro)
+    clips.append(outro)
+
+    out = os.path.join(MEDIA, "swellfire_autoplay_1080p.mp4")
+    video_core.concat_clips(clips, out)
+    print("wrote", out)
+    return out
+
+
+def main(argv=None):
+    argv = argv or sys.argv[1:]
+    which = argv[0] if argv else "long"
+    if which in ("long", "all"):
+        build_long()
+
+
+if __name__ == "__main__":
+    main()

@@ -44,6 +44,8 @@ def _build_argparser():
     ap.add_argument("--out", default=None, help="frames dir for a sequence")
     ap.add_argument("--audio", default=None, help="audio-event JSON output path")
     ap.add_argument("--size", default="1920x1080")
+    ap.add_argument("--fps", type=int, default=60,
+                    help="fixed sim/capture frame rate (lower = fewer frames)")
     ap.add_argument("--win", action="store_true",
                     help="(level mode) drive the squad to the distance goal so "
                          "the level-complete + stars dialog fires, then capture it")
@@ -79,7 +81,7 @@ def main(argv=None):
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
              "settle": 0, "ready": False, "won_triggered": False,
              "modal_settle": 0, "modal_seen": False}
-    DT = 1.0 / 60.0
+    DT = 1.0 / float(args.fps)
     # The Xwayland/SDL2 window ignores Config width/height and opens at 800x600;
     # we force Window.size after build, but the resize is not always honoured by
     # the first rendered frame, so we let a few Clock frames pass (and re-assert
@@ -241,7 +243,7 @@ def main(argv=None):
         if args.audio is not None:
             os.makedirs(os.path.dirname(args.audio) or ".", exist_ok=True)
             with open(args.audio, "w") as f:
-                json.dump({"fps": 60, "events": app.audio.capture_log or []}, f)
+                json.dump({"fps": args.fps, "events": app.audio.capture_log or []}, f)
         state["done"] = True
         app.stop()
 
