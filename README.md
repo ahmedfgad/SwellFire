@@ -58,7 +58,7 @@ Each milestone leaves a runnable desktop build:
 | M12 | — | Autoplay GA (ported from CoinTex) |
 | M13 | — | Networked versus (both runners visible on each device) |
 | M14 | — | Asset pass: AI-generated character sprites + CC0 UI/particles |
-| M15 | — | Full build verification on every platform |
+| M15 | ✅ done | CI builds on every platform (desktop matrix, Android, iOS) + tag-triggered release |
 
 ## Run from source
 
@@ -121,7 +121,7 @@ On Windows, run it inside Git Bash or MSYS2 to get `dist\Swellfire.exe`. On Linu
 | `tools/` | Scripts for atlas packing, AI sprite generation, and difficulty validation. |
 | `PlayerGA/` | Research version of the auto-player that searches with PyGAD. *(M12)* |
 | `buildozer.spec`, `build_android.sh`, `build_desktop.sh`, `build_ios.sh`, `setup_venv.sh` | Build & packaging — ported from CoinTex. |
-| `.github/workflows/ios-build.yml`, `desktop-ci.yml` | GitHub Actions for iOS + desktop sanity. |
+| `.github/workflows/` | GitHub Actions: `desktop-ci.yml` (per-push smoke), `desktop-build.yml` / `android-build.yml` / `ios-build.yml` (per-platform builds), `release.yml` (tag → all-platform GitHub Release). See `docs/CI.md`. |
 
 ## Media
 

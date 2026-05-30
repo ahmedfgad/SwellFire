@@ -14,15 +14,16 @@
 # Signing is done later, either by the sideload tools or in Xcode. A paid Apple
 # Developer account is only needed for the App Store, not for this build.
 #
-# Run it from the Actions tab with "Run workflow", or by pushing a tag like v1.0.
+# Run it from the Actions tab with "Run workflow". It is also called by
+# release.yml when a version tag like v1.0 is pushed, so the tag trigger lives
+# there (in one place) rather than here — that keeps iOS from building twice on
+# a tag and bundles its artifacts into the GitHub Release with every platform.
 
 name: Build iOS app
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
 
 concurrency:
   group: ios-build-${{ github.ref }}
