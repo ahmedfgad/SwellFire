@@ -1,4 +1,4 @@
-"""Capture the 8 Google Play phone screenshots (1280x720) via tools/capture.py.
+"""Capture the 8 Google Play phone screenshots (720x1280 portrait) via tools/capture.py.
 
 Scenes (mirroring CoinTex's set): title, world map, level select, gameplay
 (gates swelling the squad), boss fight, level-complete + stars, shop, guide.
@@ -10,9 +10,13 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from tools import capture_run
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MEDIA = os.path.join(ROOT, "swellfire_media")
-SIZE = "1280x720"
+SIZE = "720x1280"   # portrait (the game is portrait: 540x960 logical)
 
 # (filename, kind, value, warmup-frames, frames, win)
 #   kind "screen" -> meta screen name; kind "level" -> level index (gameplay)
@@ -31,7 +35,7 @@ SHOTS = [
     ("03_levelselect.png", "screen", "levelselect", 25,   30,   False),
     ("04_gameplay.png",    "level",  "4",           220,  240,  False),  # gates + squad
     ("05_boss.png",        "level",  "10",          25,   40,   False),  # world-1 boss
-    ("06_win_stars.png",   "level",  "1",           600,  5000, True),   # win + stars
+    ("06_win_stars.png",   "level",  "1",           300,  1200, True),   # win + stars
     ("07_shop.png",        "screen", "shop",        25,   30,   False),
     ("08_guide.png",       "screen", "guide",       25,   30,   False),
 ]
@@ -42,18 +46,16 @@ def main():
     for fname, kind, val, warmup, frames, win in SHOTS:
         out = os.path.join(MEDIA, fname)
         if kind == "screen":
-            cmd = [sys.executable, "tools/capture.py", "--screen", val,
-                   "--shot", out, "--size", SIZE, "--warmup", str(warmup),
-                   "--frames", str(frames)]
+            cap_args = ["--screen", val, "--shot", out, "--size", SIZE,
+                        "--warmup", warmup, "--frames", frames]
         else:
-            cmd = [sys.executable, "tools/capture.py", "--level", val,
-                   "--shot", out, "--size", SIZE, "--warmup", str(warmup),
-                   "--frames", str(frames)]
+            cap_args = ["--level", val, "--shot", out, "--size", SIZE,
+                        "--warmup", warmup, "--frames", frames]
             if win:
-                cmd.append("--win")
-        env = dict(os.environ, SDL_AUDIODRIVER="dummy")
+                cap_args.append("--win")
         print("capturing", fname)
-        subprocess.run(cmd, cwd=ROOT, env=env, check=True, timeout=600)
+        subprocess.run(capture_run.capture_cmd(cap_args), cwd=ROOT,
+                       env=capture_run.capture_env(), check=True, timeout=900)
     print("8 phone screenshots written to", MEDIA)
 
 

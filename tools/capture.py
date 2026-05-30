@@ -61,10 +61,17 @@ def main(argv=None):
     from kivy.config import Config
     Config.set("graphics", "width", str(w))
     Config.set("graphics", "height", str(h))
+    Config.set("graphics", "resizable", "1")
+    # Create the Kivy Window NOW, at our (screen-fitting) capture size, BEFORE
+    # importing main.py. main sets Config to the portrait game size (540x960) at
+    # import time and one of its submodules creates the Window; on a display
+    # shorter than 960px that window can't be created (SDL resize_window error).
+    # Kivy's Window is a singleton, so creating it here first pins our size and
+    # main's import-time Config is ignored. Callers must keep --size on-screen.
+    from kivy.core.window import Window
 
     import main as appmod
     from kivy.clock import Clock
-    from kivy.core.window import Window
     from tools.capture_core import grab_frame
     import autoplay
 

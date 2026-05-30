@@ -11,4 +11,4 @@ def test_upscales_all_to_1080p():
     out = sorted(glob.glob(os.path.join(ROOT, "swellfire_media", "tablet_screenshots", "0*_*.png")))
     assert len(out) == 8
     for p in out:
-        assert Image.open(p).size == (1920, 1080)
+        assert Image.open(p).size == (1080, 1920)

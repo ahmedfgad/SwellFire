@@ -1,5 +1,5 @@
-"""Upscale the 8 phone screenshots (1280x720) to tablet size (1920x1080) with
-LANCZOS — same approach as CoinTex. Run: `venv/bin/python tools/upscale_screenshots.py`
+"""Upscale the 8 phone screenshots (720x1280 portrait) to tablet size
+(1080x1920) with LANCZOS. Run: `venv/bin/python tools/upscale_screenshots.py`
 """
 
 import glob
@@ -10,7 +10,7 @@ from PIL import Image
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SRC = os.path.join(ROOT, "swellfire_media")
 DST = os.path.join(SRC, "tablet_screenshots")
-TARGET = (1920, 1080)
+TARGET = (1080, 1920)   # portrait 9:16
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     for p in srcs:
         im = Image.open(p).convert("RGB")
         w, h = im.size
-        assert abs(w / h - 16 / 9) < 1e-3, "{} is not 16:9".format(p)
+        assert abs(w / h - 9 / 16) < 1e-3, "{} is not 9:16 portrait".format(p)
         im.resize(TARGET, Image.LANCZOS).save(
             os.path.join(DST, os.path.basename(p)), optimize=True)
     print("wrote", len(srcs), "tablet screenshots to", DST)
