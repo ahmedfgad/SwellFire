@@ -679,25 +679,26 @@ class MenuScreen(StyledScreen):
     theme_world = 6
 
     def build(self):
-        scroll, box = _scroll_panel(size_hint=(0.7, 0.94))
-        box.add_widget(Label(text="Swellfire", font_size=sp(48), bold=True,
-                             color=[1, 0.85, 0.2, 1],
-                             size_hint_y=None, height=TITLE_HEIGHT))
+        # A vertically-centered column that fills most of the window height so
+        # the menu always covers the screen (no dead band below the buttons).
+        # Children use proportional heights, so the title + buttons scale with
+        # the window; the column height is capped so buttons stay sensible on
+        # very tall monitors, where it becomes a large centered block instead.
+        content = BoxLayout(
+            orientation="vertical", spacing=dp(12),
+            size_hint=(0.82, None),
+            pos_hint={"center_x": 0.5, "center_y": 0.5},
+        )
+        content.add_widget(Label(text="Swellfire", font_size=sp(48), bold=True,
+                                 color=[1, 0.85, 0.2, 1], size_hint_y=0.16))
 
-        play = StyledButton(text="Play", bg=[0.2, 0.7, 0.4, 1],
-                            size_hint_y=None, height=BTN_HEIGHT)
-        shop_btn = StyledButton(text="Shop", bg=[1.0, 0.65, 0.20, 1],
-                                size_hint_y=None, height=BTN_HEIGHT)
-        multiplayer = StyledButton(text="Multiplayer", bg=[0.55, 0.4, 0.8, 1],
-                                   size_hint_y=None, height=BTN_HEIGHT)
-        how = StyledButton(text="How to play", bg=[0.9, 0.6, 0.2, 1],
-                           size_hint_y=None, height=BTN_HEIGHT)
-        guide = StyledButton(text="Guide", bg=[0.85, 0.5, 0.25, 1],
-                             size_hint_y=None, height=BTN_HEIGHT)
-        about = StyledButton(text="About", bg=[0.25, 0.5, 0.9, 1],
-                             size_hint_y=None, height=BTN_HEIGHT)
-        settings = StyledButton(text="Settings", bg=[0.4, 0.45, 0.55, 1],
-                                size_hint_y=None, height=BTN_HEIGHT)
+        play = StyledButton(text="Play", bg=[0.2, 0.7, 0.4, 1], size_hint_y=0.105)
+        shop_btn = StyledButton(text="Shop", bg=[1.0, 0.65, 0.20, 1], size_hint_y=0.105)
+        multiplayer = StyledButton(text="Multiplayer", bg=[0.55, 0.4, 0.8, 1], size_hint_y=0.105)
+        how = StyledButton(text="How to play", bg=[0.9, 0.6, 0.2, 1], size_hint_y=0.105)
+        guide = StyledButton(text="Guide", bg=[0.85, 0.5, 0.25, 1], size_hint_y=0.105)
+        about = StyledButton(text="About", bg=[0.25, 0.5, 0.9, 1], size_hint_y=0.105)
+        settings = StyledButton(text="Settings", bg=[0.4, 0.45, 0.55, 1], size_hint_y=0.105)
 
         play.bind(on_release=lambda *_: app().go("worldmap"))
         shop_btn.bind(on_release=lambda *_: app().go("shop"))
@@ -708,12 +709,19 @@ class MenuScreen(StyledScreen):
         settings.bind(on_release=lambda *_: app().go("settings"))
 
         for btn in (play, shop_btn, multiplayer, how, guide, about, settings):
-            box.add_widget(btn)
+            content.add_widget(btn)
 
         self.stars = Label(text="", font_size=sp(16), color=[1, 1, 1, 0.85],
-                           size_hint_y=None, height=SUBTITLE_HEIGHT)
-        box.add_widget(self.stars)
-        self.root_layout.add_widget(scroll)
+                           size_hint_y=0.09)
+        content.add_widget(self.stars)
+
+        # A Screen's size tracks the window, so fit the column to it directly
+        # (no Window import — keeps ui importable headlessly for logic tests).
+        def _fit(*_):
+            content.height = min(self.height * 0.94, dp(1280))
+        self.bind(size=_fit)
+        _fit()
+        self.root_layout.add_widget(content)
 
     def on_enter(self):
         running = app()

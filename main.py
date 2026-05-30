@@ -17,10 +17,50 @@ from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.config import Config
 from kivy.resources import resource_add_path
 
-# Lock to portrait on desktop (Android / iOS use the orientation set in their
-# build configs). Done before any window is created.
-Config.set("graphics", "width", "540")
-Config.set("graphics", "height", "960")
+# Portrait window on desktop, sized to FIT the user's screen so it never opens
+# taller than the display. A hard-coded tall height (e.g. 960) can exceed a
+# laptop's usable height, pushing the title bar / resize edges off-screen and
+# making the window awkward to move or resize. We derive a 9:16 portrait size
+# from ~90% of the detected screen height instead, and keep the window freely
+# resizable (the UI adapts to any size). Android / iOS use the orientation set
+# in their own build configs. Done before any window is created.
+def _detect_screen_height():
+    """Best-effort desktop screen height in px, without creating a window.
+    Tries xrandr (X / XWayland) then tkinter, falling back to a safe phone-ish
+    height when there's no display (headless capture / CI)."""
+    try:
+        import subprocess
+        out = subprocess.run(["xrandr"], capture_output=True, text=True,
+                             timeout=2.0).stdout
+        for line in out.splitlines():
+            if "*" in line:                      # the active "*"-marked mode
+                return int(line.split()[0].split("x")[1])
+    except Exception:
+        pass
+    try:
+        import tkinter
+        _probe = tkinter.Tk()
+        h = _probe.winfo_screenheight()
+        _probe.destroy()
+        if h > 0:
+            return h
+    except Exception:
+        pass
+    return 768                                   # safe default that fits laptops
+
+
+def _portrait_window_size():
+    """A 9:16 portrait size ~90% of the screen height, never taller than the
+    screen minus room for window chrome."""
+    screen_h = _detect_screen_height()
+    height = max(560, min(int(screen_h * 0.90), screen_h - 72))
+    width = int(round(height * 9.0 / 16.0))
+    return width, height
+
+
+_WIN_W, _WIN_H = _portrait_window_size()
+Config.set("graphics", "width", str(_WIN_W))
+Config.set("graphics", "height", str(_WIN_H))
 Config.set("graphics", "resizable", "1")
 
 # Asset root. When frozen by PyInstaller the bundled assets are unpacked under
