@@ -52,6 +52,18 @@ def card_frames(out_dir, seconds, fps, size, caption=None):
     return n
 
 
+def overlay_caption(frame_path, text, y_frac=0.10):
+    """Burn a big bold caption (with shadow) near the top of a frame (in place)."""
+    im = Image.open(frame_path).convert("RGB")
+    w, h = im.size
+    d = ImageDraw.Draw(im)
+    f = _font(int(h * 0.045))
+    y = int(h * y_frac)
+    d.text((w / 2 + 3, y + 3), text, font=f, fill=(0, 0, 0), anchor="mm")
+    d.text((w / 2, y), text, font=f, fill=GOLD, anchor="mm")
+    im.save(frame_path)
+
+
 def overlay_lower_third(frame_path, text):
     """Burn a lower-third label bar onto an existing frame PNG (in place)."""
     im = Image.open(frame_path).convert("RGBA")
