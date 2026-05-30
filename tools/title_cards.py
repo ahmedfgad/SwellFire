@@ -27,18 +27,27 @@ def _font(size):
 
 
 def make_card(size, caption=None):
-    """A held title card: the logo centered on a dark ember field + caption."""
+    """A held title card: the logo on a field matched to its own background
+    (so it blends seamlessly), with an auto-fitted caption below it."""
     w, h = size
-    img = Image.new("RGB", size, BG)
     logo = Image.open(LOGO).convert("RGBA")
-    lw = int(w * 0.9)
+    bg = logo.getpixel((4, 4))[:3]          # blend the field to the logo's corner
+    img = Image.new("RGB", size, bg)
+    lw = int(w * 0.84)
     scale = lw / logo.width
-    logo = logo.resize((lw, int(logo.height * scale)), Image.LANCZOS)
-    img.paste(logo, ((w - lw) // 2, int(h * 0.28)), logo)
+    lh = int(logo.height * scale)
+    logo = logo.resize((lw, lh), Image.LANCZOS)
+    ly = int(h * 0.22)
+    img.paste(logo, ((w - lw) // 2, ly), logo)
     if caption:
         d = ImageDraw.Draw(img)
-        d.text((w / 2, int(h * 0.66)), caption, font=_font(int(h * 0.030)),
-               fill=GOLD, anchor="mm")
+        fs = int(h * 0.030)                  # shrink until it fits the width
+        while fs > 16 and d.textlength(caption, font=_font(fs)) > 0.92 * w:
+            fs -= 2
+        f = _font(fs)
+        cy = ly + lh + int(h * 0.045)
+        d.text((w / 2 + 2, cy + 2), caption, font=f, fill=(0, 0, 0), anchor="mm")
+        d.text((w / 2, cy), caption, font=f, fill=GOLD, anchor="mm")
     return img
 
 
