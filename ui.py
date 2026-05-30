@@ -195,6 +195,8 @@ class StyledButton(ButtonBehavior, Label):
         kwargs.setdefault("font_size", sp(22))
         kwargs.setdefault("bold", True)
         kwargs.setdefault("color", [1, 1, 1, 1])
+        kwargs.setdefault("halign", "center")
+        kwargs.setdefault("valign", "middle")
         super().__init__(**kwargs)
         with self.canvas.before:
             self._color = Color(*self.bg)
@@ -204,6 +206,10 @@ class StyledButton(ButtonBehavior, Label):
     def _sync(self, *_):
         self._rect.pos = self.pos
         self._rect.size = self.size
+        # Constrain the text box to the button so a long caption (e.g.
+        # "Next Level") wraps/centres inside the rounded rect instead of
+        # spilling outside it. Works at any button size.
+        self.text_size = (max(0, self.width - dp(12)), self.height)
 
     def _sync_color(self, *_):
         self._color.rgba = self.bg
@@ -456,19 +462,27 @@ def _format_time(seconds: float) -> str:
     return "{}:{:02d}".format(s // 60, s % 60)
 
 
+def _fit_label(lbl):
+    """Bind a label's text box to its own widget size so halign/valign take
+    effect and the text wraps *inside* its cell instead of overflowing onto
+    the neighbouring column. Robust at any modal/screen size. Returns the label
+    so it can be wrapped inline: grid.add_widget(_fit_label(Label(...)))."""
+    lbl.bind(size=lambda inst, _val: setattr(inst, "text_size", inst.size))
+    return lbl
+
+
 def _add_stat_row(grid, label_text: str, value_text: str, *,
                   value_color=(1, 1, 1, 1)) -> None:
-    """Helper to keep the two-column stat layout consistent."""
-    grid.add_widget(Label(
-        text=label_text, font_size=sp(15), color=(1, 1, 1, 0.78),
-        halign="right", valign="middle", size_hint_x=0.45,
-        text_size=(None, None),
-    ))
-    grid.add_widget(Label(
-        text=value_text, font_size=sp(15), color=value_color,
-        halign="left", valign="middle", size_hint_x=0.55,
-        markup=True, text_size=(None, None),
-    ))
+    """Helper to keep the two-column stat layout consistent. text_size is bound
+    to each cell (via _fit_label) so the value can never overlap the label."""
+    grid.add_widget(_fit_label(Label(
+        text=label_text, font_size=sp(14), color=(1, 1, 1, 0.78),
+        halign="right", valign="middle", size_hint_x=0.42,
+    )))
+    grid.add_widget(_fit_label(Label(
+        text=value_text, font_size=sp(14), color=value_color,
+        halign="left", valign="middle", size_hint_x=0.58, markup=True,
+    )))
 
 
 class LevelResultDialog(ModalView):
@@ -506,11 +520,11 @@ class LevelResultDialog(ModalView):
                 star_holder.add_widget(StarRow(stars=stars, size_hint=(1, 1)))
                 box.add_widget(star_holder)
             else:
-                box.add_widget(Label(
+                box.add_widget(_fit_label(Label(
                     text="Your squad fell to the swarm. Try a steadier path through the gates.",
                     font_size=sp(14), color=(1, 1, 1, 0.85),
                     halign="center", valign="middle", size_hint_y=0.16,
-                ))
+                )))
 
         box.add_widget(Label(text="Score   {}".format(score),
                              font_size=sp(20), bold=True, color=(1, 1, 1, 1),
@@ -527,14 +541,14 @@ class LevelResultDialog(ModalView):
                                   size_hint_y=0.42,
                                   padding=(dp(8), 0, dp(8), 0))
                 grid.add_widget(Label(text="", size_hint_x=0.40))
-                grid.add_widget(Label(text="YOU", font_size=sp(13), bold=True,
+                grid.add_widget(_fit_label(Label(text="YOU", font_size=sp(13), bold=True,
                                       color=(0.40, 0.85, 0.50, 1.0),
                                       halign="center", valign="middle",
-                                      size_hint_x=0.30))
-                grid.add_widget(Label(text="OPP", font_size=sp(13), bold=True,
+                                      size_hint_x=0.30)))
+                grid.add_widget(_fit_label(Label(text="OPP", font_size=sp(13), bold=True,
                                       color=(0.95, 0.45, 0.45, 1.0),
                                       halign="center", valign="middle",
-                                      size_hint_x=0.30))
+                                      size_hint_x=0.30)))
                 rows = [
                     ("Score",   score if score is not None else 0,
                                 opponent_score if opponent_score is not None else 0,
@@ -563,20 +577,20 @@ class LevelResultDialog(ModalView):
                                 (1, 1, 1, 1)),
                 ]
                 for label, you_v, opp_v, accent in rows:
-                    grid.add_widget(Label(
+                    grid.add_widget(_fit_label(Label(
                         text=label, font_size=sp(14), color=(1, 1, 1, 0.78),
                         halign="right", valign="middle", size_hint_x=0.40,
-                    ))
-                    grid.add_widget(Label(
+                    )))
+                    grid.add_widget(_fit_label(Label(
                         text="[b]{}[/b]".format(you_v), font_size=sp(14),
                         bold=True, color=accent, markup=True,
                         halign="center", valign="middle", size_hint_x=0.30,
-                    ))
-                    grid.add_widget(Label(
+                    )))
+                    grid.add_widget(_fit_label(Label(
                         text="[b]{}[/b]".format(opp_v), font_size=sp(14),
                         bold=True, color=accent, markup=True,
                         halign="center", valign="middle", size_hint_x=0.30,
-                    ))
+                    )))
                 box.add_widget(grid)
             else:
                 grid = GridLayout(cols=2, spacing=(dp(8), dp(4)),
@@ -586,20 +600,20 @@ class LevelResultDialog(ModalView):
                 coin_total = stats.get("coins_total", 0)
                 coin_pickup = stats.get("coins_pickup", 0)
                 coin_other = coin_total - coin_pickup
-                coin_value = "[b]{}[/b]   ({} pickups + {} progress)".format(
+                coin_value = "[b]{}[/b]  ({}+{})".format(
                     coin_total, coin_pickup, coin_other,
                 )
-                _add_stat_row(grid, "Coins earned", coin_value,
+                _add_stat_row(grid, "Coins", coin_value,
                               value_color=(1.0, 0.92, 0.40, 1.0))
-                _add_stat_row(grid, "Enemies killed",
+                _add_stat_row(grid, "Enemies",
                               "[b]{}[/b]".format(stats.get("kills", 0)))
-                _add_stat_row(grid, "Gates passed",
-                              "[b]{}[/b] hit  /  [b]{}[/b] missed".format(
+                _add_stat_row(grid, "Gates",
+                              "[b]{}[/b] hit / [b]{}[/b] miss".format(
                                   stats.get("gates_hit", 0),
                                   stats.get("gates_missed", 0),
                               ))
-                _add_stat_row(grid, "Squad survived",
-                              "[b]{}[/b] of {} runners".format(
+                _add_stat_row(grid, "Squad",
+                              "[b]{}[/b] / {}".format(
                                   stats.get("squad_end", 0),
                                   stats.get("squad_peak", 0),
                               ))
