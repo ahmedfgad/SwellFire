@@ -71,7 +71,26 @@ imply full coverage you didn't do.
 - Linux audio: run with `SDL_AUDIODRIVER=dummy` (known SDL2 init issue).
 - **Packaged-build asset paths**: assets are referenced by **cwd-relative** strings (`"assets/sprites/…"`). Kivy resolves these via `resource_find`, whose default search path is the cwd — so a PyInstaller binary crashes (`load_from_filename(None)` → `AttributeError: 'NoneType'…encode`) the instant it's launched from any dir but the one holding `assets/`. `main.py` fixes this by registering a frozen-aware `ASSET_ROOT` (`sys._MEIPASS` when frozen, else the source dir) via `resource_add_path` at import, and deriving the audio `asset_dir` from it. Raw `open()` of atlas JSON (`graphics.py`) bypasses `resource_find`, so those go through `open(resource_find(p) or p)`. **When adding new asset access, use a relative `"assets/…"` path** (auto-resolved) — don't reintroduce `os.path.dirname(__file__)`-based paths, which point into the temp `_MEIPASS` and break audio/saves in the bundle. Always smoke-test a packaged build from a *foreign* cwd (e.g. `cd /tmp && /path/to/dist/Swellfire`), not from the repo root.
 
+## Media generation
+
+Marketing/store assets live in `swellfire_media/` (build-excluded) and are
+reproducible from `tools/` — dev deps in `requirements-media.txt` (PIL, numpy,
+imageio-ffmpeg; never a runtime/mobile dep). Brand graphics derive from the
+hand-authored art in `swellfire_media/re/` (`gen_brand_assets`,
+`make_feature_graphic`, `make_youtube_thumbnail`). Screenshots + video frames are
+captured from the real game by `tools/capture.py` (fixed-dt harness that drives
+the GA autoplayer inline and grabs the GL framebuffer). The game is **portrait**;
+because the portrait window can exceed the dev screen height, captures run inside
+a tall **Xvfb** virtual display via `tools/capture_run.py` (`capture.py` also
+creates the Window at the capture size *before* importing `main`, whose
+import-time `Config` would otherwise force a too-tall window). Video soundtracks
+are rebuilt from the game's own wavs by `tools/mix_audio.py` and muxed via the
+static ffmpeg in `tools/video_core.py`; `make_videos`/`make_promo`/`make_short`
+build the three videos, `title_cards` renders logo cards/labels. See
+`swellfire_media/README.md` for regen commands.
+
 ## Verify
 
 `SDL_AUDIODRIVER=dummy venv/bin/python main.py` (needs a display). Headless logic
 tests run via `venv/bin/python - <<'PY' … PY` from the repo root (cwd import).
+Media tool tests: `SDL_AUDIODRIVER=dummy venv/bin/python -m pytest tools/tests/ -q`.

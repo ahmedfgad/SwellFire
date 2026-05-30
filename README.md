@@ -123,6 +123,17 @@ On Windows, run it inside Git Bash or MSYS2 to get `dist\Swellfire.exe`. On Linu
 | `buildozer.spec`, `build_android.sh`, `build_desktop.sh`, `build_ios.sh`, `setup_venv.sh` | Build & packaging — ported from CoinTex. |
 | `.github/workflows/ios-build.yml`, `desktop-ci.yml` | GitHub Actions for iOS + desktop sanity. |
 
+## Media
+
+Marketing & store assets live in [`swellfire_media/`](swellfire_media/) — app icon,
+splash, Google Play screenshots (phone + tablet), feature graphic, YouTube cover,
+and three videos (long autoplay, promo, vertical short). The graphics derive from
+hand-authored art + the game's own sprites; the videos are captured from the running
+game with its own music/SFX. Everything is reproducible via `tools/` — see
+[`swellfire_media/README.md`](swellfire_media/README.md) for the regen commands.
+Dev-only deps: `venv/bin/pip install -r requirements-media.txt` (plus `xvfb` for
+portrait gameplay capture).
+
 ## Author
 
 Ahmed Fawzy Gad

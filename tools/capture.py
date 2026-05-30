@@ -156,6 +156,14 @@ def main(argv=None):
                 Clock.schedule_once(_drive, 0)
                 return
 
+        # Stop a gameplay sequence cleanly the instant the level ends (squad
+        # wiped or won) so video clips never include the DEFEATED / Level-
+        # Complete banner+dialog. (--win mode handles its own capture below.)
+        if (not args.win and args.out is not None and args.level is not None
+                and gs is not None and state["ready"] and gs._level_ended):
+            _finish()
+            return
+
         # --win: once the squad has grown (after `warmup` steps), shove the
         # distance to the goal so the next `_update` fires the genuine
         # level-complete path (_end_level(won=True) -> VICTORY banner + the

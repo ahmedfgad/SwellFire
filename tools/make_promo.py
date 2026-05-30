@@ -30,9 +30,9 @@ OUT_SIZE = (1080, 1920)
 # Failed" dialog rather than a fight; the boss is showcased in the screenshots.)
 WINDOWS = [
     (3,  60, 180, "Multiply your squad"),
-    (26, 50, 180, "Mow down the swarm"),
-    (45, 50, 180, "Six worlds of war"),
-    (52, 50, 150, "Into the cosmos"),
+    (13, 50, 180, "Swarm the desert"),
+    (23, 50, 180, "Industrial firepower"),
+    (33, 50, 150, "Frostbite assault"),
 ]
 
 
