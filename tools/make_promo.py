@@ -25,12 +25,14 @@ FPS = 30
 CAP = "540x960"
 OUT_SIZE = (1080, 1920)
 
-# (level, warmup, frames, caption)
+# (level, warmup, frames, caption) — regular levels across varied worlds.
+# (Boss levels wipe the small starting squad in ~1s, so they film as a "Level
+# Failed" dialog rather than a fight; the boss is showcased in the screenshots.)
 WINDOWS = [
     (3,  60, 180, "Multiply your squad"),
     (26, 50, 180, "Mow down the swarm"),
     (45, 50, 180, "Six worlds of war"),
-    (10, 12, 150, "Face the bosses"),     # boss level — squad alive, firing up
+    (52, 50, 150, "Into the cosmos"),
 ]
 
 
