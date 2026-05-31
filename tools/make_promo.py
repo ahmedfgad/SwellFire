@@ -28,12 +28,19 @@ OUT_SIZE = (1080, 1920)
 # (level, warmup, frames, caption) — regular levels across varied worlds.
 # (Boss levels wipe the small starting squad in ~1s, so they film as a "Level
 # Failed" dialog rather than a fight; the boss is showcased in the screenshots.)
+# 8 short (6s @60fps) windows across worlds 1-5 -> ~48s of footage + cards.
+# Window length is kept short on purpose: these run with the DEFAULT starting
+# squad (no playthrough seed), so a long window risks a mid-clip wipe on the
+# harder worlds. 6s is proven safe.
 WINDOWS = [
     (3,  60, 360, "Multiply your squad"),
+    (6,  60, 360, "Open fire"),
     (13, 60, 360, "Swarm the desert"),
+    (16, 60, 360, "Overwhelm the horde"),
     (23, 60, 360, "Industrial firepower"),
     (33, 60, 360, "Frostbite assault"),
     (43, 60, 360, "Volcanic onslaught"),
+    (45, 60, 360, "Unstoppable squad"),
 ]
 
 

@@ -28,9 +28,13 @@ CAP = "540x960"
 OUT_SIZE = (1080, 1920)
 
 # (level, warmup, frames, caption) — punchy growth + combat windows.
+# 4 short (6s @60fps) windows -> ~24s of footage + cards. Kept short because
+# these run with the DEFAULT starting squad (no playthrough seed).
 WINDOWS = [
-    (4,  60, 420, "Grow your squad"),
-    (24, 60, 420, "Open fire"),
+    (4,  60, 360, "Grow your squad"),
+    (14, 60, 360, "Open fire"),
+    (24, 60, 360, "Push the frontline"),
+    (34, 60, 360, "Survive the storm"),
 ]
 
 

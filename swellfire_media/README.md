@@ -13,9 +13,9 @@ repo. Install the dev deps once: `venv/bin/pip install -r requirements-media.txt
 | Tablet screenshots ×8 | `tablet_screenshots/01..08_*.png` | 1080×1920 |
 | Google Play feature graphic | `feature_graphic_1024x500.png` | 1024×500 |
 | YouTube cover | `youtube_thumbnail_1280x720.png` | 1280×720 |
-| Long autoplay video | `swellfire_autoplay_1080p.mp4` | 1080×1920 |
-| Promo video | `swellfire_promo.mp4` | 1080×1920 |
-| Vertical short | `swellfire_short_vertical.mp4` | 1080×1920 |
+| Long autoplay video | `swellfire_autoplay_1080p.mp4` | 1080×1920, 60 fps, ~4:11 |
+| Promo video | `swellfire_promo.mp4` | 1080×1920, 60 fps, ~54s |
+| Vertical short | `swellfire_short_vertical.mp4` | 1080×1920, 60 fps, ~28s |
 
 `re/` holds the hand-authored source art (logo, presplash, YouTube cover) the
 brand graphics are derived from.
@@ -50,6 +50,19 @@ Run from the repo root with the venv.
   wavs by `tools/mix_audio.py` (per-segment world/boss music bed + SFX one-shots at
   their captured timestamps), then muxed with the frames via the pip-bundled static
   ffmpeg (`tools/video_core.py`). Title cards (`tools/title_cards.py`) use the logo.
-- The long autoplay video shows 2 regular levels per world; bosses appear in the
-  screenshots and the promo (the autoplayer's small starting squad can't survive a
-  boss long enough to film as autoplay).
+- All videos are captured and encoded at **60 fps at true real game-time**. The
+  capture harness steps the sim at a fixed `dt = 1/fps` and is the *sole* driver:
+  it re-cancels the game's own `Clock`-scheduled `_update_event` every step
+  (`_reset` re-arms it after the harness's first cancel), so the sim is never
+  double-stepped — otherwise the interval ran with real wall-clock `dt` and the
+  footage played several times too fast.
+- The long autoplay video plays **one complete regular level per world for
+  worlds 1–4** (levels 6/16/26/36), start → finish including the Level-Complete /
+  stars screen, via `capture.py --playthrough`. That mode seeds a **capture-only**
+  strong squad (max weapon tiers + squad bonus, never persisted to the real save)
+  so the autoplayer reliably wins. Worlds 5–6 levels are very long at real
+  game-time (~110s/~130s each) and are left to the screenshots/promo; bosses also
+  stay in the screenshots (the autoplayer can't reliably beat a boss).
+- The promo and vertical short are smooth real-time **montages** of short (6s)
+  highlight windows across worlds, driven by the autoplayer with the default
+  starting squad.
