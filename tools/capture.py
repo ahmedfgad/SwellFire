@@ -29,6 +29,18 @@ import numpy as np
 from PIL import Image
 
 
+def seed_strong_squad(state):
+    """Capture-only marketing seed: max every weapon tier, equip the lively
+    rifle, and max the starting-squad bonus so the autoplayer reliably
+    survives a full level and reaches a genuine win. Writes the in-memory
+    `state.data` directly and DOES NOT call state.save() — the real
+    swellfire_save.json must stay untouched by captures.
+    """
+    state.data["equipped_weapon"] = "rifle"
+    state.data["weapon_tiers"] = {"pistol": 4, "rifle": 4, "shotgun": 4, "sniper": 4}
+    state.data["squad_bonus"] = 6
+
+
 def _parse_size(s):
     w, h = s.lower().split("x")
     return int(w), int(h)
@@ -46,14 +58,22 @@ def _build_argparser():
     ap.add_argument("--size", default="1920x1080")
     ap.add_argument("--fps", type=int, default=60,
                     help="fixed sim/capture frame rate (lower = fewer frames)")
-    ap.add_argument("--win", action="store_true",
-                    help="(level mode) drive the squad to the distance goal so "
-                         "the level-complete + stars dialog fires, then capture it")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--win", action="store_true",
+                      help="(level mode) drive the squad to the distance goal so "
+                           "the level-complete + stars dialog fires, then capture it")
+    mode.add_argument("--playthrough", action="store_true",
+                      help="(level mode) seed a strong squad, drive the autoplayer "
+                           "to a genuine level win, and keep capturing through the "
+                           "victory banner + result dialog (full start->finish clip)")
     return ap
 
 
 def main(argv=None):
-    args = _build_argparser().parse_args(argv)
+    ap = _build_argparser()
+    args = ap.parse_args(argv)
+    if args.playthrough and args.out is None:
+        ap.error("--playthrough requires --out (a frames directory)")
 
     w, h = _parse_size(args.size)
 
@@ -100,6 +120,9 @@ def main(argv=None):
             app.state.set_setting("tutorial_seen", True)
         except Exception:
             pass
+
+        if args.playthrough:
+            seed_strong_squad(app.state)
 
         if args.screen is not None:
             app.go(args.screen)
@@ -159,8 +182,9 @@ def main(argv=None):
         # Stop a gameplay sequence cleanly the instant the level ends (squad
         # wiped or won) so video clips never include the DEFEATED / Level-
         # Complete banner+dialog. (--win mode handles its own capture below.)
-        if (not args.win and args.out is not None and args.level is not None
-                and gs is not None and state["ready"] and gs._level_ended):
+        if (not args.win and not args.playthrough and args.out is not None
+                and args.level is not None and gs is not None
+                and state["ready"] and gs._level_ended):
             _finish()
             return
 
@@ -178,6 +202,14 @@ def main(argv=None):
 
         # Drive a fixed number of fixed-dt steps, grabbing each rendered frame.
         if args.level is not None and gs is not None and app.sm.current == "game":
+            # The game re-arms its own Clock-scheduled _update_event inside
+            # _reset (deferred), which lands AFTER _enter_ready's one-shot
+            # cancel — so re-cancel it on every step, making this harness the
+            # SOLE fixed-dt driver. Otherwise the interval double-steps the sim
+            # with real-time dt and captured video plays several times too fast.
+            if gs._update_event is not None:
+                gs._update_event.cancel()
+                gs._update_event = None
             # Step the sim by a fixed dt (decoupled from real time).
             gs._update(DT)
             # Inline GA decision every RETARGET_DELAY of sim time.
@@ -227,6 +259,46 @@ def main(argv=None):
             os.makedirs(os.path.dirname(args.shot) or ".", exist_ok=True)
             Image.fromarray(arr).save(args.shot)
             _finish()
+            return
+
+        # --playthrough: film the whole level. Grab every frame after warmup;
+        # once the level is genuinely won, keep stepping (on a small real delay
+        # so the deferred result dialog — _open_result_dialog, ~1s real-time
+        # after _end_level — actually opens) and keep grabbing until the dialog
+        # has been visible for ~2s, then stop. A hard --frames cap bounds it.
+        if args.playthrough and args.out is not None:
+            from kivy.uix.modalview import ModalView
+            if state["frame"] >= args.warmup:
+                arr = grab_frame(Window)
+                idx = state["frame"] - args.warmup
+                os.makedirs(args.out, exist_ok=True)
+                Image.fromarray(arr).save(os.path.join(args.out, "f%05d.png" % idx))
+                state["frame"] += 1
+                # Hard safety cap.
+                if idx + 1 >= args.frames:
+                    if gs is not None and not gs._level_ended:
+                        print("WARNING: playthrough hit --frames cap before "
+                              "level end (level %s)" % args.level)
+                    _finish()
+                    return
+            else:
+                state["frame"] += 1
+            # Track the post-win victory/dialog tail.
+            if gs is not None and gs._level_ended:
+                modal_open = any(isinstance(c, ModalView) for c in Window.children)
+                if modal_open:
+                    state["modal_seen"] = True
+                if state["modal_seen"]:
+                    state["modal_settle"] += 1
+                # ~2s of dialog at args.fps, plus require it actually opened.
+                if state["modal_seen"] and state["modal_settle"] >= 2 * args.fps:
+                    _finish()
+                    return
+                # Post-end the sim runs far faster than the real-time dialog
+                # timer; step on a small real delay so that timer can elapse.
+                Clock.schedule_once(_drive, 1.0 / 120.0)
+                return
+            Clock.schedule_once(_drive, 0)
             return
 
         # Grab after warmup.

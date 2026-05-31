@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import numpy as np
 
+import levels
 from tools import capture_run, mix_audio, video_core, title_cards
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -26,7 +27,7 @@ WORK = os.path.join(ROOT, "build", "video_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")
 
-FPS = 30
+FPS = 60
 CAP = "540x960"          # capture size (fast); upscaled on encode
 OUT_SIZE = (1080, 1920)  # portrait 1080p
 
@@ -34,16 +35,29 @@ WORLD_NAMES = {1: "Meadow", 2: "Desert", 3: "Industrial",
                4: "Snowfield", 5: "Volcano", 6: "Cosmos"}
 
 
+WARMUP = 60          # frames to settle before the first grab
+SEG_MARGIN = 300     # +5s of cap headroom for warmup + the victory-screen tail
+
+
 def _segments():
-    """Two regular levels per world (autoplayer plays these well; bosses wipe
-    the small starting squad too fast to film). (label, level, warmup, frames)."""
+    """One full regular (non-boss) level per world for worlds 1-4, played
+    start->finish via the capture's --playthrough mode. Level 6 of each
+    (6,16,26,36). Worlds 5-6 levels are very long at real game-time (~110s /
+    ~130s each) so they're left to the screenshots/promo rather than filmed in
+    full here. (label, level, warmup, frames-cap).
+
+    The frames value is a hard SAFETY CAP only — the capture stops at the
+    genuine level-complete. It's sized from the level's real length
+    (distance_goal / SCROLL_SPEED * FPS) plus margin, since levels grow from
+    ~30s (W1) to ~90s (W4) and a fixed cap would truncate the longer ones."""
     segs = []
-    for wi in range(1, 7):
-        base = (wi - 1) * 10
-        for ln in (base + 2, base + 4):
-            in_world = ln - base
-            label = "World {} · {} — Level {}".format(wi, WORLD_NAMES[wi], in_world)
-            segs.append((label, ln, 60, 150))   # 60-frame warmup, 5s @30fps
+    for wi in range(1, 5):
+        level = (wi - 1) * 10 + 6
+        secs = (levels.get_level(level)["distance_goal"]
+                / levels.SCROLL_SPEED_PX_PER_SEC)
+        cap = int(secs * FPS) + SEG_MARGIN
+        label = "World {} · {}".format(wi, WORLD_NAMES[wi])
+        segs.append((label, level, WARMUP, cap))
     return segs
 
 
@@ -57,9 +71,10 @@ def _silence(path, seconds):
 
 def _capture_segment(level, warmup, frames, framedir, audio_json):
     args = ["--level", level, "--out", framedir, "--audio", audio_json,
-            "--size", CAP, "--fps", FPS, "--warmup", warmup, "--frames", frames]
+            "--size", CAP, "--fps", FPS, "--warmup", warmup, "--frames", frames,
+            "--playthrough"]
     subprocess.run(capture_run.capture_cmd(args), cwd=ROOT,
-                   env=capture_run.capture_env(), check=True, timeout=900)
+                   env=capture_run.capture_env(), check=True, timeout=2400)
 
 
 def _card_clip(work, name, seconds, caption, out_mp4):
