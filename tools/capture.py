@@ -202,6 +202,14 @@ def main(argv=None):
 
         # Drive a fixed number of fixed-dt steps, grabbing each rendered frame.
         if args.level is not None and gs is not None and app.sm.current == "game":
+            # The game re-arms its own Clock-scheduled _update_event inside
+            # _reset (deferred), which lands AFTER _enter_ready's one-shot
+            # cancel — so re-cancel it on every step, making this harness the
+            # SOLE fixed-dt driver. Otherwise the interval double-steps the sim
+            # with real-time dt and captured video plays several times too fast.
+            if gs._update_event is not None:
+                gs._update_event.cancel()
+                gs._update_event = None
             # Step the sim by a fixed dt (decoupled from real time).
             gs._update(DT)
             # Inline GA decision every RETARGET_DELAY of sim time.
