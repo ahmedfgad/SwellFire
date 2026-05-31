@@ -29,6 +29,18 @@ import numpy as np
 from PIL import Image
 
 
+def seed_strong_squad(state):
+    """Capture-only marketing seed: max every weapon tier, equip the lively
+    rifle, and max the starting-squad bonus so the autoplayer reliably
+    survives a full level and reaches a genuine win. Writes the in-memory
+    `state.data` directly and DOES NOT call state.save() — the real
+    swellfire_save.json must stay untouched by captures.
+    """
+    state.data["equipped_weapon"] = "rifle"
+    state.data["weapon_tiers"] = {"pistol": 4, "rifle": 4, "shotgun": 4, "sniper": 4}
+    state.data["squad_bonus"] = 6
+
+
 def _parse_size(s):
     w, h = s.lower().split("x")
     return int(w), int(h)
