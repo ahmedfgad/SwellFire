@@ -4,6 +4,18 @@
 
 **Goal:** Rebuild the three `swellfire_media/` videos so they play at smooth, faithful real game-time (60 fps) and run longer, and make the autoplay video play one complete level per world start → finish (including the victory/stars screen).
 
+> **Execution note (2026-05-30):** During Task 6 smoke-testing, the real "too
+> fast" root cause was found: the game's own `Clock`-scheduled `_update_event`
+> was double-stepping the sim alongside the harness's manual fixed-dt step. The
+> harness's `_enter_ready` cancelled it once, but `_reset` (deferred) re-armed
+> the interval *after* that cancel, so it ran with real wall-clock dt and
+> contributed ~88% of game progress — making every capture play ~4–6× too fast.
+> Fixed in `tools/capture.py` by re-cancelling `_update_event` on every drive
+> step (commit "capture: stop game's interval _update double-stepping the sim").
+> Also: real level lengths grow 30s→138s, so per a follow-up decision the
+> autoplay video features **worlds 1–4 only** (levels 6/16/26/36), full
+> real-time, and frame caps are sized from each level's `distance_goal`.
+
 **Architecture:** Capture is already real-time (`dt = 1/fps`, encode at same `fps`); raise `fps` 30 → 60 for smoothness. Add a `--playthrough` mode to `tools/capture.py` that seeds a capture-only strong squad/weapon, drives the GA autoplayer to a *genuine* level win, and keeps grabbing frames through the victory banner + result dialog. `tools/make_videos.py` switches to 6 full-level playthroughs (one regular level per world). `make_promo.py`/`make_short.py` stay montages but at 60 fps with longer windows.
 
 **Tech Stack:** Python, Kivy (capture harness), imageio-ffmpeg (encode), PIL/numpy. Headless logic tests via `venv/bin/python`; integration smoke via `pytest tools/tests/` under Xvfb.
