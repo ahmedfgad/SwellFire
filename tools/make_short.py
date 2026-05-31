@@ -23,14 +23,14 @@ WORK = os.path.join(ROOT, "build", "short_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")
 
-FPS = 30
+FPS = 60
 CAP = "540x960"
 OUT_SIZE = (1080, 1920)
 
 # (level, warmup, frames, caption) — punchy growth + combat windows.
 WINDOWS = [
-    (4,  60, 180, "Grow your squad"),
-    (24, 60, 180, "Open fire"),
+    (4,  60, 420, "Grow your squad"),
+    (24, 60, 420, "Open fire"),
 ]
 
 
@@ -60,7 +60,7 @@ def build_short():
         subprocess.run(capture_run.capture_cmd(
             ["--level", level, "--out", framedir, "--audio", aud, "--size", CAP,
              "--fps", FPS, "--warmup", warmup, "--frames", frames]),
-            cwd=ROOT, env=capture_run.capture_env(), check=True, timeout=900)
+            cwd=ROOT, env=capture_run.capture_env(), check=True, timeout=1800)
         for fn in sorted(os.listdir(framedir)):
             title_cards.overlay_caption(os.path.join(framedir, fn), caption)
         wav = os.path.join(WORK, "a%d.wav" % i)

@@ -21,7 +21,7 @@ WORK = os.path.join(ROOT, "build", "promo_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")
 
-FPS = 30
+FPS = 60
 CAP = "540x960"
 OUT_SIZE = (1080, 1920)
 
@@ -29,10 +29,11 @@ OUT_SIZE = (1080, 1920)
 # (Boss levels wipe the small starting squad in ~1s, so they film as a "Level
 # Failed" dialog rather than a fight; the boss is showcased in the screenshots.)
 WINDOWS = [
-    (3,  60, 180, "Multiply your squad"),
-    (13, 50, 180, "Swarm the desert"),
-    (23, 50, 180, "Industrial firepower"),
-    (33, 50, 150, "Frostbite assault"),
+    (3,  60, 360, "Multiply your squad"),
+    (13, 60, 360, "Swarm the desert"),
+    (23, 60, 360, "Industrial firepower"),
+    (33, 60, 360, "Frostbite assault"),
+    (43, 60, 360, "Volcanic onslaught"),
 ]
 
 
@@ -68,7 +69,7 @@ def build_promo():
         subprocess.run(capture_run.capture_cmd(
             ["--level", level, "--out", framedir, "--audio", aud, "--size", CAP,
              "--fps", FPS, "--warmup", warmup, "--frames", frames]),
-            cwd=ROOT, env=capture_run.capture_env(), check=True, timeout=900)
+            cwd=ROOT, env=capture_run.capture_env(), check=True, timeout=1800)
         for fn in sorted(os.listdir(framedir)):
             title_cards.overlay_caption(os.path.join(framedir, fn), caption)
         wav = os.path.join(WORK, "a%d.wav" % i)
