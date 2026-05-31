@@ -58,18 +58,22 @@ def _build_argparser():
     ap.add_argument("--size", default="1920x1080")
     ap.add_argument("--fps", type=int, default=60,
                     help="fixed sim/capture frame rate (lower = fewer frames)")
-    ap.add_argument("--win", action="store_true",
-                    help="(level mode) drive the squad to the distance goal so "
-                         "the level-complete + stars dialog fires, then capture it")
-    ap.add_argument("--playthrough", action="store_true",
-                    help="(level mode) seed a strong squad, drive the autoplayer "
-                         "to a genuine level win, and keep capturing through the "
-                         "victory banner + result dialog (full start->finish clip)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--win", action="store_true",
+                      help="(level mode) drive the squad to the distance goal so "
+                           "the level-complete + stars dialog fires, then capture it")
+    mode.add_argument("--playthrough", action="store_true",
+                      help="(level mode) seed a strong squad, drive the autoplayer "
+                           "to a genuine level win, and keep capturing through the "
+                           "victory banner + result dialog (full start->finish clip)")
     return ap
 
 
 def main(argv=None):
-    args = _build_argparser().parse_args(argv)
+    ap = _build_argparser()
+    args = ap.parse_args(argv)
+    if args.playthrough and args.out is None:
+        ap.error("--playthrough requires --out (a frames directory)")
 
     w, h = _parse_size(args.size)
 
