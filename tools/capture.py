@@ -117,6 +117,9 @@ def main(argv=None):
         except Exception:
             pass
 
+        if args.playthrough:
+            seed_strong_squad(app.state)
+
         if args.screen is not None:
             app.go(args.screen)
         else:
@@ -175,8 +178,9 @@ def main(argv=None):
         # Stop a gameplay sequence cleanly the instant the level ends (squad
         # wiped or won) so video clips never include the DEFEATED / Level-
         # Complete banner+dialog. (--win mode handles its own capture below.)
-        if (not args.win and args.out is not None and args.level is not None
-                and gs is not None and state["ready"] and gs._level_ended):
+        if (not args.win and not args.playthrough and args.out is not None
+                and args.level is not None and gs is not None
+                and state["ready"] and gs._level_ended):
             _finish()
             return
 
@@ -243,6 +247,46 @@ def main(argv=None):
             os.makedirs(os.path.dirname(args.shot) or ".", exist_ok=True)
             Image.fromarray(arr).save(args.shot)
             _finish()
+            return
+
+        # --playthrough: film the whole level. Grab every frame after warmup;
+        # once the level is genuinely won, keep stepping (on a small real delay
+        # so the deferred result dialog — _open_result_dialog, ~1s real-time
+        # after _end_level — actually opens) and keep grabbing until the dialog
+        # has been visible for ~2s, then stop. A hard --frames cap bounds it.
+        if args.playthrough and args.out is not None:
+            from kivy.uix.modalview import ModalView
+            if state["frame"] >= args.warmup:
+                arr = grab_frame(Window)
+                idx = state["frame"] - args.warmup
+                os.makedirs(args.out, exist_ok=True)
+                Image.fromarray(arr).save(os.path.join(args.out, "f%05d.png" % idx))
+                state["frame"] += 1
+                # Hard safety cap.
+                if idx + 1 >= args.frames:
+                    if gs is not None and not gs._level_ended:
+                        print("WARNING: playthrough hit --frames cap before "
+                              "level end (level %s)" % args.level)
+                    _finish()
+                    return
+            else:
+                state["frame"] += 1
+            # Track the post-win victory/dialog tail.
+            if gs is not None and gs._level_ended:
+                modal_open = any(isinstance(c, ModalView) for c in Window.children)
+                if modal_open:
+                    state["modal_seen"] = True
+                if state["modal_seen"]:
+                    state["modal_settle"] += 1
+                # ~2s of dialog at args.fps, plus require it actually opened.
+                if state["modal_seen"] and state["modal_settle"] >= 2 * args.fps:
+                    _finish()
+                    return
+                # Post-end the sim runs far faster than the real-time dialog
+                # timer; step on a small real delay so that timer can elapse.
+                Clock.schedule_once(_drive, 1.0 / 120.0)
+                return
+            Clock.schedule_once(_drive, 0)
             return
 
         # Grab after warmup.
