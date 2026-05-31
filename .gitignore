@@ -251,3 +251,6 @@ assets/raw/
 
 # Superpowers brainstorm scratch
 .superpowers/
+
+# Generated marketing videos — large binaries, reproducible via tools/make_*.py
+swellfire_media/*.mp4
