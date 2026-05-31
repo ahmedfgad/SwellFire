@@ -61,6 +61,10 @@ def _build_argparser():
     ap.add_argument("--win", action="store_true",
                     help="(level mode) drive the squad to the distance goal so "
                          "the level-complete + stars dialog fires, then capture it")
+    ap.add_argument("--playthrough", action="store_true",
+                    help="(level mode) seed a strong squad, drive the autoplayer "
+                         "to a genuine level win, and keep capturing through the "
+                         "victory banner + result dialog (full start->finish clip)")
     return ap
 
 

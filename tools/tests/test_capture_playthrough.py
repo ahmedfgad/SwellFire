@@ -33,3 +33,16 @@ def test_seed_strong_squad_tolerates_missing_keys():
     assert st.data["equipped_weapon"] == "rifle"
     assert st.data["weapon_tiers"]["sniper"] == 4
     assert st.data["squad_bonus"] == 6
+
+
+def test_playthrough_flag_parses():
+    from tools.capture import _build_argparser
+    ns = _build_argparser().parse_args(
+        ["--level", "6", "--out", "x", "--playthrough"])
+    assert ns.playthrough is True
+
+
+def test_playthrough_defaults_false():
+    from tools.capture import _build_argparser
+    ns = _build_argparser().parse_args(["--level", "6", "--out", "x"])
+    assert ns.playthrough is False
