@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import numpy as np
 
+import levels
 from tools import capture_run, mix_audio, video_core, title_cards
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -34,17 +35,29 @@ WORLD_NAMES = {1: "Meadow", 2: "Desert", 3: "Industrial",
                4: "Snowfield", 5: "Volcano", 6: "Cosmos"}
 
 
+WARMUP = 60          # frames to settle before the first grab
+SEG_MARGIN = 300     # +5s of cap headroom for warmup + the victory-screen tail
+
+
 def _segments():
-    """One full regular (non-boss) level per world, played start->finish via
-    the capture's --playthrough mode. (label, level, warmup, frames-cap).
-    Level 6 of each world (6,16,26,36,46,56): mid-world density, ~30s each.
+    """One full regular (non-boss) level per world for worlds 1-4, played
+    start->finish via the capture's --playthrough mode. Level 6 of each
+    (6,16,26,36). Worlds 5-6 levels are very long at real game-time (~110s /
+    ~130s each) so they're left to the screenshots/promo rather than filmed in
+    full here. (label, level, warmup, frames-cap).
+
     The frames value is a hard SAFETY CAP only — the capture stops at the
-    genuine level-complete; this bounds a runaway. 45s + ~3s tail @60fps."""
+    genuine level-complete. It's sized from the level's real length
+    (distance_goal / SCROLL_SPEED * FPS) plus margin, since levels grow from
+    ~30s (W1) to ~90s (W4) and a fixed cap would truncate the longer ones."""
     segs = []
-    for wi in range(1, 7):
+    for wi in range(1, 5):
         level = (wi - 1) * 10 + 6
+        secs = (levels.get_level(level)["distance_goal"]
+                / levels.SCROLL_SPEED_PX_PER_SEC)
+        cap = int(secs * FPS) + SEG_MARGIN
         label = "World {} · {}".format(wi, WORLD_NAMES[wi])
-        segs.append((label, level, 60, 2880))
+        segs.append((label, level, WARMUP, cap))
     return segs
 
 
