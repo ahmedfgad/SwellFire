@@ -125,11 +125,13 @@ exists anywhere in the codebase.
 **Fix — adjustable top inset.**
 - New persisted setting **`top_safe_inset`** (float fraction of screen height,
   default **0.05**, clamped to `[0.0, 0.12]`).
-- Shift every top-anchored HUD element down by this fraction: subtract it from
-  their `pos_hint` `top` values (progress bar `top: 0.985 - inset`, top bar
-  `top: 1.0 - inset`, and the coin counter/timer — **the implementation plan
-  enumerates the exact widgets** by reading the HUD-construction block in
-  `game.py`). Use a single helper/constant so all top elements stay in sync.
+- Shift **only the progress bar and the coin counter/timer** down by this
+  fraction: subtract it from their `pos_hint` `top` values (progress bar
+  `top: 0.985 - inset`; coin counter/timer likewise — **the implementation plan
+  enumerates the exact coin/timer widget(s)** by reading the HUD-construction
+  block in `game.py`). The stats **top bar is left at `top: 1.0`** (it's
+  off by default via `show_stats` and not the user's concern here). Use a single
+  helper/constant so the moved elements stay in sync.
 - New Settings **slider** in `ui.py: SettingsScreen` for `top_safe_inset`
   (range 0 → 0.12, like the existing Volume slider), applied **live** so the
   player can dial it until their notch is clear. Re-apply on level enter.
