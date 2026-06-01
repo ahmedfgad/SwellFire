@@ -74,7 +74,7 @@ class GameState:
             "scores": {},                         # best score per level, e.g. {"7": 1820}
             "stars": {},                          # best stars per level, e.g. {"7": 2}
             "best_distance": {},                  # best distance per level (used for the score tie-break)
-            "coins_balance": 0,                   # meta-currency for the shop
+            "coins_balance": 300,                 # meta-currency for the shop (starting grant)
             # Booster balances (per the boosters registry). New boosters can be
             # added without bumping the save version — `_load` fills missing
             # keys from defaults.
