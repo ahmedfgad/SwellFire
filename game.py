@@ -1137,6 +1137,11 @@ class GameScreen(ui.StyledScreen):
             if self.shield_aura.parent:
                 self.shield_aura.parent.remove_widget(self.shield_aura)
             self.shield_aura = None
+        # Cancel the manual-aim reticle's pulse so its Animation doesn't keep
+        # ticking on an off-stage widget between levels (the widget itself is
+        # reused on re-entry — _reset re-hides and the _update loop re-shows it).
+        if self.aim_reticle is not None:
+            self.aim_reticle.hide()
         # M13 — also tear the opponent hero off the stage; the on_enter
         # path checks "is None" before creating one, so without this the
         # next versus match would keep the stale ghost AND skip making
