@@ -849,6 +849,65 @@ class ShieldAura(Widget):
             self._anim = None
 
 
+class AimReticle(Widget):
+    """Manual-aim reticle: a faint line from the squad up to a pulsing ring
+    at the convergence point. Cyan normally, red + thicker when a target is
+    under it. Drawn in ``canvas`` (no stage depth issue — it sits above the
+    road like the shield aura). Position via ``set_endpoints`` each frame.
+    """
+
+    R = 16.0   # ring radius in logical px (caller may pass ws()-scaled size)
+
+    def __init__(self, radius: float | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.opacity = 0.0
+        self._r = radius if radius is not None else self.R
+        self._locked = False
+        with self.canvas:
+            self._line_color = Color(0.55, 0.88, 1.0, 0.30)
+            self._line = Line(width=1.6)
+            self._ring_color = Color(0.55, 0.88, 1.0, 0.95)
+            self._ring = Line(width=2.2)
+            self._dot_color = Color(0.85, 0.97, 1.0, 0.9)
+            self._dot = Line(width=1.4)
+        self._anim = None
+        self._sx = self._sy = self._rx = self._ry = 0.0
+
+    def set_endpoints(self, sx, sy, rx, ry):
+        self._sx, self._sy, self._rx, self._ry = sx, sy, rx, ry
+        self._line.points = [sx, sy, rx, ry]
+        self._ring.circle = (rx, ry, self._r)
+        self._dot.circle = (rx, ry, self._r * 0.28)
+
+    def set_locked(self, locked: bool):
+        if locked == self._locked:
+            return
+        self._locked = locked
+        if locked:
+            self._ring_color.rgba = (1.0, 0.35, 0.30, 1.0)
+            self._line_color.rgba = (1.0, 0.45, 0.40, 0.45)
+            self._ring.width = 3.0
+        else:
+            self._ring_color.rgba = (0.55, 0.88, 1.0, 0.95)
+            self._line_color.rgba = (0.55, 0.88, 1.0, 0.30)
+            self._ring.width = 2.2
+
+    def show(self):
+        self.opacity = 1.0
+        if self._anim is None:
+            anim = (Animation(a=0.55, duration=0.5, t="in_out_sine")
+                    + Animation(a=0.98, duration=0.5, t="in_out_sine"))
+            anim.repeat = True
+            anim.start(self._ring_color)
+            self._anim = anim
+
+    def hide(self):
+        self.opacity = 0.0
+        if self._anim is not None:
+            self._anim.cancel(self._ring_color)
+            self._anim = None
+
+
 class ParticleBurst(Widget):
     """Single-shot hit-burst placeholder. Real particle pool comes in M11."""
     def __init__(self, pos, color=(1, 1, 1, 1), **kwargs):
