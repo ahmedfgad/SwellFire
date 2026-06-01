@@ -1396,14 +1396,18 @@ class GameScreen(ui.StyledScreen):
         """Recompute the kill-zone for the current weapon and push it to the
         projectile controller + range-line widget. Non-boss only; boss levels
         keep unlimited range so the squad can hit the far boss."""
-        if self.stage is None or self.hero is None:
+        if self.stage is None or self.hero is None or self.stage.height < 10:
             return
         sx, sy = self.stage.pos
         sw, sh = self.stage.size
         hero_y = sy + sh * HERO_BOTTOM_FRAC
         field_h = (sy + sh) - hero_y
         is_boss = bool(self.level_config and self.level_config.get("boss"))
-        if is_boss:
+        running = ui.app()
+        is_mp = bool(running and running.current_mode != "single")
+        if is_boss or is_mp:
+            # Boss levels need the far boss hittable; MP shares the projectile
+            # pool so a host's kill line must not clip the opponent's shots.
             self._weapon_range_px = None
         else:
             frac = weapons.get(self.current_weapon_id).range_frac
@@ -2533,6 +2537,7 @@ class GameScreen(ui.StyledScreen):
             return False
         if codepoint == "w":
             self.current_weapon_id = weapons.next_id(self.current_weapon_id)
+            self._update_weapon_range()
             self._fire_cooldown = 0.0
             ui.app().audio.play_sfx("weapon_swap")
             return True
@@ -2540,6 +2545,7 @@ class GameScreen(ui.StyledScreen):
             new_id = weapons.by_index(int(codepoint) - 1)
             if new_id is not None:
                 self.current_weapon_id = new_id
+                self._update_weapon_range()
                 self._fire_cooldown = 0.0
                 ui.app().audio.play_sfx("weapon_swap")
                 return True
