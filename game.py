@@ -1070,6 +1070,7 @@ class GameScreen(ui.StyledScreen):
         # on boss levels). Done after the level config is applied so the
         # boss-level check is accurate.
         self._apply_stats_visibility()
+        self._apply_debug_visibility()
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -3652,6 +3653,15 @@ class GameScreen(ui.StyledScreen):
             self.top_bar.opacity = 1.0 if show else 0.0
         if self.chip_row is not None:
             self.chip_row.opacity = 1.0 if show else 0.0
+
+    def _apply_debug_visibility(self) -> None:
+        """Show/hide the FPS / debug overlay (FPS, frame ms, entity counts)
+        per the Settings toggle. Off by default; independent of show_stats."""
+        running = ui.app()
+        show = bool(running.state.get_setting("show_debug")) \
+            if (running and running.state) else False
+        if self.debug is not None:
+            self.debug.opacity = 1.0 if show else 0.0
 
     def _level_progress(self) -> float:
         """Fraction of the level completed (0..1), for the top progress bar.
