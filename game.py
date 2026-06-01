@@ -121,7 +121,9 @@ def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
     if not lane_centers:
         return current_x
     nearest = min(lane_centers, key=lambda lc: abs(lc - current_x))
-    if abs(nearest - current_x) > radius:
+    # `radius` is a world-px distance compared against scaled positions, so
+    # scale it with density (no-op at 1.0). Lane centers come in scaled.
+    if abs(nearest - current_x) > graphics.ws(radius):
         return current_x
     factor = 1.0 - math.exp(-strength * dt)
     return current_x + (nearest - current_x) * factor
@@ -344,7 +346,7 @@ class GameScreen(ui.StyledScreen):
         self.pickup_controller: entities.PickupController | None = None
         self.pickup_spawner: entities.PickupSpawner | None = None
         self.pickup_renderer: graphics.BatchedRenderer | None = None
-        self.grid = entities.SpatialGrid(GRID_CELL_PX)
+        self.grid = entities.SpatialGrid(graphics.ws(GRID_CELL_PX))
         self.current_weapon_id = DEFAULT_WEAPON_ID
         self._fire_cooldown = 0.0
         self._fire_rng = random.Random()
@@ -507,13 +509,14 @@ class GameScreen(ui.StyledScreen):
             self._road = Rectangle()
 
         with self.stage.canvas:
-            # Side rails.
+            # Side rails. Line widths scale with density so the road doesn't
+            # render hairline-thin on a high-density (Retina) screen.
             Color(1, 1, 1, 0.55)
-            self._left_rail = Line(width=2.0)
-            self._right_rail = Line(width=2.0)
+            self._left_rail = Line(width=graphics.ws(2.0))
+            self._right_rail = Line(width=graphics.ws(2.0))
             # Dashed centerline (N stripes that scroll).
             Color(1, 1, 1, 0.30)
-            self._stripes = [Line(width=2.6) for _ in range(N_STRIPES)]
+            self._stripes = [Line(width=graphics.ws(2.6)) for _ in range(N_STRIPES)]
 
         self.stage.bind(pos=self._layout_stage, size=self._layout_stage)
 
@@ -725,7 +728,7 @@ class GameScreen(ui.StyledScreen):
         sx, sy = self.stage.pos
         sw, sh = self.stage.size
         mid_x = sx + sw * 0.5
-        half = STRIPE_LENGTH * 0.5
+        half = graphics.ws(STRIPE_LENGTH) * 0.5
         for i, line in enumerate(self._stripes):
             y = self._stripe_ys[i]
             line.points = [mid_x, y - half, mid_x, y + half]
@@ -909,7 +912,8 @@ class GameScreen(ui.StyledScreen):
             # third-party art a drop-in replacement.
             self.hero = graphics.TextureSprite(
                 HERO_SPRITE_PATH,
-                size_hint=(None, None), size=(HERO_W, HERO_H),
+                size_hint=(None, None),
+                size=(graphics.ws(HERO_W), graphics.ws(HERO_H)),
             )
             self.stage.add_widget(self.hero)
 
@@ -918,7 +922,8 @@ class GameScreen(ui.StyledScreen):
         # _activate_shield shows it; repositioned to the hero each frame.
         if self.shield_aura is None:
             self.shield_aura = graphics.ShieldAura(
-                size_hint=(None, None), size=(HERO_W * 2.0, HERO_H * 1.7),
+                size_hint=(None, None),
+                size=(graphics.ws(HERO_W * 2.0), graphics.ws(HERO_H * 1.7)),
             )
             self.stage.add_widget(self.shield_aura)
 
@@ -930,7 +935,7 @@ class GameScreen(ui.StyledScreen):
             if self.hero_marker is None:
                 self.hero_marker = _HeroMarker(
                     color=(0.30, 0.85, 0.40, 0.90),
-                    size=(HERO_W * 0.95, HERO_H * 0.20),
+                    size=(graphics.ws(HERO_W * 0.95), graphics.ws(HERO_H * 0.20)),
                 )
                 # Insert under the hero so the sprite paints over it.
                 self.stage.add_widget(self.hero_marker, index=1)
@@ -940,14 +945,15 @@ class GameScreen(ui.StyledScreen):
                 # marker rings).
                 self.opponent_hero = graphics.TextureSprite(
                     OPPONENT_SPRITE_PATH,
-                    size_hint=(None, None), size=(HERO_W, HERO_H),
+                    size_hint=(None, None),
+                    size=(graphics.ws(HERO_W), graphics.ws(HERO_H)),
                 )
                 self.opponent_hero.opacity = 0.70
                 self.stage.add_widget(self.opponent_hero)
             if self.opponent_marker is None:
                 self.opponent_marker = _HeroMarker(
                     color=(0.95, 0.35, 0.35, 0.90),
-                    size=(HERO_W * 0.95, HERO_H * 0.20),
+                    size=(graphics.ws(HERO_W * 0.95), graphics.ws(HERO_H * 0.20)),
                 )
                 self.stage.add_widget(self.opponent_marker, index=1)
         elif running.current_mode == "single":
@@ -1212,7 +1218,12 @@ class GameScreen(ui.StyledScreen):
             if cfg is None:
                 cfg = levels.get_level(1)
         self.level_config = cfg
-        self.distance_goal = float(cfg["distance_goal"])
+        # distance_goal / gate_interval_px live in the scroll distance domain,
+        # which scales with density (self.distance accumulates scaled scroll).
+        # Scaling them keeps level *duration* and gate cadence identical to the
+        # density-1.0 build. enemy_speed/chase are left logical here — they are
+        # scaled at use in entities (EnemySpawner._spawn_one). No-op at 1.0.
+        self.distance_goal = graphics.ws(float(cfg["distance_goal"]))
         is_boss = bool(cfg.get("boss"))
 
         if self.enemy_spawner is not None:
@@ -1253,10 +1264,10 @@ class GameScreen(ui.StyledScreen):
                 # Boss levels keep gates available but sparser: ~5 pairs over
                 # the whole fight, so the player has rescue options without
                 # the gate-stream trivializing the fight.
-                self.gate_spawner.interval_px = 1500.0
+                self.gate_spawner.interval_px = graphics.ws(1500.0)
                 self.gate_spawner.max_grenade_gates = 1
             else:
-                self.gate_spawner.interval_px = cfg["gate_interval_px"]
+                self.gate_spawner.interval_px = graphics.ws(cfg["gate_interval_px"])
                 self.gate_spawner.max_grenade_gates = int(cfg.get("max_grenade_gates", 0))
             self.gate_spawner.allowed_ops = list(cfg["allowed_ops"])
             self.gate_spawner.allowed_weapons = list(cfg["allowed_weapons"])
@@ -1294,8 +1305,8 @@ class GameScreen(ui.StyledScreen):
             return
         sx, sy = self.stage.pos
         sw, sh = self.stage.size
-        boss_w = 160.0
-        boss_h = 160.0
+        boss_w = graphics.ws(160.0)
+        boss_h = graphics.ws(160.0)
         boss_cx = sx + sw * 0.5
         boss_cy = sy + sh * 0.82
         # Time-scaled HP: sized to the firepower the player ACTUALLY brings to
@@ -1512,12 +1523,17 @@ class GameScreen(ui.StyledScreen):
         if self.enemy_controller is None:
             return
         # Lower base hp so split grunts don't feel like infinite respawns.
-        speed = self.enemy_spawner.enemy_speed if self.enemy_spawner else 220.0
+        # Split grunts spawn directly (not via EnemySpawner._spawn_one), so
+        # scale their world-px size/speed/offset/chase with density here.
+        speed = graphics.ws(self.enemy_spawner.enemy_speed if self.enemy_spawner
+                            else 220.0)
+        sz = graphics.ws(36.0)
+        dx = graphics.ws(35.0)
         for k in (-1, 0, 1):
             self.enemy_controller.spawn(
-                x + k * 35.0, y, 36.0, 36.0, "enemy_red",
+                x + k * dx, y, sz, sz, "enemy_red",
                 hp=1, speed=speed,
-                chase=self._fire_rng.uniform(50.0, 110.0),
+                chase=graphics.ws(self._fire_rng.uniform(50.0, 110.0)),
                 enemy_type=entities.TYPE_GRUNT,
             )
 
@@ -1537,7 +1553,11 @@ class GameScreen(ui.StyledScreen):
         # Shake first so the offset applies to everything else this frame.
         self._step_shake(dt)
         self._run_time += dt
-        self.distance += SCROLL_SPEED_PX_PER_SEC * dt
+        # World scroll rate scales with density so the world moves the same
+        # on-screen speed at any resolution; self.distance therefore lives in
+        # the scaled domain (distance_goal/gate/pickup thresholds match it).
+        scroll = graphics.ws(SCROLL_SPEED_PX_PER_SEC)
+        self.distance += scroll * dt
 
         sx, sy = self.stage.pos
         sw, sh = self.stage.size
@@ -1545,7 +1565,7 @@ class GameScreen(ui.StyledScreen):
         # 1. Scroll the dashed centerline stripes downward (visual sense of
         #    moving forward in a top-down view).
         if sh > 0:
-            drop = SCROLL_SPEED_PX_PER_SEC * dt
+            drop = scroll * dt
             for i in range(len(self._stripe_ys)):
                 self._stripe_ys[i] -= drop
                 while self._stripe_ys[i] < sy:
@@ -1565,8 +1585,8 @@ class GameScreen(ui.StyledScreen):
             if not self._dragging and not self.auto_mode:
                 target = lane_gravity_target(target, self.lane_centers, dt)
                 self._hero_target_x = target
-            min_x = sx + HERO_W * 0.5
-            max_x = sx + sw - HERO_W * 0.5
+            min_x = sx + graphics.ws(HERO_W) * 0.5
+            max_x = sx + sw - graphics.ws(HERO_W) * 0.5
             target = max(min_x, min(max_x, target))
             self._hero_target_x = target
             # Hero motion: manual touch already feels smooth because the
@@ -1577,7 +1597,7 @@ class GameScreen(ui.StyledScreen):
             # AUTO_HERO_MAX_SPEED so it reads like a real player.
             if self.auto_mode:
                 desired_dx = target - self.hero.center_x
-                max_step = AUTO_HERO_MAX_SPEED * dt
+                max_step = graphics.ws(AUTO_HERO_MAX_SPEED) * dt
                 if desired_dx > max_step:
                     self.hero.center_x += max_step
                 elif desired_dx < -max_step:
@@ -1589,7 +1609,7 @@ class GameScreen(ui.StyledScreen):
 
             # Running bob — vertical sine driven by distance (so it looks
             # right even at varying frame rates).
-            bob = math.sin(self.distance / 22.0) * 5.0
+            bob = math.sin(self.distance / graphics.ws(22.0)) * graphics.ws(5.0)
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
             # Hero identity marker — green ring under the local hero.
@@ -1604,7 +1624,7 @@ class GameScreen(ui.StyledScreen):
             if self.opponent_hero is not None and role == "host":
                 ox = self.opponent_hero.center_x
                 desired_dx = self.opponent_target_x - ox
-                max_step = AUTO_HERO_MAX_SPEED * dt
+                max_step = graphics.ws(AUTO_HERO_MAX_SPEED) * dt
                 if desired_dx > max_step:
                     self.opponent_hero.center_x += max_step
                 elif desired_dx < -max_step:
@@ -1634,7 +1654,7 @@ class GameScreen(ui.StyledScreen):
             elif lvl_type == "hybrid":
                 # Alternating spikes every ~3 s — half the level the spawn
                 # pressure ratchets up so the player can't autopilot.
-                phase = (self.distance / SCROLL_SPEED_PX_PER_SEC) / 3.0
+                phase = (self.distance / scroll) / 3.0
                 spike = (int(phase) % 2 == 1)
                 type_mult = 0.70 if spike else 1.0
             else:   # dynamic
@@ -1677,7 +1697,7 @@ class GameScreen(ui.StyledScreen):
                 and not self.level_config.get("boss")):
             self.pickup_spawner.tick(
                 self.distance, x_min, x_max, y_max,
-                SCROLL_SPEED_PX_PER_SEC,
+                scroll,
             )
             self.pickup_controller.update(dt, y_min)
             # Magnet booster: home every active pickup toward the hero so the
@@ -1685,7 +1705,7 @@ class GameScreen(ui.StyledScreen):
             if self.magnet_active_until > self._run_time:
                 pp = self.pickup_pool
                 hx, hy = self.hero.center_x, self.hero.center_y
-                step = boosters.MAGNET_PULL_SPEED * dt
+                step = graphics.ws(boosters.MAGNET_PULL_SPEED) * dt
                 for i in range(pp.capacity):
                     if not pp.active[i]:
                         continue
@@ -1698,7 +1718,7 @@ class GameScreen(ui.StyledScreen):
             entities.resolve_pickup_collection(
                 self.pickup_controller,
                 self.hero.center_x, self.hero.center_y,
-                PICKUP_COLLECT_RADIUS,
+                graphics.ws(PICKUP_COLLECT_RADIUS),
                 self._on_pickup_collect,
             )
             # M13 — versus: opponent collects pickups independently via
@@ -1711,7 +1731,7 @@ class GameScreen(ui.StyledScreen):
                 entities.resolve_pickup_collection(
                     self.pickup_controller,
                     self.opponent_hero.center_x, self.opponent_hero.center_y,
-                    PICKUP_COLLECT_RADIUS,
+                    graphics.ws(PICKUP_COLLECT_RADIUS),
                     self._on_opponent_pickup_collect,
                     player_id=1,
                 )
@@ -1723,7 +1743,7 @@ class GameScreen(ui.StyledScreen):
                 and self.hero is not None):
             self.gate_spawner.tick(self.distance, x_min, x_max, y_max)
             self.gate_controller.update(
-                dt, SCROLL_SPEED_PX_PER_SEC,
+                dt, scroll,
                 self.hero.center_x, self.hero.center_y,
                 self._on_apply_gate,
                 on_miss=self._on_miss_gate,
@@ -1806,13 +1826,15 @@ class GameScreen(ui.StyledScreen):
                         has_target = False
                 if has_target:
                     # Shooter positions: hero muzzle + every active follower's muzzle.
-                    hero_muzzle = (self.hero.center_x, self.hero.center_y + MUZZLE_OFFSET_Y)
+                    hero_muzzle = (self.hero.center_x,
+                                   self.hero.center_y + graphics.ws(MUZZLE_OFFSET_Y))
                     positions = [hero_muzzle]
                     sp = self.squad_pool
                     sc = self.squad_controller
+                    squad_muzzle = graphics.ws(sc.MUZZLE_OFFSET_Y)
                     for i in range(sp.capacity):
                         if sp.active[i]:
-                            positions.append((sp.cx[i], sp.cy[i] + sc.MUZZLE_OFFSET_Y))
+                            positions.append((sp.cx[i], sp.cy[i] + squad_muzzle))
                     # Sub-linear firepower cap. Above MAX_SHOOTERS_PER_SHOT,
                     # randomly sample so every squad member rotates in over
                     # time (every shot picks a different subset). Squad
@@ -1922,22 +1944,24 @@ class GameScreen(ui.StyledScreen):
             if (self._mp_role() == "host"
                     and self.opponent_hero is not None
                     and self.opponent_alive):
+                front_offset = graphics.ws(ATTRITION_FRONT_OFFSET)
+                zone_half_w = graphics.ws(ATTRITION_ZONE_HALF_W)
                 entities.resolve_squad_attrition_dual(
                     self.enemy_controller,
                     self.hero.center_x, self.hero.center_y,
-                    self.hero.center_y + ATTRITION_FRONT_OFFSET,
+                    self.hero.center_y + front_offset,
                     self._on_squad_loss,
                     self.opponent_hero.center_x, self.opponent_hero.center_y,
-                    self.opponent_hero.center_y + ATTRITION_FRONT_OFFSET,
+                    self.opponent_hero.center_y + front_offset,
                     self._on_opponent_squad_loss,
-                    ATTRITION_ZONE_HALF_W,
+                    zone_half_w,
                 )
             else:
                 entities.resolve_squad_attrition(
                     self.enemy_controller,
                     self.hero.center_x, self.hero.center_y,
-                    ATTRITION_ZONE_HALF_W,
-                    self.hero.center_y + ATTRITION_FRONT_OFFSET,
+                    graphics.ws(ATTRITION_ZONE_HALF_W),
+                    self.hero.center_y + graphics.ws(ATTRITION_FRONT_OFFSET),
                     self._on_squad_loss,
                 )
 
@@ -2122,7 +2146,7 @@ class GameScreen(ui.StyledScreen):
             "weapon_swap" if gate.op == gates.OP_WEAPON else "gate_pickup")
         if self.particle_controller is not None and self.hero is not None:
             self.particle_controller.burst(
-                self.hero.center_x, self.hero.center_y + HERO_H * 0.3,
+                self.hero.center_x, self.hero.center_y + graphics.ws(HERO_H * 0.3),
                 count=10, speed=260.0, ttl=0.45, size=12.0,
                 frame="particle", rng=self._fire_rng,
             )
@@ -2529,7 +2553,8 @@ class GameScreen(ui.StyledScreen):
         self.grenade_count -= 1
         hero_cx = self.hero.center_x
         hero_cy = self.hero.center_y
-        r2 = GRENADE_RADIUS * GRENADE_RADIUS
+        grenade_radius = graphics.ws(GRENADE_RADIUS)
+        r2 = grenade_radius * grenade_radius
         ep = self.enemy_pool
         active = ep.active
         cx = ep.cx
@@ -2892,7 +2917,7 @@ class GameScreen(ui.StyledScreen):
         sx_s, sy_s = self.stage.pos
         sw_s, sh_s = self.stage.size
         if sh_s > 0:
-            drop = SCROLL_SPEED_PX_PER_SEC * dt
+            drop = graphics.ws(SCROLL_SPEED_PX_PER_SEC) * dt
             for i in range(len(self._stripe_ys)):
                 self._stripe_ys[i] -= drop
                 while self._stripe_ys[i] < sy_s:
@@ -3324,11 +3349,13 @@ class GameScreen(ui.StyledScreen):
                 # their fire contribution still counts.
                 n = max(1, min(self.opponent_squad, MAX_SHOOTERS_PER_SHOT))
                 positions = []
+                muzzle_off = graphics.ws(MUZZLE_OFFSET_Y)
+                fan_step = graphics.ws(14.0)
                 for i in range(n):
-                    offset = (i - (n - 1) / 2.0) * 14.0
+                    offset = (i - (n - 1) / 2.0) * fan_step
                     positions.append((
                         self.opponent_hero.center_x + offset,
-                        self.opponent_hero.center_y + MUZZLE_OFFSET_Y,
+                        self.opponent_hero.center_y + muzzle_off,
                     ))
                 entities.fire_from_positions(
                     positions, target_x, target_y, weapon,

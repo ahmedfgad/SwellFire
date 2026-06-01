@@ -161,7 +161,7 @@ class EnemyController:
         speed = self.speed
         state = self.state
 
-        despawn_y = y_min - 60.0   # past the floor; small buffer
+        despawn_y = y_min - graphics.ws(60.0)   # past the floor; small buffer
 
         for i in range(pool.capacity):
             if not active[i]:
@@ -281,26 +281,31 @@ class EnemySpawner:
                 enemy_type = t
                 break
         arch = ARCHETYPES[enemy_type]
-        size = float(arch["size"])
+        # World-px magnitudes (sprite size, downward speed, lateral chase,
+        # edge margins) scale with device density so the enemy is the same
+        # on-screen size/speed at any resolution. No-op at density 1.0.
+        size = graphics.ws(float(arch["size"]))
         hp = max(1, int(round(self.enemy_hp * arch["hp_mult"])))
-        speed = self.enemy_speed * arch["speed_mult"]
-        chase_lo = self.chase_strength_min * arch["chase_mult"]
-        chase_hi = self.chase_strength_max * arch["chase_mult"]
+        speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
+        chase_lo = graphics.ws(self.chase_strength_min) * arch["chase_mult"]
+        chase_hi = graphics.ws(self.chase_strength_max) * arch["chase_mult"]
         frame = arch["frame"]
+        edge = graphics.ws(40.0)
+        above_top = graphics.ws(self.spawn_above_top)
 
         count = int(arch["spawn_count"])
         last_idx = -1
         # Cluster spawn (swarmers): tile horizontally near the chosen X with
         # a tight spread so they read as one wave.
-        anchor_x = rng.uniform(x_min + size * 0.5 + 40.0,
-                               x_max - size * 0.5 - 40.0)
+        anchor_x = rng.uniform(x_min + size * 0.5 + edge,
+                               x_max - size * 0.5 - edge)
         for k in range(count):
             offset = (k - (count - 1) / 2.0) * (size * 0.95)
             x = max(x_min + size * 0.5,
                     min(x_max - size * 0.5, anchor_x + offset))
             chase = rng.uniform(chase_lo, chase_hi)
             last_idx = self.controller.spawn(
-                x, y_max + self.spawn_above_top,
+                x, y_max + above_top,
                 size, size, frame,
                 hp=hp, speed=speed, chase=chase, enemy_type=enemy_type,
             )
@@ -349,7 +354,7 @@ class ProjectileController:
         vx = pool.vx
         vy = pool.vy
         ttl = self.ttl
-        margin = 60.0
+        margin = graphics.ws(60.0)
         for i in range(pool.capacity):
             if not active[i]:
                 continue
@@ -384,6 +389,10 @@ class ParticleController:
 
     def burst(self, x: float, y: float, count: int, speed: float, ttl: float,
               size: float, frame: str, rng: random.Random) -> None:
+        # Particle size + spread velocity are world-px; scale with density so
+        # bursts read the same on-screen at any resolution.
+        speed = graphics.ws(speed)
+        size = graphics.ws(size)
         two_pi = 6.28318530718
         for _ in range(count):
             angle = rng.uniform(0.0, two_pi)
@@ -401,6 +410,9 @@ class ParticleController:
                   size: float, ttl: float, frame: str) -> int:
         """Single directional particle. Used for muzzle flashes and
         gun-smoke trails where the direction matters."""
+        size = graphics.ws(size)
+        vx = graphics.ws(vx)
+        vy = graphics.ws(vy)
         idx = self.pool.spawn(x, y, vx, vy, size, size, frame)
         if idx >= 0:
             self.ttl[idx] = ttl
@@ -542,8 +554,8 @@ def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,
 
     muzzle_y = hero_cy + muzzle_offset_y
     spread = math.radians(weapon.spread_deg)
-    speed = weapon.projectile_speed
-    size = weapon.projectile_size
+    speed = graphics.ws(weapon.projectile_speed)
+    size = graphics.ws(weapon.projectile_size)
     spawned = 0
     for _ in range(weapon.projectiles_per_shot):
         a = rng.uniform(-spread, spread)
@@ -604,9 +616,11 @@ class SquadController:
         follower_count = max(0, min(self.pool.capacity, int(follower_count)))
         pool = self.pool
         # Spawn slots up to target.
+        runner_w = graphics.ws(self.RUNNER_W)
+        runner_h = graphics.ws(self.RUNNER_H)
         while pool.active_count < follower_count:
             idx = pool.spawn(0.0, 0.0, 0.0, 0.0,
-                             self.RUNNER_W, self.RUNNER_H, self.FRAME_NAME)
+                             runner_w, runner_h, self.FRAME_NAME)
             if idx < 0:
                 break
         # Release surplus slots, from highest index down so we don't keep
@@ -628,9 +642,12 @@ class SquadController:
         if n == 0:
             return
         cols = min(self.MAX_COLS, max(1, int(math.sqrt(n) * 1.2 + 0.5)))
-        row_width = (cols - 1) * self.SPACING_X
-        spacing_x = self.SPACING_X
-        spacing_y = self.SPACING_Y
+        # Formation spacing + the gap below the hero are world-px; scale so the
+        # crowd keeps the same on-screen density at any resolution.
+        spacing_x = graphics.ws(self.SPACING_X)
+        spacing_y = graphics.ws(self.SPACING_Y)
+        start_offset = graphics.ws(self.FORMATION_START_OFFSET)
+        row_width = (cols - 1) * spacing_x
         cx = pool.cx
         cy = pool.cy
         slot = 0
@@ -640,7 +657,7 @@ class SquadController:
             col = slot % cols
             row = slot // cols
             cx[i] = hero_cx + col * spacing_x - row_width * 0.5
-            cy[i] = (hero_cy - self.FORMATION_START_OFFSET
+            cy[i] = (hero_cy - start_offset
                     - row * spacing_y)
             slot += 1
 
@@ -658,8 +675,8 @@ def fire_from_positions(positions, target_x: float, target_y: float,
     apply a tier multiplier without mutating the immutable `Weapon`. Returns
     number actually spawned (the projectile pool may be saturated).
     """
-    speed = weapon.projectile_speed
-    size = weapon.projectile_size
+    speed = graphics.ws(weapon.projectile_speed)
+    size = graphics.ws(weapon.projectile_size)
     spread = math.radians(weapon.spread_deg)
     damage = weapon.damage if damage_override is None else max(1, int(damage_override))
     spawned = 0
@@ -749,7 +766,7 @@ class PickupController:
         vy = pool.vy
         cp1 = self.consumed_by_p1
         cp2 = self.consumed_by_p2
-        despawn = y_min - self.DESPAWN_BELOW_Y_MARGIN
+        despawn = y_min - graphics.ws(self.DESPAWN_BELOW_Y_MARGIN)
         for i in range(pool.capacity):
             if not active[i]:
                 continue
@@ -777,28 +794,32 @@ class PickupSpawner:
         self._next_distance = 250.0   # first pickup ~0.7 s into the level
 
     def reset_per_level(self) -> None:
-        self._next_distance = 250.0
+        # Distances live in the (density-scaled) scroll domain — see
+        # graphics.world_scale(). Scaling the thresholds keeps the *number*
+        # of pickups per level constant when scroll_speed also scales.
+        self._next_distance = graphics.ws(250.0)
 
     def tick(self, distance: float, x_min: float, x_max: float,
              y_top: float, scroll_speed: float) -> bool:
         if distance < self._next_distance:
             return False
         # Random interval to next pickup so spacing isn't predictable.
-        self._next_distance += self._rng.uniform(
+        self._next_distance += graphics.ws(self._rng.uniform(
             self.INTERVAL_PX_MIN, self.INTERVAL_PX_MAX,
-        )
+        ))
         # Lateral X (keep margin from rails).
-        x = self._rng.uniform(x_min + 60.0, x_max - 60.0)
+        x = self._rng.uniform(x_min + graphics.ws(60.0),
+                              x_max - graphics.ws(60.0))
         # M14 — coin / double_coin now have dedicated atlas frames; the
         # old "projectile" / "particle" reuses are gone.
         if self._rng.random() < self.DOUBLE_COIN_CHANCE:
             ptype = PICKUP_DOUBLE_COIN
             frame = "double_coin"
-            size = self.DOUBLE_SIZE
+            size = graphics.ws(self.DOUBLE_SIZE)
         else:
             ptype = PICKUP_COIN
             frame = "coin"
-            size = self.COIN_SIZE
+            size = graphics.ws(self.COIN_SIZE)
         self.controller.spawn(x, y_top, -scroll_speed, size, frame, ptype)
         return True
 
@@ -939,7 +960,8 @@ def resolve_projectile_collisions(
     e_type = enemy_controller.type
     kills = 0
     # Bumped from 30 to 40 to cover the larger tank/splitter hit boxes.
-    enemy_max_radius = 40.0
+    # Scales with density since enemy hit-boxes (pool.hw/hh) do.
+    enemy_max_radius = graphics.ws(40.0)
     for pi in range(pp.capacity):
         if not p_active[pi]:
             continue

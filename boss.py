@@ -117,11 +117,11 @@ class BossController:
                            if boss.phase2 else self.TARGET_REPICK_EVERY)
         if self._target_timer >= repick_interval:
             self._target_timer = 0.0
-            margin = boss.width * 0.5 + 20.0
+            margin = boss.width * 0.5 + graphics.ws(20.0)
             boss.target_cx = self._rng.uniform(x_min + margin, x_max - margin)
         dx = boss.target_cx - boss.cx
         if abs(dx) > 0.5:
-            step = self.LATERAL_SPEED * dt
+            step = graphics.ws(self.LATERAL_SPEED) * dt
             if abs(dx) < step:
                 boss.cx = boss.target_cx
             else:
@@ -183,24 +183,30 @@ class BossController:
         # constants at module load time).
         import entities as ent
         boss = self.boss
+        # Boss minions spawn directly (not via EnemySpawner._spawn_one), so
+        # scale their world-px size/speed/margins with density here. No-op at 1.0.
+        edge = graphics.ws(30.0)
+        above = graphics.ws(20.0)
+        minion_sz = graphics.ws(44.0)
         for _ in range(self.VOLLEY_COUNT):
-            x = self._rng.uniform(x_min + 30.0,
-                                  x_min + (self.boss.cx - x_min) * 2 - 30.0)
+            x = self._rng.uniform(x_min + edge,
+                                  x_min + (self.boss.cx - x_min) * 2 - edge)
             self.enemy_controller.spawn(
-                x, y_max + 20.0, 44.0, 44.0, "enemy_red",
-                hp=self.minion_hp, speed=240.0, chase=self._rng.uniform(40.0, 110.0),
+                x, y_max + above, minion_sz, minion_sz, "enemy_red",
+                hp=self.minion_hp, speed=graphics.ws(240.0),
+                chase=graphics.ws(self._rng.uniform(40.0, 110.0)),
                 enemy_type=ent.TYPE_GRUNT,
             )
         if boss.phase2:
             tank_arch = ent.ARCHETYPES[ent.TYPE_TANK]
-            tank_size = float(tank_arch["size"])
+            tank_size = graphics.ws(float(tank_arch["size"]))
             tank_x = self._rng.uniform(x_min + tank_size,
                                        x_min + (self.boss.cx - x_min) * 2 - tank_size)
             self.enemy_controller.spawn(
-                tank_x, y_max + 20.0, tank_size, tank_size, tank_arch["frame"],
+                tank_x, y_max + above, tank_size, tank_size, tank_arch["frame"],
                 hp=int(max(1, self.minion_hp * tank_arch["hp_mult"])),
-                speed=240.0 * tank_arch["speed_mult"],
-                chase=self._rng.uniform(40.0, 90.0) * tank_arch["chase_mult"],
+                speed=graphics.ws(240.0) * tank_arch["speed_mult"],
+                chase=graphics.ws(self._rng.uniform(40.0, 90.0)) * tank_arch["chase_mult"],
                 enemy_type=ent.TYPE_TANK,
             )
 
@@ -209,10 +215,14 @@ class BossController:
         """Single enemy spawned near the boss aimed roughly at hero."""
         import entities as ent
         offset = self._rng.uniform(-self.boss.width * 0.45, self.boss.width * 0.45)
-        x = max(x_min + 30.0, min(x_max - 30.0, self.boss.cx + offset))
+        edge = graphics.ws(30.0)
+        minion_sz = graphics.ws(44.0)
+        x = max(x_min + edge, min(x_max - edge, self.boss.cx + offset))
         self.enemy_controller.spawn(
-            x, self.boss.cy - self.boss.height * 0.5 - 20.0, 44.0, 44.0, "enemy_red",
-            hp=self.minion_hp, speed=300.0, chase=self._rng.uniform(110.0, 180.0),
+            x, self.boss.cy - self.boss.height * 0.5 - graphics.ws(20.0),
+            minion_sz, minion_sz, "enemy_red",
+            hp=self.minion_hp, speed=graphics.ws(300.0),
+            chase=graphics.ws(self._rng.uniform(110.0, 180.0)),
             enemy_type=ent.TYPE_GRUNT,
         )
 

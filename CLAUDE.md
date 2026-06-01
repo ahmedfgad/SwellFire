@@ -64,6 +64,26 @@ imply full coverage you didn't do.
 
 ## Gotchas
 
+- **World pixel scale (density independence)**: the game *world* (sprite sizes,
+  speeds, distances, gate boxes, offsets, radii) is dimensioned in raw pixels
+  tuned on a **density-1.0 desktop window**. On a high-density (Retina) surface
+  Kivy reports `Window.size` in physical pixels and `Metrics.density` is 2–3, so
+  raw-px magnitudes render tiny while `sp()`/`dp()` *text* scales up — sprites
+  look small and gate equations overflow their box (the iOS bug). The fix:
+  **every runtime read of a world-px size/speed/distance/offset is wrapped in
+  `graphics.ws(value)`** (= `value * Metrics.density`, cached, clamped ≥1.0,
+  **no-op at density 1.0** so desktop is unchanged). Positions derived from the
+  (already-scaled) stage bounds are left alone. The scroll *distance* domain
+  (`self.distance`, `distance_goal`, gate/pickup interval thresholds) scales
+  too, which keeps level duration + gate cadence identical across densities
+  (numerator and denominator both ×density). **When you add any new world-px
+  magnitude, wrap it in `graphics.ws()`** — keep the base constant as the
+  readable logical value. Sites that bypass the scaled spawners (direct
+  `enemy_controller.spawn` in the splitter code + `boss.py` minions) scale
+  inline. Regression test: `SDL_AUDIODRIVER=dummy venv/bin/python
+  test_world_scale.py`. (MP positions are sent normalized to stage fraction —
+  `norm_x` — so they stay density-independent; cross-device *different*-density
+  lockstep is still untested.)
 - **Atlas UVs**: `SpriteAtlas._build_frames` maps frames with **no vertical flip** (this Kivy/provider loads PIL-row-0 at GL v=0). Don't "restore" a `1 - y/H` flip or `get_region`-derived coords — they sample the empty half and render transparent against the 256×256 atlases.
 - **Gate labels**: `label_text` stays canonical ASCII (synced to MP client, used by logic); the `Gate` widget prettifies for display. Math gates pair only with math gates; bonus gates (grenade/reinforce/freeze/overdrive/magnet/weapon) form rare bonus pairs.
 - **Boss HP** is time-scaled in `_spawn_boss` (`BOSS_TARGET_SECONDS`), not a flat number.

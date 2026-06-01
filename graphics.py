@@ -21,8 +21,59 @@ from kivy.core.image import Image as CoreImage
 from kivy.resources import resource_find
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
-from kivy.metrics import dp, sp
+from kivy.metrics import dp, sp, Metrics
 from kivy.properties import BooleanProperty, NumericProperty
+
+
+# ===========================================================================
+# World pixel scale (density independence)
+# ===========================================================================
+#
+# The whole game *world* (sprite sizes, speeds, distances, gate boxes) is
+# dimensioned in raw pixels that were tuned on a density-1.0 desktop window.
+# On a high-density (Retina) mobile surface, Kivy reports Window.size in
+# physical pixels and Metrics.density is 2-3, so those raw-pixel magnitudes
+# render tiny while sp()/dp() text scales up with density — gate equations
+# overflow their fixed-px box, sprites/coins/monsters look small.
+#
+# `ws(value)` multiplies a world-space pixel magnitude by the device density so
+# the world becomes density-independent: identical look AND feel at any
+# density, and a *no-op at density 1.0* (so the desktop build is unchanged).
+# Apply it at every runtime read of a world-px size/speed/distance/offset;
+# leave positions derived from the (already-scaled) stage bounds alone.
+_WORLD_SCALE = None
+
+
+def world_scale() -> float:
+    """Cached world-space pixel scale (= Metrics.density, clamped to >= 1.0).
+
+    Read lazily and cached so it is stable for the whole run and picks up the
+    real density only after the Window (and thus Metrics.density) exists —
+    reading it at import time would bake in the pre-window default of 1.0.
+    """
+    global _WORLD_SCALE
+    if _WORLD_SCALE is None:
+        try:
+            d = float(Metrics.density)
+        except Exception:
+            d = 1.0
+        _WORLD_SCALE = d if d and d > 0.0 else 1.0
+    return _WORLD_SCALE
+
+
+def ws(value: float) -> float:
+    """Scale a world-space pixel magnitude by the device density."""
+    return value * world_scale()
+
+
+def set_world_scale(value) -> None:
+    """Override / reset the cached scale. Pass None to re-read on next use.
+
+    Used by headless tests to exercise the density-3 path without a Retina
+    display; production code never calls this.
+    """
+    global _WORLD_SCALE
+    _WORLD_SCALE = float(value) if value else None
 
 
 # ===========================================================================

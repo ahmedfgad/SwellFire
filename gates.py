@@ -36,6 +36,8 @@ from kivy.metrics import dp, sp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import graphics
+
 
 # --- op tags -------------------------------------------------------------
 
@@ -323,12 +325,17 @@ class GateSpawner:
     def __init__(self, controller: "GateController", seed: int | None = None):
         self.controller = controller
         self._rng = random.Random(seed)
-        self.interval_px = self.INTERVAL_PX
+        # interval_px and _next_distance live in the (density-scaled) scroll
+        # distance domain — see graphics.world_scale(). Scaling keeps gate
+        # cadence (gates per level) identical to the density-1.0 build.
+        # game.GameScreen overrides interval_px from the level cfg (already
+        # scaled at that assignment site).
+        self.interval_px = graphics.ws(self.INTERVAL_PX)
         # First gate should arrive before the first wave of enemies reaches
         # the squad — otherwise late-world levels are unplayable at squad=1.
         # 200 px = ~0.55 s of scroll; gate then takes ~1.3 s to travel to the
         # hero, so it lands at ~1.85 s — just under the first attrition.
-        self._next_distance = 200.0
+        self._next_distance = graphics.ws(200.0)
         self.allowed_ops: list[str] = list(self.DEFAULT_OPS)
         self.allowed_weapons: list[str] = list(self.DEFAULT_WEAPONS)
         # World tier (1..6) drives the *equation difficulty* on gate labels.
@@ -362,10 +369,16 @@ class GateSpawner:
         self._next_distance += self.interval_px
 
         road_w = x_max - x_min
-        gate_w = (road_w - self.LATERAL_MARGIN * 2 - self.GATE_GAP_PX) * 0.5
-        gate_h = self.GATE_HEIGHT
-        left_x = x_min + self.LATERAL_MARGIN
-        right_x = left_x + gate_w + self.GATE_GAP_PX
+        # Gate box height/gap/margins are world-px tuned at density 1.0; scale
+        # them so the box matches its sp()-sized equation labels (which already
+        # scale with density) — otherwise the two-line equation overflows a
+        # fixed-px box on a Retina screen. No-op at density 1.0.
+        lateral_margin = graphics.ws(self.LATERAL_MARGIN)
+        gate_gap = graphics.ws(self.GATE_GAP_PX)
+        gate_w = (road_w - lateral_margin * 2 - gate_gap) * 0.5
+        gate_h = graphics.ws(self.GATE_HEIGHT)
+        left_x = x_min + lateral_margin
+        right_x = left_x + gate_w + gate_gap
 
         # Math ops always pair with math ops (a real ×2-vs-+5 decision);
         # weapon/grenade gates form their own occasional bonus pairs and never
@@ -671,7 +684,7 @@ class GateController:
                         if on_miss is not None:
                             on_miss()
 
-            if pair[0].y + pair[0].height < self.stage.y - self.DESPAWN_BELOW_PX:
+            if pair[0].y + pair[0].height < self.stage.y - graphics.ws(self.DESPAWN_BELOW_PX):
                 to_remove.append(pair)
 
         for pair in to_remove:
