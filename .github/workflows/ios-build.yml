@@ -104,7 +104,7 @@ jobs:
 
       # kivy-ios writes its own default name, bundle id and version into the app
       # Info.plist, and allows every orientation. Set the Swellfire values here
-      # so the built app matches the Android app and stays landscape only.
+      # so the built app matches the Android app and stays portrait only.
       - name: Set the app metadata
         run: |
           PLIST=$(find "$PROJ_DIR" -name "${SCHEME}-Info.plist" | head -1)
@@ -118,16 +118,18 @@ jobs:
           $PB -c "Set :CFBundleVersion 10000" "$PLIST" || $PB -c "Add :CFBundleVersion string 10000" "$PLIST"
           # The 2-player feature talks to a nearby device over the local network.
           $PB -c "Add :NSLocalNetworkUsageDescription string 'Swellfire uses the local network to play with a nearby device.'" "$PLIST" || true
-          $PB -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
-          $PB -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
-          $PB -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
-          $PB -c "Add :UISupportedInterfaceOrientations: string UIInterfaceOrientationLandscapeLeft" "$PLIST"
-          $PB -c "Add :UISupportedInterfaceOrientations: string UIInterfaceOrientationLandscapeRight" "$PLIST"
+          # Portrait only, on both iPhone and iPad, matching the Android build.
+          for KEY in "UISupportedInterfaceOrientations" "UISupportedInterfaceOrientations~ipad"; do
+            $PB -c "Delete :$KEY" "$PLIST" 2>/dev/null || true
+            $PB -c "Add :$KEY array" "$PLIST"
+            $PB -c "Add :$KEY: string UIInterfaceOrientationPortrait" "$PLIST"
+          done
           echo "--- updated values ---"
           $PB -c "Print :CFBundleIdentifier" "$PLIST"
           $PB -c "Print :CFBundleShortVersionString" "$PLIST"
           $PB -c "Print :CFBundleVersion" "$PLIST"
           $PB -c "Print :UISupportedInterfaceOrientations" "$PLIST"
+          $PB -c "Print :UISupportedInterfaceOrientations~ipad" "$PLIST"
 
       # Build for a real device without signing. Signing is left to Xcode or the
       # sideload tools, which sign with the user's own Apple ID.
