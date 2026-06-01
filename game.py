@@ -110,6 +110,7 @@ SCORE_COLOR = (0.95, 0.96, 1.0, 1.0)        # white/silver — distinct from coi
 GATE_GAIN_COLOR = (0.55, 0.80, 1.0, 1.0)    # squad blue (gate gain)
 GATE_LOSS_COLOR = (1.0, 0.42, 0.40, 1.0)    # red (gate loss)
 GATE_WEAPON_COLOR = (1.0, 0.80, 0.30, 1.0)  # weapon amber
+AUTOPLAYER_COST = 30   # coins charged once per level to enable the autoplayer
 # Fractional coin rewards per archetype kill — accumulated via a remainder
 # counter so common grunts contribute meaningfully over many kills without
 # trivializing the shop. A run of ~70 grunt kills now pays ~21 coins
@@ -452,6 +453,7 @@ class GameScreen(ui.StyledScreen):
         # daemon thread drives ``_hero_target_x`` and the touch handlers
         # ignore drag input so the GA can play without interference.
         self.auto_mode = False
+        self._auto_paid_for_level = False   # autoplayer charged this level yet?
         self.auto: autoplay.AutoPlayer | None = None
         self.auto_btn = None
         # Multiplayer state (M13). Used only when current_mode != "single".
@@ -1269,13 +1271,14 @@ class GameScreen(ui.StyledScreen):
                 self.boss_widget.update_from_boss()
         if self._update_event is None:
             self._update_event = Clock.schedule_interval(self._update, 1 / 60.0)
-        # If auto-play was on for the previous level, keep it on for this
-        # one — restart the GA daemon now that the world is reset.
+        # Autoplay never carries across levels — each level starts OFF so the
+        # player is never charged the per-level cost by surprise. They must
+        # re-enable (and re-pay) it explicitly via the Auto button.
+        self.auto_mode = False
+        self._auto_paid_for_level = False
+        if self.auto is not None:
+            self.auto.stop()
         self._refresh_auto_button()
-        if self.auto_mode:
-            if self.auto is None:
-                self.auto = autoplay.AutoPlayer(self)
-            self.auto.start()
 
     def _apply_level_config(self) -> None:
         """Look up the per-level config and push it to the spawners.
@@ -3892,19 +3895,46 @@ class GameScreen(ui.StyledScreen):
 
     # --- auto-play toggle (M12) ------------------------------------------
 
+    def _charge_autoplayer(self) -> bool:
+        """Spend the per-level autoplayer cost once. Returns True if autoplay
+        may run this level (already paid, or just paid); False if the player
+        can't afford it. Multiplayer never touches the save, so it's free there."""
+        if self._auto_paid_for_level:
+            return True
+        running = ui.app()
+        if (running is None or running.state is None
+                or running.current_mode != "single"):
+            self._auto_paid_for_level = True
+            return True
+        if running.state.spend_coins(AUTOPLAYER_COST):
+            self._auto_paid_for_level = True
+            self._float_text("-{} c".format(AUTOPLAYER_COST), (1.0, 0.45, 0.40, 1.0))
+            running.audio.play_sfx("purchase")
+            return True
+        # Can't afford — feedback, no enable.
+        self._float_text("NEED {} COINS".format(AUTOPLAYER_COST),
+                         (1.0, 0.45, 0.40, 1.0))
+        running.audio.play_sfx("error")
+        return False
+
     def _toggle_auto(self) -> None:
         """Flip auto mode on/off. Same shape as CoinTex's _toggle_auto:
         flip the flag, refresh the button, then start or stop the GA
         daemon. The thread stays dormant when the game isn't active so
         it's safe to call this between levels."""
-        self.auto_mode = not self.auto_mode
-        self._refresh_auto_button()
-        if self.auto_mode:
+        if not self.auto_mode:
+            # Turning autoplay ON costs coins (once per level); block if broke.
+            if not self._charge_autoplayer():
+                return
+            self.auto_mode = True
+            self._refresh_auto_button()
             if self.auto is None:
                 self.auto = autoplay.AutoPlayer(self)
             if not self._level_ended and not self.paused:
                 self.auto.start()
         else:
+            self.auto_mode = False
+            self._refresh_auto_button()
             if self.auto is not None:
                 self.auto.stop()
 
@@ -3915,7 +3945,7 @@ class GameScreen(ui.StyledScreen):
             self.auto_btn.text = "Auto: On"
             self.auto_btn.bg = [0.20, 0.70, 0.40, 1]
         else:
-            self.auto_btn.text = "Auto: Off"
+            self.auto_btn.text = "Auto ({}c)".format(AUTOPLAYER_COST)
             self.auto_btn.bg = [0.45, 0.45, 0.5, 1]
 
     # --- 2× coins power-up indicator -------------------------------------
