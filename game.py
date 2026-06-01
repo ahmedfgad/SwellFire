@@ -1134,6 +1134,19 @@ class GameScreen(ui.StyledScreen):
             running_app.state.mark_world2_hint_shown()
             Clock.schedule_once(lambda *_: self._show_world2_hint(), 0.05)
 
+        # Once-per-world shop nudge (Task 6): on entering the first level of a
+        # new world (W2..W6), remind the player they can upgrade in the shop.
+        # Single-player only; the modal is a dismissible overlay (non-blocking).
+        if (running is not None and running.state is not None
+                and running.current_mode == "single" and running.current_level):
+            world = (running.current_level - 1) // levels.LEVELS_PER_WORLD + 1
+            in_world = (running.current_level - 1) % levels.LEVELS_PER_WORLD + 1
+            flag = "intro_seen_w{}".format(world)
+            if world >= 2 and in_world == 1 and not running.state.get_setting(flag):
+                running.state.set_setting(flag, True)
+                ui.WorldIntroModal(
+                    world, running.state.max_tier_for_world(world)).open()
+
     def _show_world2_hint(self) -> None:
         if self._level_ended:
             return

@@ -307,6 +307,47 @@ def _fade_in_modal(modal, duration: float = 0.18) -> None:
     modal.bind(on_open=_on_open)
 
 
+class WorldIntroModal(ModalView):
+    """Once-per-world shop nudge shown on entering the first level of a new
+    world (worlds 2..6). Reminds the player they can upgrade their weapon and
+    grow their squad in the shop now that tougher enemies are coming."""
+
+    def __init__(self, world, max_tier, **kwargs):
+        super().__init__(size_hint=(0.82, 0.5), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
+        with box.canvas.before:
+            Color(0.12, 0.14, 0.22, 0.98)
+            self._bg = RoundedRectangle(radius=[dp(16)])
+        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
+                 size=lambda *a: setattr(self._bg, "size", box.size))
+        box.add_widget(Label(text="World {}".format(world), font_size=sp(28),
+                             bold=True, color=[1, 0.85, 0.2, 1], size_hint_y=0.26))
+        message = ("Tougher enemies ahead! Visit the Shop to upgrade your "
+                   "weapon (now up to tier {}) and grow your squad."
+                   .format(max_tier))
+        body = Label(text=message, font_size=sp(18), halign="center",
+                     valign="middle", color=[1, 1, 1, 1], size_hint_y=0.44)
+        body.bind(width=lambda *a: setattr(body, "text_size", (body.width, None)))
+        box.add_widget(body)
+        row = BoxLayout(orientation="horizontal", spacing=dp(16), size_hint_y=0.3)
+        later_btn = StyledButton(text="Continue", bg=[0.45, 0.45, 0.5, 1])
+        shop_btn = StyledButton(text="Go to Shop", bg=[0.95, 0.75, 0.20, 1])
+
+        later_btn.bind(on_release=lambda *_: self.dismiss())
+
+        def go_shop(*_):
+            self.dismiss()
+            running = app()
+            if running is not None:
+                running.go("shop")
+        shop_btn.bind(on_release=go_shop)
+        row.add_widget(later_btn)
+        row.add_widget(shop_btn)
+        box.add_widget(row)
+        self.add_widget(box)
+        _fade_in_modal(self)
+
+
 class PauseDialog(ModalView):
     """In-level pause menu: Resume / Shop / Quit, each an icon + button."""
 
