@@ -501,10 +501,10 @@ class GateSpawner:
         always a genuine choice. Math ops get an equation label; bonus ops a
         literal one.
 
-        Reward magnitudes are intentionally tight: ×2 only (no ×3), ADD
-        capped at 7, SUB up to 7, GRENADE always 1. The cumulative effect
-        across many gates makes the level passable; no single gate carries
-        the run.
+        Reward magnitudes are intentionally tight: MUL ×2 only (no ×3), ADD
+        capped at 7, SUB up to 7, DIV /2–/4; GRENADE uses the tier-weighted
+        1–3 reward strength (``_bonus_value``). The cumulative effect across
+        many gates makes the level passable; no single gate carries the run.
         """
         op_table = {
             OP_MUL:     ([2],              lambda v: "x{}".format(v)),
@@ -525,9 +525,10 @@ class GateSpawner:
             cand = [op for op in cand if op != OP_GRENADE]
         op = self._rng.choice(cand)
         values, fmt = op_table[op]
-        value = self._rng.choice(values)
         if op == OP_GRENADE:
             value = self._bonus_value(OP_GRENADE)
+        else:
+            value = self._rng.choice(values)
         if op == OP_GRENADE:
             self.grenade_gates_spawned += 1
         # M14 — for value-bearing ops (mul/add/sub/div) replace the plain
