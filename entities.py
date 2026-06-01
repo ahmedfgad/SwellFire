@@ -93,6 +93,13 @@ ARCHETYPES: dict[int, dict] = {
 }
 
 
+def hp_size_factor(hp: int) -> float:
+    """Sprite-size multiplier for a tougher enemy: bigger HP reads bigger,
+    capped so even a tank stays imposing rather than absurd. Shared by the
+    enemy spawners and the boss minions so sizing is consistent everywhere."""
+    return min(1.6, 1.0 + 0.12 * (int(hp) - 1))
+
+
 # --- enemy controller ----------------------------------------------------
 
 class EnemyController:
@@ -300,7 +307,7 @@ class EnemySpawner:
         # Tougher enemies are visibly bigger (#11). Cap so a tank stays
         # imposing rather than absurd. `size` is already ws()-scaled; the
         # factor is dimensionless.
-        size *= min(1.6, 1.0 + 0.12 * (hp - 1))
+        size *= hp_size_factor(hp)
         speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
         chase_lo = graphics.ws(self.chase_strength_min) * arch["chase_mult"]
         chase_hi = graphics.ws(self.chase_strength_max) * arch["chase_mult"]
@@ -414,7 +421,7 @@ class FormationSpawner:
             enemy_type = self._pick_type()
             arch = ARCHETYPES[enemy_type]
             hp = max(1, int(round(self.enemy_hp * arch["hp_mult"] * self.hp_scale)))
-            size = graphics.ws(float(arch["size"])) * min(1.6, 1.0 + 0.12 * (hp - 1))
+            size = graphics.ws(float(arch["size"])) * hp_size_factor(hp)
             speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
             # Honor cluster archetypes (swarmer spawn_count=4): tile the cluster
             # horizontally within the column so swarmers keep their swarm

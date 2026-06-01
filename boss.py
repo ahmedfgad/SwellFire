@@ -187,7 +187,8 @@ class BossController:
         # scale their world-px size/speed/margins with density here. No-op at 1.0.
         edge = graphics.ws(30.0)
         above = graphics.ws(20.0)
-        minion_sz = graphics.ws(44.0)
+        minion_sz = (graphics.ws(float(ent.ARCHETYPES[ent.TYPE_GRUNT]["size"]))
+                     * ent.hp_size_factor(self.minion_hp))
         for _ in range(self.VOLLEY_COUNT):
             x = self._rng.uniform(x_min + edge,
                                   x_min + (self.boss.cx - x_min) * 2 - edge)
@@ -216,7 +217,8 @@ class BossController:
         import entities as ent
         offset = self._rng.uniform(-self.boss.width * 0.45, self.boss.width * 0.45)
         edge = graphics.ws(30.0)
-        minion_sz = graphics.ws(44.0)
+        minion_sz = (graphics.ws(float(ent.ARCHETYPES[ent.TYPE_GRUNT]["size"]))
+                     * ent.hp_size_factor(self.minion_hp))
         x = max(x_min + edge, min(x_max - edge, self.boss.cx + offset))
         self.enemy_controller.spawn(
             x, self.boss.cy - self.boss.height * 0.5 - graphics.ws(20.0),

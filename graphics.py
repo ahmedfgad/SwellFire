@@ -857,6 +857,8 @@ class AimReticle(Widget):
     """
 
     R = 16.0   # ring radius in logical px (caller may pass ws()-scaled size)
+    SEGMENTS = 5
+    BEAM_ALPHA = 0.45   # brightest (squad-end) segment alpha
 
     def __init__(self, radius: float | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -864,18 +866,35 @@ class AimReticle(Widget):
         self._r = radius if radius is not None else self.R
         self._locked = False
         with self.canvas:
-            self._line_color = Color(0.55, 0.88, 1.0, 0.30)
-            self._line = Line(width=1.6)
+            self._seg_colors = []
+            self._segs = []
+            n = self.SEGMENTS
+            for i in range(n):
+                self._seg_colors.append(Color(0.55, 0.88, 1.0, 0.0))
+                # width tapers ~2.0 (squad) -> ~1.0 (reticle)
+                w = 2.0 - 1.0 * (i / (n - 1))
+                self._segs.append(Line(width=max(1.0, w)))
             self._ring_color = Color(0.55, 0.88, 1.0, 0.95)
             self._ring = Line(width=2.2)
             self._dot_color = Color(0.85, 0.97, 1.0, 0.9)
             self._dot = Line(width=1.4)
         self._anim = None
         self._sx = self._sy = self._rx = self._ry = 0.0
+        self._base_rgb = (0.55, 0.88, 1.0)   # cyan; set red while locked
 
     def set_endpoints(self, sx, sy, rx, ry):
         self._sx, self._sy, self._rx, self._ry = sx, sy, rx, ry
-        self._line.points = [sx, sy, rx, ry]
+        n = self.SEGMENTS
+        r, g, b = self._base_rgb
+        for i in range(n):
+            t0 = i / n
+            t1 = (i + 1) / n
+            x0 = sx + (rx - sx) * t0
+            y0 = sy + (ry - sy) * t0
+            x1 = sx + (rx - sx) * t1
+            y1 = sy + (ry - sy) * t1
+            self._segs[i].points = [x0, y0, x1, y1]
+            self._seg_colors[i].rgba = (r, g, b, self.BEAM_ALPHA * (1.0 - i / n))
         self._ring.circle = (rx, ry, self._r)
         self._dot.circle = (rx, ry, self._r * 0.28)
 
@@ -885,12 +904,14 @@ class AimReticle(Widget):
         self._locked = locked
         if locked:
             self._ring_color.rgba = (1.0, 0.35, 0.30, 1.0)
-            self._line_color.rgba = (1.0, 0.45, 0.40, 0.45)
             self._ring.width = 3.0
+            self._base_rgb = (1.0, 0.40, 0.35)
         else:
             self._ring_color.rgba = (0.55, 0.88, 1.0, 0.95)
-            self._line_color.rgba = (0.55, 0.88, 1.0, 0.30)
             self._ring.width = 2.2
+            self._base_rgb = (0.55, 0.88, 1.0)
+        # Beam hue is re-applied from _base_rgb on the next set_endpoints (called
+        # every frame), so segments pick up the new color with their fade intact.
 
     def show(self):
         self.opacity = 1.0
