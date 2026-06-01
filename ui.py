@@ -33,6 +33,7 @@ import graphics
 import levels
 import net
 import shop
+import weapons
 
 
 ABOUT_TEXT = (
@@ -826,6 +827,9 @@ class ShopScreen(StyledScreen):
             current_tier = state.get_weapon_tier(wid)
             next_price = shop.next_tier_price(wid, current_tier)
             is_max = (next_price is None)
+            cap = state.max_tier_for_world(state.max_world_reached)
+            world_locked = (not is_max) and (current_tier + 1 > cap)
+            unlock_world = current_tier + 1   # world that lifts the lock
             is_equipped = (state.starting_weapon == wid)
             # The "effective price" used to render the card.
             effective_price = next_price if next_price is not None else 0
@@ -833,13 +837,15 @@ class ShopScreen(StyledScreen):
             owned = is_max          # for the OWNED border treatment when at MAX
             squad_locked = False
             is_selected = is_equipped
-            can_buy = is_max or can_afford  # can interact: equip (always) or upgrade
+            can_buy = (is_max or can_afford) and not world_locked  # can interact: equip (always) or upgrade
             card = ShopItemCard(
                 item=item, can_buy=can_buy, owned=owned,
                 squad_locked=False, is_selected=is_selected,
                 on_buy=self._buy,
                 weapon_tier=current_tier, weapon_next_price=next_price,
                 weapon_is_max=is_max, weapon_is_equipped=is_equipped,
+                weapon_world_locked=world_locked,
+                weapon_unlock_world=unlock_world,
             )
             return card
 
@@ -876,6 +882,11 @@ class ShopScreen(StyledScreen):
                     "non-boss level."
                 ).format(item.label)
                 self._confirm(msg, "Equip", lambda: self._do_equip_weapon(wid, item, card))
+                return
+            cap = state.max_tier_for_world(state.max_world_reached)
+            cur = state.get_weapon_tier(wid)
+            if cur < weapons.MAX_TIER and cur + 1 > cap:
+                app().audio.play_sfx("error")
                 return
             if next_price is None:
                 # Already MAX — nothing to do.
@@ -1044,6 +1055,8 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                  weapon_tier: int = 1, weapon_next_price=None,
                  weapon_is_max: bool = False,
                  weapon_is_equipped: bool = False,
+                 weapon_world_locked: bool = False,
+                 weapon_unlock_world: int = 0,
                  **kwargs):
         super().__init__(orientation="horizontal", spacing=dp(10),
                          size_hint_y=None, height=dp(114),
@@ -1059,6 +1072,8 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         self.weapon_next_price = weapon_next_price
         self.weapon_is_max = weapon_is_max
         self.weapon_is_equipped = weapon_is_equipped
+        self.weapon_world_locked = weapon_world_locked
+        self.weapon_unlock_world = weapon_unlock_world
 
         # Background card (color depends on state) + outer border.
         self._max_glow = None
@@ -1239,7 +1254,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         equip_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         right.add_widget(equip_lbl)
         # Bottom: upgrade chip — "Buy Lv X+1: Yc" / "MAX" / "Need +c"
-        if self.weapon_is_max:
+        if self.weapon_world_locked:
+            up_text = "Reach World {}".format(self.weapon_unlock_world)
+            up_color = (0.95, 0.55, 0.55, 1.0)
+        elif self.weapon_is_max:
             up_text = "[b]★ MAX ★[/b]"   # gold star badge
             up_color = (1.0, 0.85, 0.25, 1.0)
         else:
