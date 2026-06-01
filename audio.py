@@ -48,6 +48,8 @@ SFX_FILES = {
     "freeze":         "freeze.wav",        # freeze activation
     "overdrive":      "overdrive.wav",     # overdrive activation
     "magnet":         "magnet.wav",        # magnet activation
+    "smash":          "smash.wav",        # enemy death crunch (rate-limited)
+    "enemy_hit":      "enemy_hit.wav",    # non-lethal enemy impact (rate-limited)
     "purchase":       "purchase.wav",      # shop buy (booster / weapon / squad)
     "upgrade":        "upgrade.wav",        # shop weapon tier upgrade
     "error":          "error.wav",         # can't afford / invalid action

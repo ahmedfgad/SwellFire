@@ -36,6 +36,7 @@ import aim
 import autoplay
 import boss as boss_module
 import boosters
+import combat_juice
 import entities
 import gates
 import graphics
@@ -101,6 +102,14 @@ ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad
 MAX_GRENADES = 9                    # in-run cap; HUD shows current count
 GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within this
                                     # (sized to cover the full stage in front of the hero)
+# --- combat juice (#1/#2/#7) ---------------------------------------------
+COMBAT_SFX_INTERVAL = 0.07      # min seconds between combat sfx (~14/sec cap)
+SCORE_POPUP_INTERVAL = 0.35     # seconds between aggregated score popups
+SCORE_POPUP_OFFSET = 80.0       # world-px above the squad for the score popup
+SCORE_COLOR = (0.95, 0.96, 1.0, 1.0)        # white/silver — distinct from coins
+GATE_GAIN_COLOR = (0.55, 0.80, 1.0, 1.0)    # squad blue (gate gain)
+GATE_LOSS_COLOR = (1.0, 0.42, 0.40, 1.0)    # red (gate loss)
+GATE_WEAPON_COLOR = (1.0, 0.80, 0.30, 1.0)  # weapon amber
 # Fractional coin rewards per archetype kill — accumulated via a remainder
 # counter so common grunts contribute meaningfully over many kills without
 # trivializing the shop. A run of ~70 grunt kills now pays ~21 coins
@@ -378,6 +387,13 @@ class GameScreen(ui.StyledScreen):
         self._fire_cooldown = 0.0
         self._fire_rng = random.Random()
         self.kills_total = 0
+        # Combat-juice runtime state.
+        self.score_total = 0
+        self._pending_score = 0
+        self._had_kill_this_frame = False
+        self._had_hit_this_frame = False
+        self._last_combat_sfx = 0.0
+        self._last_score_popup = 0.0
         # Gates + squad (M7 + M8).
         self.gate_layer: Widget | None = None
         self.gate_controller: gates.GateController | None = None
@@ -1012,6 +1028,12 @@ class GameScreen(ui.StyledScreen):
         self.current_weapon_id = DEFAULT_WEAPON_ID
         self._fire_cooldown = 0.0
         self.kills_total = 0
+        self.score_total = 0
+        self._pending_score = 0
+        self._last_combat_sfx = 0.0
+        self._last_score_popup = 0.0
+        self._had_kill_this_frame = False
+        self._had_hit_this_frame = False
         self.squad_count = 1
         # Highest squad size reached this run — shown in the end-of-level
         # summary so the player sees their crowd peaked at e.g. 47.
@@ -2081,6 +2103,10 @@ class GameScreen(ui.StyledScreen):
                         _self._coins_earned += 1
                         _self._coin_remainder -= 1.0
                     _self.kills_total += 1
+                    _s = combat_juice.score_for_kill(enemy_type)
+                    _self._pending_score += _s
+                    _self.score_total += _s
+                    _self._had_kill_this_frame = True
                 else:
                     _self._opponent_coin_remainder += reward
                     while _self._opponent_coin_remainder >= 1.0:
@@ -2091,8 +2117,12 @@ class GameScreen(ui.StyledScreen):
                     _self._bomber_explode(hit_x, hit_y)
                 elif enemy_type == entities.TYPE_SPLITTER:
                     _self._splitter_split(hit_x, hit_y)
+            def _on_hit(hx, hy, etype, owner, _self=self):
+                if owner == 0:
+                    _self._had_hit_this_frame = True
             entities.resolve_projectile_collisions(
-                self.projectile_controller, self.enemy_controller, self.grid, _on_kill,
+                self.projectile_controller, self.enemy_controller, self.grid,
+                _on_kill, on_hit=_on_hit,
             )
 
             # Projectile vs boss (M10): AABB-only — boss is one big entity.
@@ -2121,6 +2151,26 @@ class GameScreen(ui.StyledScreen):
                 boss_module.resolve_projectile_vs_boss(
                     self.projectile_controller, self.boss_controller, _on_boss_hit,
                 )
+
+            # Combat SFX — one rate-limited cue per window, death-priority.
+            _cue = combat_juice.combat_cue(self._had_kill_this_frame,
+                                           self._had_hit_this_frame)
+            if _cue is not None and combat_juice.sfx_due(
+                    self._run_time, self._last_combat_sfx, COMBAT_SFX_INTERVAL):
+                ui.app().audio.play_sfx(_cue)
+                self._last_combat_sfx = self._run_time
+            self._had_kill_this_frame = False
+            self._had_hit_this_frame = False
+
+            # Aggregated score popup — one Label per window, never per kill.
+            if self._run_time - self._last_score_popup >= SCORE_POPUP_INTERVAL:
+                if self._pending_score > 0 and self.hero is not None:
+                    self._float_text(
+                        "+{}".format(self._pending_score), SCORE_COLOR,
+                        cx=self.hero.center_x,
+                        cy=self.hero.center_y + graphics.ws(SCORE_POPUP_OFFSET))
+                    self._pending_score = 0
+                self._last_score_popup = self._run_time
 
             # M13 — opponent's auto-fire + gate pass on the host's tick.
             # Done here so opponent's projectiles are spawned BEFORE the
@@ -2302,6 +2352,7 @@ class GameScreen(ui.StyledScreen):
         if self.double_coin_until > self._run_time:
             gate_reward *= 2
         self._coins_earned += gate_reward
+        _prev_squad = self.squad_count
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
@@ -2329,6 +2380,17 @@ class GameScreen(ui.StyledScreen):
             self._apply_overdrive_effect(int(gate.value))
         elif gate.op == gates.OP_MAGNET:
             self._apply_magnet_effect(int(gate.value))
+        # Squad-change popup (distinct from coins): every gate gets feedback.
+        if gate.op in (gates.OP_MUL, gates.OP_ADD, gates.OP_SUB, gates.OP_DIV):
+            _sym = {gates.OP_MUL: "×", gates.OP_ADD: "+",
+                    gates.OP_SUB: "−", gates.OP_DIV: "÷"}[gate.op]
+            _delta = self.squad_count - _prev_squad
+            _color = GATE_GAIN_COLOR if _delta >= 0 else GATE_LOSS_COLOR
+            self._float_text("{}{}".format(_sym, int(gate.value)), _color)
+        elif gate.op == gates.OP_WEAPON:
+            self._float_text("{}!".format(str(gate.value).upper()),
+                             GATE_WEAPON_COLOR)
+        # Reward gates pop their own booster float-text from the effect calls.
         # Audio + particle burst at the hero so the pickup reads. Weapon gates
         # get the weapon-swap cue; everything else the generic pickup blip.
         running = ui.app()
