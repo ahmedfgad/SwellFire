@@ -5,6 +5,12 @@
 import json
 import os
 
+import weapons
+
+# Keep in sync with levels.LEVELS_PER_WORLD (kept local to avoid an import cycle).
+_LEVELS_PER_WORLD = 10
+SQUAD_BONUS_MAX = 6
+
 # Settings and their starting values. The "seen" flags remember one-time things:
 # the tutorial auto-shows once, and each world's heads-up message shows once.
 DEFAULT_SETTINGS = {
@@ -218,6 +224,19 @@ class GameState:
             return "pistol"
         return equipped
 
+    @property
+    def max_world_reached(self) -> int:
+        """Highest world the player has reached, from highest_unlocked."""
+        return (max(1, self.highest_unlocked) - 1) // _LEVELS_PER_WORLD + 1
+
+    def max_tier_for_world(self, world: int) -> int:
+        """Weapon-tier cap at `world`: min(MAX_TIER, world) — W1=1 ... W6=6."""
+        return min(weapons.MAX_TIER, max(1, int(world)))
+
+    def max_squad_bonus_for_world(self, world: int) -> int:
+        """Squad-bonus cap at `world`: min(SQUAD_BONUS_MAX, world-1)."""
+        return min(SQUAD_BONUS_MAX, max(0, int(world) - 1))
+
     def get_weapon_tier(self, weapon_id: str) -> int:
         tiers = self.data.get("weapon_tiers", {})
         return max(1, int(tiers.get(weapon_id, 1)))
@@ -234,7 +253,7 @@ class GameState:
         current = self.get_weapon_tier(weapon_id)
         if target_tier != current + 1:
             return False    # only one tier at a time
-        if target_tier > 4:
+        if target_tier > self.max_tier_for_world(self.max_world_reached):
             return False
         if not self.spend_coins(price):
             return False
@@ -294,6 +313,8 @@ class GameState:
 
     def purchase_squad_bonus(self, target: int, price: int) -> bool:
         if self.squad_bonus >= target:
+            return False
+        if target > self.max_squad_bonus_for_world(self.max_world_reached):
             return False
         if not self.spend_coins(price):
             return False
