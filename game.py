@@ -1346,6 +1346,27 @@ class GameScreen(ui.StyledScreen):
             if running_app and running_app.state:
                 self.current_weapon_id = running_app.state.starting_weapon
 
+        # Mild power-scaling (#11/#12): snapshot the equipped weapon tier at
+        # level start and make enemies proportionally tougher, so an upgraded
+        # weapon no longer trivializes early worlds. Damage scales faster than
+        # this HP bump, so an upgrade is still a net win.
+        if self.enemy_spawner is not None:
+            running_app = ui.app()
+            tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
+                    if (running_app and running_app.state) else 1)
+            self.enemy_spawner.hp_scale = 1.0 + 0.25 * (max(1, tier) - 1)
+            # Appearance poof for on-screen (top-half) spawns (#16).
+            self.enemy_spawner.spawn_poof = self._enemy_spawn_poof
+
+    def _enemy_spawn_poof(self, x: float, y: float) -> None:
+        """Small particle burst when an enemy spawns on-screen (top half) so it
+        appears rather than popping in (#16)."""
+        if self.particle_controller is not None:
+            self.particle_controller.burst(
+                x, y, count=8, speed=180.0, ttl=0.35,
+                size=12.0, frame="particle", rng=self._fire_rng,
+            )
+
     def _spawn_boss(self, cfg: dict) -> None:
         if self._atlas is None or self.stage is None:
             return
