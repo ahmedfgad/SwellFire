@@ -1206,6 +1206,7 @@ class GameScreen(ui.StyledScreen):
             self._aim_lead_x = hero_cx
             self._aim_angle = 0.0
             self._reticle_x = hero_cx
+            self._reticle_y = 0.0
         running_app = ui.app()
         self._aim_mode = (running_app.state.get_setting("aim_mode")
                           if running_app and running_app.state else "auto")
@@ -1938,18 +1939,25 @@ class GameScreen(ui.StyledScreen):
                             1, int(round(effective_damage
                                          * boosters.OVERDRIVE_DAMAGE_MULT)))
                     if self._aim_mode == "manual" and self.aim_reticle is not None:
-                        # Lock-flash the reticle if an enemy sits near the
-                        # convergence point (clear "you will hit this" cue).
-                        near = entities.find_nearest_threat(
-                            self.hero.center_x, self.hero.center_y,
-                            self.enemy_controller,
-                            graphics.ws(RETICLE_LEAD_DIST * 1.4))
+                        # Lock-flash the reticle when the actual target sits
+                        # near the convergence point (clear "you will hit this"
+                        # cue). Compare the boss/enemy position to the reticle
+                        # in BOTH axes — comparing to target_x would be trivially
+                        # true in manual+human mode (target_x IS the reticle).
+                        lock_x = graphics.ws(60.0)
+                        lock_y = graphics.ws(80.0)
                         locked = False
                         if self.boss is not None and self.boss.alive:
-                            locked = abs(target_x - self._reticle_x) < graphics.ws(60.0)
-                        elif near >= 0:
-                            locked = (abs(self.enemy_pool.cx[near] - target_x)
-                                      < graphics.ws(60.0))
+                            locked = (abs(self.boss.cx - self._reticle_x) < lock_x
+                                      and abs(self.boss.cy - self._reticle_y) < lock_y)
+                        else:
+                            near = entities.find_nearest_threat(
+                                self.hero.center_x, self.hero.center_y,
+                                self.enemy_controller,
+                                graphics.ws(RETICLE_LEAD_DIST * 1.4))
+                            if near >= 0:
+                                locked = (abs(self.enemy_pool.cx[near] - self._reticle_x) < lock_x
+                                          and abs(self.enemy_pool.cy[near] - self._reticle_y) < lock_y)
                         self.aim_reticle.set_locked(locked)
                     entities.fire_from_positions(
                         positions, target_x, target_y, weapon,
