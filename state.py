@@ -17,6 +17,13 @@ DEFAULT_SETTINGS = {
     # Aiming: "auto" = squad auto-targets (default, easy); "manual" = the
     # player tilts the squad's fire by steering (challenge mode). See aim.py.
     "aim_mode": "auto",
+    # FPS / debug overlay (FPS, frame ms, entity counts). Off by default;
+    # toggled in Settings, separate from show_stats (the band/title/chips).
+    "show_debug": False,
+    # Top safe-area inset (fraction of screen height) to push the progress bar
+    # and the 2x-coins timer below a phone notch / dynamic island. Slider in
+    # Settings; clamped to [0, 0.12] at apply time.
+    "top_safe_inset": 0.05,
     "volume": 1.0,            # 0.0 to 1.0
     "ga_style": "balanced",   # auto player: cautious | balanced | aggressive
     "ga_speed": "normal",     # auto player: slow | normal | fast
