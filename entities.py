@@ -226,6 +226,13 @@ class EnemySpawner:
         self.chase_strength_min = 30.0
         self.chase_strength_max = 90.0
         self.spawn_above_top = 30.0
+        # Multiplier on every spawned enemy's HP. game.py snapshots it from the
+        # equipped weapon tier at level start (mild power-scaling, #11/#12).
+        self.hp_scale = 1.0
+        # Optional callback(x, y) fired when an enemy spawns ON-SCREEN (top
+        # half) so it visibly appears rather than popping in (#16). game.py
+        # wires it to a particle burst.
+        self.spawn_poof = None
         # Archetype mix: list of (type_int, weight). Default is all grunts.
         # game.GameScreen._apply_level_config overrides with the per-level mix.
         self.spawn_table: list[tuple[int, float]] = [(TYPE_GRUNT, 1.0)]
@@ -239,6 +246,10 @@ class EnemySpawner:
         """Zero the in-level timer. Call on level entry so the intro-delay
         and ramps start fresh."""
         self._level_elapsed = 0.0
+
+    def _above_top_px(self) -> float:
+        """The density-scaled spawn ceiling offset above the play area top."""
+        return graphics.ws(self.spawn_above_top)
 
     def tick(self, dt: float, x_min: float, y_min: float,
              x_max: float, y_max: float) -> int:
@@ -285,7 +296,11 @@ class EnemySpawner:
         # edge margins) scale with device density so the enemy is the same
         # on-screen size/speed at any resolution. No-op at density 1.0.
         size = graphics.ws(float(arch["size"]))
-        hp = max(1, int(round(self.enemy_hp * arch["hp_mult"])))
+        hp = max(1, int(round(self.enemy_hp * arch["hp_mult"] * self.hp_scale)))
+        # Tougher enemies are visibly bigger (#11). Cap so a tank stays
+        # imposing rather than absurd. `size` is already ws()-scaled; the
+        # factor is dimensionless.
+        size *= min(1.6, 1.0 + 0.12 * (hp - 1))
         speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
         chase_lo = graphics.ws(self.chase_strength_min) * arch["chase_mult"]
         chase_hi = graphics.ws(self.chase_strength_max) * arch["chase_mult"]
@@ -295,6 +310,11 @@ class EnemySpawner:
 
         count = int(arch["spawn_count"])
         last_idx = -1
+        # Spawn anywhere in the TOP HALF (#16): from mid-screen up to just
+        # above the top edge. Some enemies appear closer with less reaction
+        # time. The whole cluster shares one depth so it reads as a wave.
+        mid_y = y_min + 0.5 * (y_max - y_min)
+        spawn_y = rng.uniform(mid_y, y_max + above_top)
         # Cluster spawn (swarmers): tile horizontally near the chosen X with
         # a tight spread so they read as one wave.
         anchor_x = rng.uniform(x_min + size * 0.5 + edge,
@@ -305,10 +325,13 @@ class EnemySpawner:
                     min(x_max - size * 0.5, anchor_x + offset))
             chase = rng.uniform(chase_lo, chase_hi)
             last_idx = self.controller.spawn(
-                x, y_max + above_top,
+                x, spawn_y,
                 size, size, frame,
                 hp=hp, speed=speed, chase=chase, enemy_type=enemy_type,
             )
+        # Appearance poof for on-screen spawns so they don't harshly pop (#16).
+        if self.spawn_poof is not None and spawn_y < y_max:
+            self.spawn_poof(anchor_x, spawn_y)
         return last_idx
 
 
