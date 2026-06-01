@@ -335,6 +335,84 @@ class EnemySpawner:
         return last_idx
 
 
+class FormationSpawner:
+    """Spawns enemies as ranks (rows) marching straight down a column grid.
+
+    Distance-driven: a new rank spawns each time the world has scrolled
+    ``rank_interval_px`` further, so ranks stay evenly spaced into a grid
+    regardless of frame rate (mirrors the gate spawner's distance cadence).
+    Enemies spawn at the top edge with ``chase=0`` — they descend straight
+    down and never steer toward the hero. Archetype mix and HP mirror
+    EnemySpawner (per-world ``spawn_table`` + ``enemy_hp`` * ``hp_scale``);
+    tougher types render bigger via the same HP-size factor.
+    """
+
+    EDGE = 40.0          # world-px inset from each rail
+    SPAWN_ABOVE_TOP = 30.0
+
+    def __init__(self, controller: "EnemyController", seed: int | None = None):
+        self.controller = controller
+        self._rng = random.Random(seed)
+        self.columns = 6
+        self.rank_interval_px = 160.0
+        self.enemy_speed = 220.0
+        self.enemy_hp = 1
+        self.hp_scale = 1.0
+        self.spawn_table: list[tuple[int, float]] = [(TYPE_GRUNT, 1.0)]
+        self._last_spawn_distance = 0.0
+
+    def reset_per_level(self, distance: float) -> None:
+        self._last_spawn_distance = distance
+
+    def update(self, distance: float, x_min: float, y_min: float,
+               x_max: float, y_max: float) -> int:
+        """Spawn one rank for each ``rank_interval_px`` crossed since the last.
+        Returns the number of ranks spawned this call."""
+        if self.rank_interval_px <= 0.0:
+            return 0
+        ranks = 0
+        while distance - self._last_spawn_distance >= self.rank_interval_px:
+            self._last_spawn_distance += self.rank_interval_px
+            self._spawn_rank(x_min, y_min, x_max, y_max)
+            ranks += 1
+        return ranks
+
+    def _column_xs(self, x_min: float, x_max: float, size: float) -> list[float]:
+        edge = graphics.ws(self.EDGE)
+        lo = x_min + size * 0.5 + edge
+        hi = x_max - size * 0.5 - edge
+        n = max(1, int(self.columns))
+        if n == 1:
+            return [(lo + hi) * 0.5]
+        step = (hi - lo) / (n - 1)
+        return [lo + i * step for i in range(n)]
+
+    def _pick_type(self) -> int:
+        total = sum(w for _, w in self.spawn_table) or 1.0
+        r = self._rng.uniform(0.0, total)
+        cum = 0.0
+        for t, w in self.spawn_table:
+            cum += w
+            if r <= cum:
+                return t
+        return self.spawn_table[-1][0] if self.spawn_table else TYPE_GRUNT
+
+    def _spawn_rank(self, x_min: float, y_min: float,
+                    x_max: float, y_max: float) -> None:
+        spawn_y = y_max + graphics.ws(self.SPAWN_ABOVE_TOP)
+        base_size = graphics.ws(float(ARCHETYPES[TYPE_GRUNT]["size"]))
+        for cx in self._column_xs(x_min, x_max, base_size):
+            enemy_type = self._pick_type()
+            arch = ARCHETYPES[enemy_type]
+            hp = max(1, int(round(self.enemy_hp * arch["hp_mult"] * self.hp_scale)))
+            size = graphics.ws(float(arch["size"])) * min(1.6, 1.0 + 0.12 * (hp - 1))
+            speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
+            self.controller.spawn(
+                cx, spawn_y, size, size, arch["frame"],
+                hp=hp, speed=speed, chase=0.0, enemy_type=enemy_type,
+            )
+
+
 # --- projectile controller -----------------------------------------------
 
 class ProjectileController:
