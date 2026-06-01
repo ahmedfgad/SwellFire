@@ -1083,6 +1083,7 @@ def resolve_projectile_collisions(
     enemy_controller: EnemyController,
     grid: SpatialGrid,
     on_kill,
+    on_hit=None,
 ) -> int:
     """Detect projectile<->enemy hits via the spatial grid.
 
@@ -1143,5 +1144,9 @@ def resolve_projectile_collisions(
                     # positional arg — game.py reads it to route kills.
                     on_kill(hit_x, hit_y, enemy_type, killer)
                     kills += 1
+                elif on_hit is not None:
+                    # Non-lethal contact (enemy survived) — signal for the
+                    # rate-limited hit SFX.
+                    on_hit(e_cx[ei], e_cy[ei], int(e_type[ei]), int(p_owner[pi]))
                 break   # projectile consumed
     return kills
