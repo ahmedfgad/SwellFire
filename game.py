@@ -349,6 +349,11 @@ class GameScreen(ui.StyledScreen):
         self._reticle_y = 0.0
         self._auto_target = None       # (x, y) stashed by the fire tick for #9
         self.aim_reticle = None
+        self.range_line = None               # weapon kill-zone indicator
+        self.formation_spawner = None        # army-formation rank spawner
+        self._weapon_range_px = None         # None = unlimited (boss/MP)
+        self._rank_interval_start = 200.0
+        self._rank_interval_end = 120.0
         # Lane centers (M7 fills these per spawned gate pair).
         self.lane_centers: list[float] = []
         # Enemy systems (M5).
@@ -838,6 +843,7 @@ class GameScreen(ui.StyledScreen):
             self.enemy_pool = graphics.EntityPool(ENEMY_POOL_CAPACITY, self._atlas)
             self.enemy_controller = entities.EnemyController(self.enemy_pool)
             self.enemy_spawner = entities.EnemySpawner(self.enemy_controller, self._atlas)
+            self.formation_spawner = entities.FormationSpawner(self.enemy_controller)
             self.enemy_renderer = graphics.BatchedRenderer(
                 self.enemy_pool, size_hint=(1, 1), pos_hint={"x": 0, "y": 0},
             )
@@ -945,6 +951,10 @@ class GameScreen(ui.StyledScreen):
                 size_hint=(None, None), size=(1, 1),
             )
             self.stage.add_widget(self.aim_reticle)
+
+        if self.range_line is None:
+            self.range_line = graphics.RangeLine(size_hint=(None, None), size=(1, 1))
+            self.stage.add_widget(self.range_line)
 
         # Shield bubble — a glowing aura shown around the hero while a shield
         # is up (replaces the old rectangle tint). Added once, hidden until
@@ -1225,6 +1235,7 @@ class GameScreen(ui.StyledScreen):
         self._auto_target = None
         if self.aim_reticle is not None:
             self.aim_reticle.hide()
+        self._update_weapon_range()
         # Boss position was computed in `_apply_level_config` (via `_spawn_boss`)
         # off the *pre-layout* stage size, which is 0/100 right after on_enter —
         # leaving the boss pinned to the bottom-left corner. Now that the stage
@@ -1357,6 +1368,51 @@ class GameScreen(ui.StyledScreen):
             self.enemy_spawner.hp_scale = 1.0 + 0.25 * (max(1, tier) - 1)
             # Appearance poof for on-screen (top-half) spawns (#16).
             self.enemy_spawner.spawn_poof = self._enemy_spawn_poof
+
+        # Configure the army-formation spawner (non-boss spawn source).
+        if self.formation_spawner is not None:
+            fs = self.formation_spawner
+            fs.columns = int(cfg.get("formation_columns", 6))
+            self._rank_interval_start = cfg.get("rank_interval_start", 200.0)
+            self._rank_interval_end = cfg.get("rank_interval_end", 120.0)
+            fs.enemy_speed = cfg["enemy_speed"]
+            fs.enemy_hp = cfg["enemy_hp"]
+            fs.hp_scale = self.enemy_spawner.hp_scale if self.enemy_spawner else 1.0
+            if cfg.get("boss"):
+                fs.spawn_table = [(entities.TYPE_GRUNT, 1.0)]
+            else:
+                fs.spawn_table = [
+                    (entities.TYPE_NAMES[name], weight)
+                    for name, weight in cfg["allowed_enemy_types"]
+                ]
+            fs.reset_per_level(self.distance)
+        self._update_weapon_range()
+
+    def _update_weapon_range(self) -> None:
+        """Recompute the kill-zone for the current weapon and push it to the
+        projectile controller + range-line widget. Non-boss only; boss levels
+        keep unlimited range so the squad can hit the far boss."""
+        if self.stage is None or self.hero is None:
+            return
+        sx, sy = self.stage.pos
+        sw, sh = self.stage.size
+        hero_y = sy + sh * HERO_BOTTOM_FRAC
+        field_h = (sy + sh) - hero_y
+        is_boss = bool(self.level_config and self.level_config.get("boss"))
+        if is_boss:
+            self._weapon_range_px = None
+        else:
+            frac = weapons.get(self.current_weapon_id).range_frac
+            self._weapon_range_px = frac * field_h
+        kill_y = None if self._weapon_range_px is None else hero_y + self._weapon_range_px
+        if self.projectile_controller is not None:
+            self.projectile_controller.kill_line_y = kill_y
+        if self.range_line is not None:
+            if kill_y is None:
+                self.range_line.hide()
+            else:
+                self.range_line.show()
+                self.range_line.set_line(sx, sx + sw, kill_y)
 
     def _enemy_spawn_poof(self, x: float, y: float) -> None:
         """Small particle burst when an enemy spawns on-screen (top half) so it
@@ -1685,12 +1741,15 @@ class GameScreen(ui.StyledScreen):
             # target stashed by the fire tick (#9 — show where the GA aims).
             if self._aim_mode == "manual" and self.aim_reticle is not None:
                 muzzle_y = self.hero.center_y + graphics.ws(MUZZLE_OFFSET_Y)
+                _lead = (self._weapon_range_px
+                         if self._weapon_range_px is not None
+                         else graphics.ws(RETICLE_LEAD_DIST))
                 if self.auto_mode:
                     if self._auto_target is not None:
                         rx, ry = self._auto_target
                     else:
                         rx = self.hero.center_x
-                        ry = muzzle_y + graphics.ws(RETICLE_LEAD_DIST)
+                        ry = muzzle_y + _lead
                 else:
                     self._aim_lead_x = aim.update_aim_lead(
                         self._aim_lead_x, self._hero_target_x, dt, AIM_LEAD_EASE)
@@ -1699,7 +1758,7 @@ class GameScreen(ui.StyledScreen):
                         offset, graphics.ws(AIM_OFFSET_FULL), AIM_MAX_RAD)
                     rx, ry = aim.reticle_point(
                         self.hero.center_x, muzzle_y, self._aim_angle,
-                        graphics.ws(RETICLE_LEAD_DIST))
+                        _lead)
                 self._reticle_x, self._reticle_y = rx, ry
                 self.aim_reticle.set_endpoints(
                     self.hero.center_x, muzzle_y, rx, ry)
@@ -1737,38 +1796,25 @@ class GameScreen(ui.StyledScreen):
         y_min = sy
         x_max = sx + sw
         y_max = sy + sh
-        if (self.enemy_controller is not None
-                and self.enemy_spawner is not None
-                and self.hero is not None
+        # Army formation: ranks spawn on a distance cadence, tightening
+        # within the level (denser toward the end). Boss levels spawn no
+        # ranks — the boss controller owns minions.
+        if (self.formation_spawner is not None
                 and self.level_config is not None
                 and not self.level_config.get("boss")):
-            base_interval = self.level_config["enemy_spawn_interval"]
-            lvl_type = self.level_config.get("type", "static")
-            if lvl_type == "static":
-                type_mult = 1.10
-            elif lvl_type == "hybrid":
-                # Alternating spikes every ~3 s — half the level the spawn
-                # pressure ratchets up so the player can't autopilot.
-                phase = (self.distance / scroll) / 3.0
-                spike = (int(phase) % 2 == 1)
-                type_mult = 0.70 if spike else 1.0
-            else:   # dynamic
-                type_mult = 0.65
-            # In-level ramp: start very gentle (2.5× interval = 40 % of base
-            # spawn rate) and end at 0.55× (relentless). The aggressive
-            # initial floor lets a small starting squad survive long enough
-            # to engage the first few gates before the level ramps up.
             if self.distance_goal > 0:
                 progress = min(1.0, self.distance / self.distance_goal)
             else:
                 progress = 0.0
-            ramp = max(0.55, 2.50 - 2.00 * progress)
-            self.enemy_spawner.interval = base_interval * type_mult * ramp
+            self.formation_spawner.rank_interval_px = graphics.ws(
+                self._rank_interval_start
+                + (self._rank_interval_end - self._rank_interval_start) * progress)
+            self.formation_spawner.update(
+                self.distance, x_min, y_min, x_max, y_max)
 
         if (self.enemy_controller is not None
                 and self.enemy_spawner is not None
                 and self.hero is not None):
-            self.enemy_spawner.tick(dt, x_min, y_min, x_max, y_max)
             # Freeze booster: enemies stop dead — advance their motion with
             # dt=0 so positions hold (and none can escape past the squad)
             # while the squad keeps firing. Attrition + bomber AoE are gated
@@ -1929,9 +1975,12 @@ class GameScreen(ui.StyledScreen):
                             target_x, target_y = self.boss.cx, self.boss.cy
                         has_target = True
                     else:
-                        _ti = entities.find_nearest_enemy(
+                        _rng_px = (self._weapon_range_px
+                                   if self._weapon_range_px is not None
+                                   else graphics.ws(99999.0))
+                        _ti = entities.find_nearest_threat(
                             self.hero.center_x, self.hero.center_y,
-                            self.enemy_controller)
+                            self.enemy_controller, _rng_px)
                         if _ti >= 0:
                             target_x = self.enemy_pool.cx[_ti]
                             target_y = self.enemy_pool.cy[_ti]
@@ -2258,6 +2307,7 @@ class GameScreen(ui.StyledScreen):
         elif gate.op == gates.OP_WEAPON:
             if gate.value in weapons.WEAPONS:
                 self.current_weapon_id = gate.value
+                self._update_weapon_range()
                 self._fire_cooldown = 0.0
         elif gate.op == gates.OP_GRENADE:
             self.grenade_count = min(MAX_GRENADES,
