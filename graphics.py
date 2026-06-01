@@ -908,6 +908,54 @@ class AimReticle(Widget):
             self._anim = None
 
 
+class RangeLine(Widget):
+    """A horizontal 'engagement line' drawn across the lane at the current
+    weapon's max reach. Its Y tweens (via the `line_y` NumericProperty) when the
+    weapon — hence range — changes, so the player can read how far their shots
+    reach. Drawn in ``canvas`` like the other HUD auras.
+
+    Animating a Kivy NumericProperty (not a plain attribute) is what lets
+    `Animation(line_y=...)` work — mirrors the gate `emph_scale` pattern.
+    """
+
+    line_y = NumericProperty(0.0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.opacity = 0.0
+        with self.canvas:
+            self._glow_color = Color(1.0, 0.85, 0.30, 0.18)
+            self._glow = Line(width=6.0)
+            self._line_color = Color(1.0, 0.88, 0.40, 0.85)
+            self._line = Line(width=2.0)
+        self._x1 = 0.0
+        self._x2 = 0.0
+        self._anim = None
+        self.bind(line_y=lambda *_: self._redraw())
+
+    def _redraw(self):
+        y = self.line_y
+        self._glow.points = [self._x1, y, self._x2, y]
+        self._line.points = [self._x1, y, self._x2, y]
+
+    def set_line(self, x1, x2, y, animate=True):
+        self._x1, self._x2 = x1, x2
+        if animate and self.opacity > 0.0 and y != self.line_y:
+            if self._anim is not None:
+                self._anim.cancel(self)
+            self._anim = Animation(line_y=y, duration=0.18, t="out_quad")
+            self._anim.start(self)
+        else:
+            self.line_y = y
+            self._redraw()   # ensure redraw even if the value didn't change
+
+    def show(self):
+        self.opacity = 1.0
+
+    def hide(self):
+        self.opacity = 0.0
+
+
 class ParticleBurst(Widget):
     """Single-shot hit-burst placeholder. Real particle pool comes in M11."""
     def __init__(self, pos, color=(1, 1, 1, 1), **kwargs):

@@ -1706,10 +1706,6 @@ class SettingsScreen(StyledScreen):
         self.debug_btn.bind(on_release=lambda *_: self._toggle("show_debug"))
         box.add_widget(self.debug_btn)
 
-        self.aim_btn = StyledButton(size_hint_y=None, height=BTN_HEIGHT)
-        self.aim_btn.bind(on_release=lambda *_: self._toggle_aim_mode())
-        box.add_widget(self.aim_btn)
-
         vol_row = BoxLayout(orientation="horizontal", spacing=dp(10),
                             size_hint_y=None, height=BTN_HEIGHT)
         vol_row.add_widget(Label(text="Volume", font_size=sp(18),
@@ -1772,22 +1768,11 @@ class SettingsScreen(StyledScreen):
         on = running.state.get_setting("show_debug")
         self.debug_btn.text = "FPS / debug info: {}".format("On" if on else "Off")
         self.debug_btn.bg = [0.2, 0.7, 0.4, 1] if on else [0.5, 0.5, 0.55, 1]
-        mode = running.state.get_setting("aim_mode")
-        manual = (mode == "manual")
-        self.aim_btn.text = "Aiming: {}".format("Manual" if manual else "Auto")
-        self.aim_btn.bg = [0.85, 0.55, 0.2, 1] if manual else [0.2, 0.6, 0.7, 1]
-
     def _toggle(self, key):
         running = app()
         new_value = not running.state.get_setting(key)
         running.state.set_setting(key, new_value)
         running.audio.apply_settings(running.state)
-        self._refresh_labels()
-
-    def _toggle_aim_mode(self):
-        running = app()
-        cur = running.state.get_setting("aim_mode")
-        running.state.set_setting("aim_mode", "manual" if cur == "auto" else "auto")
         self._refresh_labels()
 
     def _on_volume(self, _slider, value):

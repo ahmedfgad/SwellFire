@@ -26,6 +26,7 @@ class Weapon:
     projectile_size: float    # px, square
     ttl: float                # projectile lifespan (seconds)
     frame: str                # atlas frame name for the projectile sprite
+    range_frac: float = 0.33  # kill-zone reach as a fraction of the play field
 
 
 # Order matters: cycle key visits these in this order, and the digit shortcuts
@@ -35,25 +36,25 @@ WEAPONS: dict[str, Weapon] = {
         id="pistol",  name="Pistol",
         fire_rate=2.5, damage=1, projectiles_per_shot=1,
         spread_deg=2.0, projectile_speed=820.0, projectile_size=14.0,
-        ttl=1.0, frame="projectile",
+        ttl=1.0, frame="projectile", range_frac=0.33,
     ),
     "rifle": Weapon(
         id="rifle",   name="Rifle",
         fire_rate=7.0, damage=1, projectiles_per_shot=1,
         spread_deg=4.0, projectile_speed=980.0, projectile_size=12.0,
-        ttl=0.70, frame="projectile",
+        ttl=0.70, frame="projectile", range_frac=0.33,
     ),
     "shotgun": Weapon(
         id="shotgun", name="Shotgun",
         fire_rate=1.7, damage=1, projectiles_per_shot=6,
         spread_deg=15.0, projectile_speed=720.0, projectile_size=14.0,
-        ttl=0.8, frame="projectile",
+        ttl=0.8, frame="projectile", range_frac=0.25,
     ),
     "sniper": Weapon(
         id="sniper",  name="Sniper",
         fire_rate=1.0, damage=5, projectiles_per_shot=1,
         spread_deg=0.5, projectile_speed=1400.0, projectile_size=10.0,
-        ttl=1.5, frame="projectile",
+        ttl=1.5, frame="projectile", range_frac=0.50,
     ),
 }
 
