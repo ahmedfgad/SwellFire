@@ -312,7 +312,7 @@ class WorldIntroModal(ModalView):
     world (worlds 2..6). Reminds the player they can upgrade their weapon and
     grow their squad in the shop now that tougher enemies are coming."""
 
-    def __init__(self, world, max_tier, **kwargs):
+    def __init__(self, world, max_tier, on_shop=None, on_continue=None, **kwargs):
         super().__init__(size_hint=(0.82, 0.5), auto_dismiss=False, **kwargs)
         box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
         with box.canvas.before:
@@ -333,13 +333,16 @@ class WorldIntroModal(ModalView):
         later_btn = StyledButton(text="Continue", bg=[0.45, 0.45, 0.5, 1])
         shop_btn = StyledButton(text="Go to Shop", bg=[0.95, 0.75, 0.20, 1])
 
-        later_btn.bind(on_release=lambda *_: self.dismiss())
+        def go_continue(*_):
+            self.dismiss()
+            if on_continue:
+                on_continue()
+        later_btn.bind(on_release=go_continue)
 
         def go_shop(*_):
             self.dismiss()
-            running = app()
-            if running is not None:
-                running.go("shop")
+            if on_shop:
+                on_shop()
         shop_btn.bind(on_release=go_shop)
         row.add_widget(later_btn)
         row.add_widget(shop_btn)

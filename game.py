@@ -1124,19 +1124,10 @@ class GameScreen(ui.StyledScreen):
         # the next frame so positions are real.
         Clock.schedule_once(self._reset, 0)
 
-        # One-time hint the first time the player reaches world 2: the shop
-        # lets them upgrade weapons. Shown over a paused world with a direct
-        # "Go to Shop" button.
-        if (running.current_mode == "single"
-                and running.current_level == levels.LEVELS_PER_WORLD + 1
-                and running_app and running_app.state
-                and not running_app.state.world2_hint_shown):
-            running_app.state.mark_world2_hint_shown()
-            Clock.schedule_once(lambda *_: self._show_world2_hint(), 0.05)
-
         # Once-per-world shop nudge (Task 6): on entering the first level of a
         # new world (W2..W6), remind the player they can upgrade in the shop.
-        # Single-player only; the modal is a dismissible overlay (non-blocking).
+        # Single-player only; shown over a paused/dimmed world via the proven
+        # pause-flow (see _show_world_intro).
         if (running is not None and running.state is not None
                 and running.current_mode == "single" and running.current_level):
             world = (running.current_level - 1) // levels.LEVELS_PER_WORLD + 1
@@ -1144,10 +1135,9 @@ class GameScreen(ui.StyledScreen):
             flag = "intro_seen_w{}".format(world)
             if world >= 2 and in_world == 1 and not running.state.get_setting(flag):
                 running.state.set_setting(flag, True)
-                ui.WorldIntroModal(
-                    world, running.state.max_tier_for_world(world)).open()
+                Clock.schedule_once(lambda *_: self._show_world_intro(world), 0.05)
 
-    def _show_world2_hint(self) -> None:
+    def _show_world_intro(self, world: int) -> None:
         if self._level_ended:
             return
         self.paused = True
@@ -1170,7 +1160,11 @@ class GameScreen(ui.StyledScreen):
             self._show_pause_dim(False)
             self._resume()
 
-        ui.WeaponUpgradeDialog(on_shop=go_shop, on_later=later).open()
+        running_app = ui.app()
+        max_tier = (running_app.state.max_tier_for_world(world)
+                    if running_app and running_app.state else world)
+        ui.WorldIntroModal(world, max_tier,
+                           on_shop=go_shop, on_continue=later).open()
 
     def on_leave(self):
         if self._update_event is not None:
