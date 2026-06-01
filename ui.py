@@ -1046,7 +1046,7 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                  weapon_is_equipped: bool = False,
                  **kwargs):
         super().__init__(orientation="horizontal", spacing=dp(10),
-                         size_hint_y=None, height=dp(96),
+                         size_hint_y=None, height=dp(114),
                          padding=(dp(10), dp(8)),
                          **kwargs)
         self.item = item
@@ -1120,8 +1120,8 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                         size_hint_x=1.0)
         title = Label(
             text=item.label, font_size=sp(18), bold=True,
-            color=(1, 1, 1, 1), halign="left", valign="middle",
-            size_hint_y=None, height=dp(28),
+            color=(1, 1, 1, 1), halign="left", valign="top",
+            size_hint_y=None, height=dp(46),
         )
         title.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         mid.add_widget(title)
