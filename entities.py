@@ -397,20 +397,37 @@ class FormationSpawner:
                 return t
         return self.spawn_table[-1][0] if self.spawn_table else TYPE_GRUNT
 
+    def _max_cell_size(self) -> float:
+        """Largest possible on-screen enemy size across the spawn table
+        (including the HP-size growth cap), so outer columns inset enough that
+        even a big tank stays on-rail. Interior overlap is fine — it reads as a
+        crowd."""
+        types = [t for t, _ in self.spawn_table] or [TYPE_GRUNT]
+        raw = max(float(ARCHETYPES[t]["size"]) for t in types)
+        return graphics.ws(raw) * 1.6   # 1.6 = the HP-size factor cap
+
     def _spawn_rank(self, x_min: float, y_min: float,
                     x_max: float, y_max: float) -> None:
         spawn_y = y_max + graphics.ws(self.SPAWN_ABOVE_TOP)
-        base_size = graphics.ws(float(ARCHETYPES[TYPE_GRUNT]["size"]))
-        for cx in self._column_xs(x_min, x_max, base_size):
+        cell = self._max_cell_size()
+        for cx in self._column_xs(x_min, x_max, cell):
             enemy_type = self._pick_type()
             arch = ARCHETYPES[enemy_type]
             hp = max(1, int(round(self.enemy_hp * arch["hp_mult"] * self.hp_scale)))
             size = graphics.ws(float(arch["size"])) * min(1.6, 1.0 + 0.12 * (hp - 1))
             speed = graphics.ws(self.enemy_speed) * arch["speed_mult"]
-            self.controller.spawn(
-                cx, spawn_y, size, size, arch["frame"],
-                hp=hp, speed=speed, chase=0.0, enemy_type=enemy_type,
-            )
+            # Honor cluster archetypes (swarmer spawn_count=4): tile the cluster
+            # horizontally within the column so swarmers keep their swarm
+            # pressure instead of becoming a single trivial enemy.
+            count = int(arch.get("spawn_count", 1))
+            for k in range(count):
+                offset = (k - (count - 1) / 2.0) * (size * 0.95)
+                ex = max(x_min + size * 0.5,
+                         min(x_max - size * 0.5, cx + offset))
+                self.controller.spawn(
+                    ex, spawn_y, size, size, arch["frame"],
+                    hp=hp, speed=speed, chase=0.0, enemy_type=enemy_type,
+                )
 
 
 # --- projectile controller -----------------------------------------------

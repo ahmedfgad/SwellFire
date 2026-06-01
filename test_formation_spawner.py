@@ -60,6 +60,33 @@ def test_hp_uses_curve_and_scale():
     assert ctrl.calls[0]["hp"] == 2        # grunt hp_mult 1.0 * enemy_hp 2
 
 
+def test_swarmer_cells_spawn_clusters():
+    ctrl = _FakeCtrl()
+    fs = entities.FormationSpawner(ctrl, seed=1)
+    fs.columns = 3
+    fs.rank_interval_px = 100.0
+    fs.enemy_hp = 1
+    fs.spawn_table = [(entities.TYPE_SWARMER, 1.0)]
+    fs.reset_per_level(0.0)
+    fs.update(100.0, 0.0, 0.0, 400.0, 1000.0)
+    # swarmer spawn_count == 4 → 3 columns x 4 = 12 enemies
+    assert len(ctrl.calls) == 12
+
+
+def test_big_enemies_stay_on_rail():
+    ctrl = _FakeCtrl()
+    fs = entities.FormationSpawner(ctrl, seed=1)
+    fs.columns = 6
+    fs.rank_interval_px = 100.0
+    fs.enemy_hp = 1
+    fs.spawn_table = [(entities.TYPE_TANK, 1.0)]
+    fs.reset_per_level(0.0)
+    fs.update(100.0, 0.0, 0.0, 400.0, 1000.0)
+    for c in ctrl.calls:
+        assert c["x"] - c["w"] * 0.5 >= -1e-6
+        assert c["x"] + c["w"] * 0.5 <= 400.0 + 1e-6
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
