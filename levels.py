@@ -177,6 +177,13 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 enemy_hp = 4
             enemy_chase_min = _lerp(25.0, 80.0, t)
             enemy_chase_max = _lerp(80.0, 170.0, t)
+            # Army-formation params. Columns widen and ranks tighten with the
+            # global ramp `t`, so later worlds field a denser army; within a
+            # level the spawner tightens the interval further (game.py ramps
+            # start->end by distance progress).
+            formation_columns = int(round(_lerp(5.0, 7.0, t)))
+            rank_interval_start = _lerp(240.0, 150.0, t)
+            rank_interval_end = _lerp(150.0, 90.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
             # player makes 10-24 decisions per run regardless of level
             # length. Earlier formulas used a fixed px interval, which gave
@@ -312,6 +319,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 "min_duration_sec": min_duration,
                 "kill_target": kill_target,
                 "allowed_enemy_types": allowed_enemy_types,
+                "formation_columns": formation_columns,
+                "rank_interval_start": rank_interval_start,
+                "rank_interval_end": rank_interval_end,
                 "max_grenade_gates": max_grenade_gates,
             }
     return levels
