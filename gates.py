@@ -303,12 +303,11 @@ class Gate(Widget):
         self._color.a = min(1.0, OP_COLORS[self.op][3] + 0.18)
         self._border_color.rgba = (1.0, 0.92, 0.35, 1.0)
         self._glow_color.rgba = (1.0, 0.92, 0.35, 0.85)
-        # Cancel any in-flight emphasis pulse, then bump labels a tier so the
-        # picked gate reads "this one" even after it scrolls past.
-        for lbl in self._labels:
-            Animation.cancel_all(lbl, "font_size")
-            lbl.font_size = lbl.font_size * 1.14
-            lbl.bold = True
+        # Cancel any in-flight emphasis pulse, then keep the picked gate
+        # enlarged via the scale transform — NOT font_size, which would reflow
+        # and wrap the label text (see emphasize()).
+        Animation.cancel_all(self, "emph_scale")
+        self.emph_scale = 1.14
 
 
 # --- spawner -------------------------------------------------------------

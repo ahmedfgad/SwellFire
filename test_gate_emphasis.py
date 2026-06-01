@@ -33,6 +33,17 @@ def test_emphasize_sets_flag_and_leaves_font_untouched():
     assert lbl.font_size == fs0   # emphasize animates emph_scale, not font
 
 
+def test_mark_selected_does_not_reflow_label():
+    g = _make_gate()
+    lbl = g._name_label
+    fs0, txt0, ts0 = lbl.font_size, lbl.text, tuple(lbl.text_size)
+    g.mark_selected()
+    assert lbl.font_size == fs0, "mark_selected must not change font_size (reflow)"
+    assert lbl.text == txt0
+    assert tuple(lbl.text_size) == ts0
+    assert abs(g._scale.x - 1.14) < 1e-6   # enlarged via transform instead
+
+
 def test_scale_origin_tracks_center_on_sync():
     g = _make_gate()
     g.pos = (40, 60)              # triggers _sync via the pos bind
