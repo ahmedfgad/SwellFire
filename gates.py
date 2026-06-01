@@ -31,7 +31,8 @@ from __future__ import annotations
 import random
 
 from kivy.animation import Animation
-from kivy.graphics import Color, Line, RoundedRectangle
+from kivy.properties import NumericProperty
+from kivy.graphics import Color, Line, RoundedRectangle, PushMatrix, PopMatrix, Scale
 from kivy.metrics import dp, sp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -106,6 +107,10 @@ OP_COLORS: dict[str, tuple[float, float, float, float]] = {
 class Gate(Widget):
     """One gate panel — translucent op-tinted rectangle + label."""
 
+    # Drives the emphasis pop (see emphasize()). Animating a scale transform
+    # instead of font_size means the text is laid out once and never reflows.
+    emph_scale = NumericProperty(1.0)
+
     def __init__(self, op: str, value, label_text: str, **kwargs):
         super().__init__(**kwargs)
         self.op = op
@@ -126,6 +131,9 @@ class Gate(Widget):
 
         color = OP_COLORS[op]
         with self.canvas.before:
+            # Uniform pop transform (origin set to the gate centre in _sync).
+            PushMatrix()
+            self._scale = Scale(x=1.0, y=1.0, z=1.0)
             self._color = Color(*color)
             self._bg = RoundedRectangle(radius=[dp(12)])
             self._border_color = Color(1, 1, 1, 0.85)
@@ -135,6 +143,10 @@ class Gate(Widget):
             # a glance even after the hero has scrolled past it.
             self._glow_color = Color(1, 1, 1, 0.0)
             self._glow = Line(rounded_rectangle=[0, 0, 0, 0, dp(14)], width=6.0)
+
+        with self.canvas.after:
+            PopMatrix()
+        self.bind(emph_scale=self._on_emph_scale)
 
         # Emphasis pulse fires once as the pair nears the decision zone.
         self._emphasized = False
@@ -230,6 +242,7 @@ class Gate(Widget):
         return sp(22)
 
     def _sync(self, *_):
+        self._scale.origin = (self.center_x, self.center_y)
         self._bg.pos = self.pos
         self._bg.size = self.size
         self._border.rounded_rectangle = [self.x, self.y, self.width, self.height, dp(12)]
@@ -253,16 +266,19 @@ class Gate(Widget):
             self._name_label.size = self.size
             self._name_label.text_size = self.size
 
+    def _on_emph_scale(self, _widget, value):
+        self._scale.x = value
+        self._scale.y = value
+
     def emphasize(self) -> None:
         """One-shot attention cue as the pair enters the decision zone: a
-        gentle pulse on the primary glyph. Fires once per gate."""
+        gentle scale pop. Fires once per gate. Scaling (not font_size) means
+        the text never reflows/wraps when it grows."""
         if self._emphasized or self.consumed:
             return
         self._emphasized = True
-        lbl = self._op_label if self._is_math else self._name_label
-        base = lbl.font_size
-        (Animation(font_size=base * 1.18, duration=0.22, t="out_quad")
-         + Animation(font_size=base, duration=0.22, t="in_quad")).start(lbl)
+        (Animation(emph_scale=1.18, duration=0.22, t="out_quad")
+         + Animation(emph_scale=1.0, duration=0.22, t="in_quad")).start(self)
 
     def mark_consumed(self, dim: bool = True) -> None:
         """Mark this gate as part of a resolved pair.
