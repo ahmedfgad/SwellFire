@@ -86,6 +86,11 @@ MAX_SHOOTERS_PER_SHOT = 22
 BOSS_TARGET_SECONDS = 82.0
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
+# Top-center HUD default top anchors (fraction of screen height). The safe-area
+# inset (top_safe_inset setting) subtracts from these to clear a notch.
+DIST_BAR_TOP = 0.985          # always-visible level-progress bar
+DC_PANEL_TOP = 0.99           # 2x-coins timer pill
+TOP_SAFE_INSET_MAX = 0.12     # clamp ceiling for the inset
 HERO_FRAME_NAME = "runner_blue"
 HERO_SPRITE_PATH = "assets/sprites/hero_blue.png"
 OPPONENT_SPRITE_PATH = "assets/sprites/hero_green.png"
@@ -579,7 +584,7 @@ class GameScreen(ui.StyledScreen):
         # rounded fill that grows left→right toward 100 %.
         self.dist_bar_holder = FloatLayout(
             size_hint=(0.6, None), height=dp(20),
-            pos_hint={"center_x": 0.5, "top": 0.985},
+            pos_hint={"center_x": 0.5, "top": DIST_BAR_TOP},
         )
         with self.dist_bar_holder.canvas.before:
             Color(0, 0, 0, 0.55)
@@ -632,7 +637,7 @@ class GameScreen(ui.StyledScreen):
         # bonus has left. Hidden when the bonus isn't active.
         self.dc_panel = FloatLayout(
             size_hint=(0.34, 0.07),
-            pos_hint={"center_x": 0.5, "top": 0.99},
+            pos_hint={"center_x": 0.5, "top": DC_PANEL_TOP},
             opacity=0,
         )
         with self.dc_panel.canvas.before:
@@ -1070,6 +1075,8 @@ class GameScreen(ui.StyledScreen):
         # on boss levels). Done after the level config is applied so the
         # boss-level check is accurate.
         self._apply_stats_visibility()
+        self._apply_debug_visibility()
+        self._apply_top_safe_inset()
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
@@ -3652,6 +3659,36 @@ class GameScreen(ui.StyledScreen):
             self.top_bar.opacity = 1.0 if show else 0.0
         if self.chip_row is not None:
             self.chip_row.opacity = 1.0 if show else 0.0
+
+    def _apply_debug_visibility(self) -> None:
+        """Show/hide the FPS / debug overlay (FPS, frame ms, entity counts)
+        per the Settings toggle. Off by default; independent of show_stats."""
+        running = ui.app()
+        show = bool(running.state.get_setting("show_debug")) \
+            if (running and running.state) else False
+        if self.debug is not None:
+            self.debug.opacity = 1.0 if show else 0.0
+
+    def _apply_top_safe_inset(self) -> None:
+        """Shift the top-center HUD (progress bar + 2x-coins timer) down by the
+        player's safe-area inset so a notch / dynamic island doesn't cover them.
+        The stats top bar is intentionally left at the very top."""
+        running = ui.app()
+        inset = running.state.get_setting("top_safe_inset") \
+            if (running and running.state) else 0.0
+        try:
+            inset = float(inset)
+        except (TypeError, ValueError):
+            inset = 0.0
+        inset = max(0.0, min(TOP_SAFE_INSET_MAX, inset))
+        if self.dist_bar_holder is not None:
+            ph = dict(self.dist_bar_holder.pos_hint)
+            ph["top"] = DIST_BAR_TOP - inset
+            self.dist_bar_holder.pos_hint = ph
+        if self.dc_panel is not None:
+            ph = dict(self.dc_panel.pos_hint)
+            ph["top"] = DC_PANEL_TOP - inset
+            self.dc_panel.pos_hint = ph
 
     def _level_progress(self) -> float:
         """Fraction of the level completed (0..1), for the top progress bar.
