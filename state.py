@@ -14,9 +14,6 @@ DEFAULT_SETTINGS = {
     # the top band never covers gameplay (notably the boss); the player can
     # turn it on in Settings.
     "show_stats": False,
-    # Aiming: "auto" = squad auto-targets (default, easy); "manual" = the
-    # player tilts the squad's fire by steering (challenge mode). See aim.py.
-    "aim_mode": "auto",
     # FPS / debug overlay (FPS, frame ms, entity counts). Off by default;
     # toggled in Settings, separate from show_stats (the band/title/chips).
     "show_debug": False,

@@ -342,7 +342,7 @@ class GameScreen(ui.StyledScreen):
         self._hero_target_x = 0.0
         # Manual-aim runtime state (see aim.py). _aim_mode is cached per
         # level in _reset; the reticle/auto target are recomputed each frame.
-        self._aim_mode = "auto"
+        self._aim_mode = "manual"
         self._aim_lead_x = 0.0
         self._aim_angle = 0.0
         self._reticle_x = 0.0
@@ -1231,9 +1231,7 @@ class GameScreen(ui.StyledScreen):
             self._aim_angle = 0.0
             self._reticle_x = hero_cx
             self._reticle_y = 0.0
-        running_app = ui.app()
-        self._aim_mode = (running_app.state.get_setting("aim_mode")
-                          if running_app and running_app.state else "auto")
+        self._aim_mode = "manual"   # manual aim is the only control scheme
         self._auto_target = None
         if self.aim_reticle is not None:
             self.aim_reticle.hide()
