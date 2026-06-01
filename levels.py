@@ -181,9 +181,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # global ramp `t`, so later worlds field a denser army; within a
             # level the spawner tightens the interval further (game.py ramps
             # start->end by distance progress).
-            formation_columns = int(round(_lerp(6.0, 9.0, t)))
-            rank_interval_start = _lerp(220.0, 120.0, t)
-            rank_interval_end = _lerp(120.0, 60.0, t)
+            formation_columns = int(round(_lerp(5.0, 9.0, t)))
+            rank_interval_start = _lerp(260.0, 120.0, t)
+            rank_interval_end = _lerp(140.0, 60.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
             # player makes 10-24 decisions per run regardless of level
             # length. Earlier formulas used a fixed px interval, which gave
@@ -276,13 +276,13 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 # don't auto-pass passive on starting squad alone.
                 starting_squad = int(round(_lerp(2.5, 11.0, world / NUM_WORLDS)))
             else:
-                # Non-boss starting squad scales with world: W1=1, W2=2, W3=3,
-                # W4=4, W5=5, W6=6. Sub-linear fire cap (22) makes this
-                # invisible firepower-wise for higher worlds (extra members
-                # just absorb attrition), but it lets the player survive the
-                # intro period before the first gate lands. Verified by the
-                # difficulty sim — without this scaling W2+ dies at ~4 s.
-                starting_squad = world
+                # Non-boss starting squad = 4 + world: W1=5, W2=6, ... W6=10.
+                # A squad of 5 gives a brand-new player enough muzzles to clear
+                # the front rank and reach the first gates (W1 used to start at 1
+                # and die before gate 2). The sub-linear fire cap (22) means the
+                # higher-world bumps mostly absorb attrition rather than add
+                # firepower. The persistent shop squad_bonus stacks on top.
+                starting_squad = 4 + world
             # Per-world minion HP for boss-spawned enemies. Worlds 1-3 → 1,
             # 4-5 → 2, 6 → 3, so the squad can't just hose the wave.
             boss_minion_hp = 1 if world < 4 else (2 if world < 6 else 3)

@@ -396,12 +396,14 @@ class GateSpawner:
         # spawned so far.
         self.max_grenade_gates = 0
         self.grenade_gates_spawned = 0
+        self._pairs_spawned = 0   # pairs emitted this level (first-pair gain bias)
 
     def reset_per_level(self) -> None:
         """Call at level start. Resets per-run counters that track
         rare-resource emission and the pity-gate floor."""
         self.grenade_gates_spawned = 0
         self.consecutive_misses = 0
+        self._pairs_spawned = 0
 
     def tick(self, distance: float, x_min: float, x_max: float, y_top: float) -> bool:
         """Spawn a pair when the run has advanced past the next interval.
@@ -433,7 +435,8 @@ class GateSpawner:
 
         # Pity floor: if the player has missed the last few pairs, force a
         # math pair with at least one safe op (MUL or ADD) so they recover.
-        force_safe = self.consecutive_misses >= self.PITY_AFTER_MISSES
+        force_safe = (self.consecutive_misses >= self.PITY_AFTER_MISSES
+                      or self._pairs_spawned == 0)
         if force_safe:
             safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops] \
                 or [OP_MUL, OP_ADD]
@@ -453,6 +456,7 @@ class GateSpawner:
             (left_x,  y_top, gate_w, gate_h, op_a, value_a, label_a),
             (right_x, y_top, gate_w, gate_h, op_b, value_b, label_b),
         )
+        self._pairs_spawned += 1
         return True
 
     def _bonus_value(self, op: str) -> int:
@@ -507,7 +511,7 @@ class GateSpawner:
         many gates makes the level passable; no single gate carries the run.
         """
         op_table = {
-            OP_MUL:     ([2],              lambda v: "x{}".format(v)),
+            OP_MUL:     ([2, 3],           lambda v: "x{}".format(v)),
             OP_ADD:     ([3, 5, 7],        lambda v: "+{}".format(v)),
             OP_SUB:     ([2, 3, 5, 7],     lambda v: "-{}".format(v)),
             OP_DIV:     ([2, 4],           lambda v: "/{}".format(v)),
