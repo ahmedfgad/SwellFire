@@ -451,6 +451,10 @@ class ProjectileController:
         self.owner = bytearray(cap)
         self.spawned_total = 0
         self.recycled_total = 0
+        # When set (non-boss levels), projectiles that travel past this Y
+        # (the weapon's kill-zone line) are released so shots visibly stop at
+        # the line and can't reach the far army. None = unlimited (boss/MP).
+        self.kill_line_y = None
 
     def spawn(self, x: float, y: float, vx: float, vy: float,
               w: float, h: float, frame: str,
@@ -480,6 +484,7 @@ class ProjectileController:
             cy[i] += vy[i] * dt
             ttl[i] -= dt
             if (ttl[i] <= 0.0
+                    or (self.kill_line_y is not None and cy[i] > self.kill_line_y)
                     or cx[i] < x_min - margin or cx[i] > x_max + margin
                     or cy[i] < y_min - margin or cy[i] > y_max + margin):
                 pool.release(i)
