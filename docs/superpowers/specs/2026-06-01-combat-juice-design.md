@@ -72,8 +72,8 @@ approval. The user can retune.)
 3. **Rate-limited channel:** in `_update`, after collision resolution, run a
    single combat-audio throttle: if `self._run_time - self._last_combat_sfx >=
    COMBAT_SFX_INTERVAL` (~0.07s ≈ 14/sec) and a flag is set, play **`smash`** if
-   `_had_kill_this_frame` else **`hit`** if `_had_hit_this_frame` (death takes
-   priority), update `_last_combat_sfx`. Reset both flags each frame. This caps
+   `_had_kill_this_frame` else **`enemy_hit`** if `_had_hit_this_frame` (death
+   takes priority), update `_last_combat_sfx`. Reset both flags each frame. This caps
    combat sounds regardless of how many enemies die/are hit that frame, honoring
    CLAUDE.md's "no one-shot per bullet/kill" rule.
 
@@ -90,7 +90,7 @@ existing unpooled `_float_text` is sufficient — no Label pool needed.
   flags + the `on_hit` callback wiring; reset flags/accumulators on level start.
 - `entities.py` — optional `on_hit` callback in `resolve_projectile_collisions`
   (non-lethal contacts).
-- `tools/gen_sfx.py` — `smash` and `smash` + `enemy_hit` builders.
+- `tools/gen_sfx.py` — `smash` + `enemy_hit` builders.
 - `audio.py` — register the new cue name(s) in `SFX_FILES`.
 
 ## Testing / verification
