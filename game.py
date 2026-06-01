@@ -1213,6 +1213,8 @@ class GameScreen(ui.StyledScreen):
 
     def _reset(self, _dt):
         self.distance = 0.0
+        if self.formation_spawner is not None:
+            self.formation_spawner.reset_per_level(0.0)
         # Reset shake so a fresh level doesn't inherit the previous one's kick.
         self.shake_intensity = 0.0
         self.shake_x = 0.0
@@ -1284,6 +1286,10 @@ class GameScreen(ui.StyledScreen):
         is_boss = bool(cfg.get("boss"))
 
         if self.enemy_spawner is not None:
+            # LEGACY: enemy_spawner is no longer ticked — FormationSpawner is the
+            # spawn source now. Only `hp_scale` (set in the block below) is still
+            # read (copied into formation_spawner). These assignments are inert;
+            # kept to avoid churn. Edit FormationSpawner config (below) instead.
             if is_boss:
                 # Boss controls all spawning during the fight.
                 self.enemy_spawner.interval = 0.0
@@ -1385,7 +1391,7 @@ class GameScreen(ui.StyledScreen):
                     (entities.TYPE_NAMES[name], weight)
                     for name, weight in cfg["allowed_enemy_types"]
                 ]
-            fs.reset_per_level(self.distance)
+            fs.reset_per_level(0.0)
         self._update_weapon_range()
 
     def _update_weapon_range(self) -> None:
@@ -2036,7 +2042,9 @@ class GameScreen(ui.StyledScreen):
                             near = entities.find_nearest_threat(
                                 self.hero.center_x, self.hero.center_y,
                                 self.enemy_controller,
-                                graphics.ws(RETICLE_LEAD_DIST * 1.4))
+                                (self._weapon_range_px
+                                 if self._weapon_range_px is not None
+                                 else graphics.ws(RETICLE_LEAD_DIST * 1.4)))
                             if near >= 0:
                                 locked = (abs(self.enemy_pool.cx[near] - self._reticle_x) < lock_x
                                           and abs(self.enemy_pool.cy[near] - self._reticle_y) < lock_y)
