@@ -52,28 +52,38 @@ def test_tougher_enemy_is_bigger():
     assert big > small
 
 
-def test_spawn_y_is_in_top_half():
-    sp, ctrl = _spawner(seed=7)
-    sp.enemy_hp = 1
+def test_spawn_y_is_always_in_top_half_across_seeds():
     y_min, y_max = 0.0, 1000.0
-    sp._spawn_one(0.0, y_min, 400.0, y_max)
-    y = ctrl.calls[-1]["y"]
     mid = y_min + 0.5 * (y_max - y_min)
-    assert y >= mid                      # never below the top half
-    assert y <= y_max + sp._above_top_px()  # never above the spawn ceiling
+    for seed in range(30):
+        sp, ctrl = _spawner(seed=seed)
+        sp.enemy_hp = 1
+        sp._spawn_one(0.0, y_min, 400.0, y_max)
+        y = ctrl.calls[-1]["y"]
+        assert y >= mid, (seed, y)                          # never below top half
+        assert y <= y_max + sp._above_top_px(), (seed, y)   # never above the ceiling
 
 
-def test_poof_fires_only_for_onscreen_spawns():
-    sp, ctrl = _spawner(seed=3)
-    sp.enemy_hp = 1
-    poofs = []
-    sp.spawn_poof = lambda x, y: poofs.append((x, y))
-    sp._spawn_one(0.0, 0.0, 400.0, 1000.0)
-    y = ctrl.calls[-1]["y"]
-    if y < 1000.0:                       # spawned on-screen
-        assert poofs, "on-screen spawn should poof"
-    else:
-        assert not poofs, "off-screen spawn should not poof"
+def test_poof_fires_exactly_for_onscreen_spawns_across_seeds():
+    # Across many seeds the invariant "poofed iff spawned on-screen" must hold,
+    # and BOTH branches (on-screen and off-screen) must actually occur so each
+    # path is exercised.
+    saw_onscreen = False
+    saw_offscreen = False
+    y_max = 1000.0
+    for seed in range(60):
+        sp, ctrl = _spawner(seed=seed)
+        sp.enemy_hp = 1
+        poofs = []
+        sp.spawn_poof = lambda x, y: poofs.append((x, y))
+        sp._spawn_one(0.0, 0.0, 400.0, y_max)
+        y = ctrl.calls[-1]["y"]
+        onscreen = y < y_max
+        assert bool(poofs) == onscreen, (seed, y, poofs)    # poof iff on-screen
+        saw_onscreen = saw_onscreen or onscreen
+        saw_offscreen = saw_offscreen or (not onscreen)
+    assert saw_onscreen, "no on-screen spawn occurred across 60 seeds"
+    assert saw_offscreen, "no off-screen spawn occurred across 60 seeds"
 
 
 if __name__ == "__main__":
