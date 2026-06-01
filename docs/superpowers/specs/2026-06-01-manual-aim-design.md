@@ -94,6 +94,17 @@ UI fixes (#3/#10/#13/#4).
   exists, remove it so boss levels use the regular weapon fire rate. If it is
   purely perceptual, report that and leave fire rate unchanged. No speculative
   change before confirming.
+- **FINDING (2026-06-01, verified):** there is **no** boss-only fire-rate change.
+  The only firing-cadence write is `self._fire_cooldown = 1.0 / weapon.fire_rate`
+  (`game.py:1967`); the only divisor is the **Overdrive booster**
+  (`game.py:1969`, `boosters.OVERDRIVE_FIRE_MULT`), which is not boss-specific.
+  Every other `self._fire_cooldown = 0.0` is a "fire immediately" reset at
+  level/surge start, not a sustained rate change. The faster *feel* is
+  perceptual: boss levels grant a **head-start squad** (`levels.py:246-263`,
+  `starting_squad` scales ~3→12 by world vs the world-number count on normal
+  levels), so more muzzles fire, and because every shot converges on the single
+  boss target the stream reads as denser than scattered fire on normal levels.
+  **No code change made** — boss levels already use the regular weapon fire rate.
 
 ## G. Autoplayer aim control (#9)
 
