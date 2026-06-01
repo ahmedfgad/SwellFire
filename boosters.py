@@ -94,3 +94,11 @@ OVERDRIVE_FIRE_MULT = 2.0        # fire-rate multiplier while Overdrive is up
 OVERDRIVE_DAMAGE_MULT = 1.3      # small damage bump alongside the rate boost
 REINFORCE_AMOUNT = 8             # squad members granted per Reinforcements use
 MAGNET_PULL_SPEED = 900.0        # px/s pickups home toward the hero under Magnet
+
+
+def refreshed_until(current_until: float, now: float,
+                    base_duration: float, scale: int = 1) -> float:
+    """New `*_active_until` for a timed booster, applying refresh-not-rob:
+    a (re)activation extends the timer to `now + base_duration*scale` but never
+    shortens an already-longer active window."""
+    return max(current_until, now + base_duration * max(1, int(scale)))
