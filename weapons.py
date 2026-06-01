@@ -65,8 +65,8 @@ ORDERED_IDS: list[str] = list(WEAPONS.keys())
 # Weapon tier scaling. Tier 1 is the base weapon (free for all); each
 # higher tier multiplies projectile damage. Index by tier 1..4 so the
 # zero slot is unused.
-MAX_TIER = 4
-TIER_DAMAGE_MULT: list[float] = [None, 1.0, 1.5, 2.0, 3.0]
+MAX_TIER = 6
+TIER_DAMAGE_MULT: list[float] = [None, 1.0, 1.5, 2.0, 3.0, 4.0, 5.5]
 
 
 def tier_damage(weapon: "Weapon", tier: int) -> int:
