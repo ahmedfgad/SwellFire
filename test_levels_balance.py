@@ -24,6 +24,11 @@ def test_tanks_appear_in_world_3():
     assert "tank" not in [n for n, _ in levels._allowed_enemy_types(2)]
 
 
+def test_sniper_unlocks_in_world_3_with_tanks():
+    assert "sniper" in levels.get_level(21)["allowed_weapons"]   # W3-L1
+    assert "sniper" not in levels.get_level(11)["allowed_weapons"]  # W2-L1
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
