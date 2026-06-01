@@ -157,6 +157,7 @@ class Gate(Widget):
         # (weapon / grenade) are not arithmetic, so they render as one
         # centered name label.
         self._is_math = op in MATH_OPS
+        self._factor_label = None
         if self._is_math:
             self._op_label = Label(
                 text=OP_GLYPH.get(op, "?"), font_size=sp(40), bold=True,
@@ -173,6 +174,23 @@ class Gate(Widget):
             self.add_widget(self._op_label)
             self.add_widget(self._expr_label)
             self._labels = [self._op_label, self._expr_label]
+        elif op in CONSUMABLE_BONUS:
+            # Consumable reward gate: name on top, "xN" factor on its own line
+            # below (amber, like the math accent) — never cram onto one line.
+            name = CONSUMABLE_BONUS[op]
+            self._name_label = Label(
+                text=name, font_size=(sp(28) if len(name) <= 9 else sp(22)),
+                bold=True, color=(1, 1, 1, 1), halign="center", valign="middle",
+                outline_width=2, outline_color=_OUTLINE_RGBA,
+            )
+            self._factor_label = Label(
+                text="×{}".format(int(value)), font_size=sp(26), bold=True,
+                color=OP_ACCENT_RGBA, halign="center", valign="middle",
+                outline_width=2, outline_color=_OUTLINE_RGBA,
+            )
+            self.add_widget(self._name_label)
+            self.add_widget(self._factor_label)
+            self._labels = [self._name_label, self._factor_label]
         else:
             fs = sp(30) if len(label_text) <= 7 else sp(24)
             self._name_label = Label(
@@ -261,6 +279,17 @@ class Gate(Widget):
             self._expr_label.pos = (self.x, self.y + self.height * 0.02)
             self._expr_label.size = (self.width, expr_h)
             self._expr_label.text_size = (self.width, expr_h)
+        elif self._factor_label is not None:
+            # Name on the top band, xN factor on the bottom band (mirrors the
+            # math op/expression split so the pop-scale never reflows).
+            name_h = self.height * 0.52
+            self._name_label.pos = (self.x, self.y + self.height * 0.44)
+            self._name_label.size = (self.width, name_h)
+            self._name_label.text_size = (self.width, name_h)
+            fac_h = self.height * 0.42
+            self._factor_label.pos = (self.x, self.y + self.height * 0.04)
+            self._factor_label.size = (self.width, fac_h)
+            self._factor_label.text_size = (self.width, fac_h)
         else:
             self._name_label.pos = self.pos
             self._name_label.size = self.size
@@ -426,6 +455,17 @@ class GateSpawner:
         )
         return True
 
+    def _bonus_value(self, op: str) -> int:
+        """Reward-gate strength xN (1-3): rarer-higher, skewing up by world."""
+        tier = self.world_tier
+        if tier <= 2:
+            weights = [0.80, 0.20, 0.00]
+        elif tier <= 4:
+            weights = [0.55, 0.33, 0.12]
+        else:
+            weights = [0.40, 0.35, 0.25]
+        return self._rng.choices([1, 2, 3], weights=weights)[0]
+
     def _build_bonus_pair(self):
         """Build two distinct weapon/grenade specs, or None if fewer than two
         bonus choices are available (e.g. one weapon and the grenade cap hit).
@@ -440,12 +480,10 @@ class GateSpawner:
         for op, name in CONSUMABLE_BONUS.items():
             if op not in self.allowed_ops:
                 continue
-            if op == OP_GRENADE:
-                if self.grenade_gates_spawned >= self.max_grenade_gates:
-                    continue
-                candidates.append((OP_GRENADE, 1, "GRENADE x1"))
-            else:
-                candidates.append((op, 1, name))
+            if op == OP_GRENADE and self.grenade_gates_spawned >= self.max_grenade_gates:
+                continue
+            n = self._bonus_value(op)
+            candidates.append((op, n, "{} x{}".format(name, n)))
         if OP_WEAPON in self.allowed_ops:
             for w in (self.allowed_weapons or self.DEFAULT_WEAPONS):
                 candidates.append((OP_WEAPON, w, w.upper()))
@@ -463,10 +501,10 @@ class GateSpawner:
         always a genuine choice. Math ops get an equation label; bonus ops a
         literal one.
 
-        Reward magnitudes are intentionally tight: ×2 only (no ×3), ADD
-        capped at 7, SUB up to 7, GRENADE always 1. The cumulative effect
-        across many gates makes the level passable; no single gate carries
-        the run.
+        Reward magnitudes are intentionally tight: MUL ×2 only (no ×3), ADD
+        capped at 7, SUB up to 7, DIV /2–/4; GRENADE uses the tier-weighted
+        1–3 reward strength (``_bonus_value``). The cumulative effect across
+        many gates makes the level passable; no single gate carries the run.
         """
         op_table = {
             OP_MUL:     ([2],              lambda v: "x{}".format(v)),
@@ -475,7 +513,7 @@ class GateSpawner:
             OP_DIV:     ([2, 4],           lambda v: "/{}".format(v)),
             OP_WEAPON:  (self.allowed_weapons or self.DEFAULT_WEAPONS,
                          lambda v: v.upper()),
-            OP_GRENADE: ([1],              lambda v: "GRENADE x{}".format(v)),
+            OP_GRENADE: ([1, 2, 3],        lambda v: "GRENADE x{}".format(v)),
         }
         pool = allowed if allowed is not None else self.allowed_ops
         cand = [op for op in pool if op != exclude_op and op in op_table]
@@ -487,7 +525,10 @@ class GateSpawner:
             cand = [op for op in cand if op != OP_GRENADE]
         op = self._rng.choice(cand)
         values, fmt = op_table[op]
-        value = self._rng.choice(values)
+        if op == OP_GRENADE:
+            value = self._bonus_value(OP_GRENADE)
+        else:
+            value = self._rng.choice(values)
         if op == OP_GRENADE:
             self.grenade_gates_spawned += 1
         # M14 — for value-bearing ops (mul/add/sub/div) replace the plain

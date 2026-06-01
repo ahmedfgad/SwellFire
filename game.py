@@ -2320,20 +2320,15 @@ class GameScreen(ui.StyledScreen):
                 self._update_weapon_range()
                 self._fire_cooldown = 0.0
         elif gate.op == gates.OP_GRENADE:
-            self.grenade_count = min(MAX_GRENADES,
-                                     self.grenade_count + int(gate.value))
+            self._apply_grenade_effect(int(gate.value))
         elif gate.op == gates.OP_REINFORCE:
-            self.reinforce_count = min(boosters.REINFORCE.max_per_run,
-                                       self.reinforce_count + int(gate.value))
+            self._apply_reinforce_effect(int(gate.value))
         elif gate.op == gates.OP_FREEZE:
-            self.freeze_count = min(boosters.FREEZE.max_per_run,
-                                    self.freeze_count + int(gate.value))
+            self._apply_freeze_effect(int(gate.value))
         elif gate.op == gates.OP_OVERDRIVE:
-            self.overdrive_count = min(boosters.OVERDRIVE.max_per_run,
-                                       self.overdrive_count + int(gate.value))
+            self._apply_overdrive_effect(int(gate.value))
         elif gate.op == gates.OP_MAGNET:
-            self.magnet_count = min(boosters.MAGNET.max_per_run,
-                                    self.magnet_count + int(gate.value))
+            self._apply_magnet_effect(int(gate.value))
         # Audio + particle burst at the hero so the pickup reads. Weapon gates
         # get the weapon-swap cue; everything else the generic pickup blip.
         running = ui.app()
@@ -2589,8 +2584,25 @@ class GameScreen(ui.StyledScreen):
         self._float_text("SHIELD!", boosters.BOOSTERS["shield"].hud_color)
         self._add_shake(1.5)
 
+    def _apply_reinforce_effect(self, scale: int = 1) -> None:
+        """Instantly grow the squad by REINFORCE_AMOUNT * scale (no charge)."""
+        if self._level_ended or self.squad_count >= MAX_SQUAD:
+            return
+        amount = boosters.REINFORCE_AMOUNT * max(1, int(scale))
+        self.squad_count = min(MAX_SQUAD, self.squad_count + amount)
+        ui.app().audio.play_sfx("reinforce")
+        if self.hero is not None and self.particle_controller is not None:
+            self.particle_controller.burst(
+                self.hero.center_x, self.hero.center_y,
+                count=20, speed=360.0, ttl=0.55, size=13.0,
+                frame="runner_blue", rng=self._fire_rng,
+            )
+        self._float_text("+{} SQUAD!".format(amount),
+                         boosters.BOOSTERS["reinforce"].hud_color)
+        self._add_shake(2.0)
+
     def _activate_reinforce(self) -> None:
-        """Burn one reinforcement kit: instantly grow the squad."""
+        """Burn one reinforcement kit (shop charge): instantly grow the squad."""
         if self._level_ended:
             return
         if self.reinforce_count <= 0:
@@ -2600,18 +2612,20 @@ class GameScreen(ui.StyledScreen):
             self._booster_unavailable("reinforce", message="SQUAD FULL!")
             return
         self.reinforce_count -= 1
-        self.squad_count = min(MAX_SQUAD,
-                               self.squad_count + boosters.REINFORCE_AMOUNT)
-        ui.app().audio.play_sfx("reinforce")
-        if self.hero is not None and self.particle_controller is not None:
-            self.particle_controller.burst(
-                self.hero.center_x, self.hero.center_y,
-                count=20, speed=360.0, ttl=0.55, size=13.0,
-                frame="runner_blue", rng=self._fire_rng,
-            )
-        self._float_text("+{} SQUAD!".format(boosters.REINFORCE_AMOUNT),
-                         boosters.BOOSTERS["reinforce"].hud_color)
-        self._add_shake(2.0)
+        self._apply_reinforce_effect(1)
+
+    def _apply_freeze_effect(self, scale: int = 1) -> None:
+        if self._level_ended:
+            return
+        self.freeze_active_until = boosters.refreshed_until(
+            self.freeze_active_until, self._run_time,
+            boosters.FREEZE_DURATION_SEC, scale)
+        ui.app().audio.play_sfx("freeze")
+        # Frosty pop at the hero + an icy-blue tint over the whole stage for
+        # the duration (driven in the update loop) so the freeze is obvious.
+        self._booster_burst(0.55, 0.85, 1.0)
+        self._float_text("FREEZE!", boosters.BOOSTERS["freeze"].hud_color)
+        self._add_shake(1.5)
 
     def _activate_freeze(self) -> None:
         if self._level_ended:
@@ -2622,12 +2636,21 @@ class GameScreen(ui.StyledScreen):
         if self.freeze_active_until > self._run_time:
             return
         self.freeze_count -= 1
-        self.freeze_active_until = self._run_time + boosters.FREEZE_DURATION_SEC
-        ui.app().audio.play_sfx("freeze")
-        # Frosty pop at the hero + an icy-blue tint over the whole stage for
-        # the duration (driven in the update loop) so the freeze is obvious.
-        self._booster_burst(0.55, 0.85, 1.0)
-        self._float_text("FREEZE!", boosters.BOOSTERS["freeze"].hud_color)
+        self._apply_freeze_effect(1)
+
+    def _apply_overdrive_effect(self, scale: int = 1) -> None:
+        if self._level_ended:
+            return
+        self.overdrive_active_until = boosters.refreshed_until(
+            self.overdrive_active_until, self._run_time,
+            boosters.OVERDRIVE_DURATION_SEC, scale)
+        self._fire_cooldown = 0.0    # let the surge start firing immediately
+        ui.app().audio.play_sfx("overdrive")
+        # Orange flare on the hero so the fire-rate surge reads visually.
+        self._booster_burst(1.0, 0.55, 0.15)
+        if self.hero is not None:
+            self.hero.flash(duration=0.5, color=(1.0, 0.55, 0.10, 0.6))
+        self._float_text("OVERDRIVE!", boosters.BOOSTERS["overdrive"].hud_color)
         self._add_shake(1.5)
 
     def _activate_overdrive(self) -> None:
@@ -2639,16 +2662,21 @@ class GameScreen(ui.StyledScreen):
         if self.overdrive_active_until > self._run_time:
             return
         self.overdrive_count -= 1
-        self.overdrive_active_until = (self._run_time
-                                       + boosters.OVERDRIVE_DURATION_SEC)
-        self._fire_cooldown = 0.0    # let the surge start firing immediately
-        ui.app().audio.play_sfx("overdrive")
-        # Orange flare on the hero so the fire-rate surge reads visually.
-        self._booster_burst(1.0, 0.55, 0.15)
+        self._apply_overdrive_effect(1)
+
+    def _apply_magnet_effect(self, scale: int = 1) -> None:
+        if self._level_ended:
+            return
+        self.magnet_active_until = boosters.refreshed_until(
+            self.magnet_active_until, self._run_time,
+            boosters.MAGNET_DURATION_SEC, scale)
+        ui.app().audio.play_sfx("magnet")
+        # Purple pulse on the hero as the magnet switches on.
+        self._booster_burst(0.80, 0.45, 0.95)
         if self.hero is not None:
-            self.hero.flash(duration=0.5, color=(1.0, 0.55, 0.10, 0.6))
-        self._float_text("OVERDRIVE!", boosters.BOOSTERS["overdrive"].hud_color)
-        self._add_shake(1.5)
+            self.hero.flash(duration=0.5, color=(0.80, 0.45, 0.95, 0.6))
+        self._float_text("MAGNET!", boosters.BOOSTERS["magnet"].hud_color)
+        self._add_shake(1.2)
 
     def _activate_magnet(self) -> None:
         if self._level_ended:
@@ -2659,14 +2687,7 @@ class GameScreen(ui.StyledScreen):
         if self.magnet_active_until > self._run_time:
             return
         self.magnet_count -= 1
-        self.magnet_active_until = self._run_time + boosters.MAGNET_DURATION_SEC
-        ui.app().audio.play_sfx("magnet")
-        # Purple pulse on the hero as the magnet switches on.
-        self._booster_burst(0.80, 0.45, 0.95)
-        if self.hero is not None:
-            self.hero.flash(duration=0.5, color=(0.80, 0.45, 0.95, 0.6))
-        self._float_text("MAGNET!", boosters.BOOSTERS["magnet"].hud_color)
-        self._add_shake(1.2)
+        self._apply_magnet_effect(1)
 
     def _booster_burst(self, r: float, g: float, b: float) -> None:
         """A small celebratory particle pop at the hero for booster activation.
@@ -2740,17 +2761,14 @@ class GameScreen(ui.StyledScreen):
             # StyledButton has no built-in disabled visual.
             btn.opacity = 1.0 if count > 0 else 0.4
 
-    def _detonate_grenade(self) -> None:
-        """Burn one grenade: kill every enemy within GRENADE_RADIUS of the hero."""
+    def _apply_grenade_effect(self, scale: int = 1) -> None:
+        """Detonate a grenade (no charge): kill enemies within a scaled radius."""
         if self.hero is None or self.enemy_controller is None or self._level_ended:
             return
-        if self.grenade_count <= 0:
-            self._booster_unavailable("grenade")
-            return
-        self.grenade_count -= 1
+        scale = max(1, int(scale))
         hero_cx = self.hero.center_x
         hero_cy = self.hero.center_y
-        grenade_radius = graphics.ws(GRENADE_RADIUS)
+        grenade_radius = graphics.ws(GRENADE_RADIUS) * (1.0 + 0.5 * (scale - 1))
         r2 = grenade_radius * grenade_radius
         ep = self.enemy_pool
         active = ep.active
@@ -2774,7 +2792,7 @@ class GameScreen(ui.StyledScreen):
             dx = self.boss.cx - hero_cx
             dy = self.boss.cy - hero_cy
             if dx * dx + dy * dy <= r2 * 1.6 * 1.6:
-                died = self.boss_controller.take_damage(20)
+                died = self.boss_controller.take_damage(20 * scale)
                 if died and not self._level_ended:
                     self._end_level(won=True)
         # Big visual + audio.
@@ -2793,6 +2811,16 @@ class GameScreen(ui.StyledScreen):
         self._add_shake(8.0)
         ui.app().audio.play_sfx("explosion")
         self._float_text("GRENADE!", boosters.BOOSTERS["grenade"].hud_color)
+
+    def _detonate_grenade(self) -> None:
+        """Burn one grenade (shop charge) and detonate."""
+        if self.hero is None or self.enemy_controller is None or self._level_ended:
+            return
+        if self.grenade_count <= 0:
+            self._booster_unavailable("grenade")
+            return
+        self.grenade_count -= 1
+        self._apply_grenade_effect(1)
 
     # --- input ------------------------------------------------------------
 
