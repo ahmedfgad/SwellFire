@@ -162,14 +162,19 @@ def build_levels() -> dict[int, dict[str, Any]]:
             min_duration = LEVEL_BASE_DURATION_SEC + (index - 1) * LEVEL_DURATION_STEP_SEC
             distance_goal = max(_lerp(7200.0, 14400.0, t),
                                 min_duration * SCROLL_SPEED_PX_PER_SEC)
-            enemy_spawn_interval = _lerp(0.18, 0.05, t)     # ~5/s → ~20/s
+            enemy_spawn_interval = _lerp(0.15, 0.05, t)     # ~6.7/s → ~20/s (denser early)
             enemy_speed = _lerp(180.0, 290.0, t)            # px/sec downward
-            if t < 0.40:
+            # Tougher earlier so an upgraded weapon can't one-shot everything
+            # through W2/W3 (#11/#12). W2-L1 (t~0.17) and W3-L1 (t~0.34) now
+            # spawn 2-HP enemies → a 1-damage rifle needs 2 shots.
+            if t < 0.10:
                 enemy_hp = 1
-            elif t < 0.78:
+            elif t < 0.40:
                 enemy_hp = 2
-            else:
+            elif t < 0.75:
                 enemy_hp = 3
+            else:
+                enemy_hp = 4
             enemy_chase_min = _lerp(25.0, 80.0, t)
             enemy_chase_max = _lerp(80.0, 170.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
@@ -321,17 +326,19 @@ def _allowed_enemy_types(world: int) -> list[tuple[str, float]]:
 
         W1   grunts only
         W2   grunts only (slightly higher base spawn rate)
-        W3   + swarmer (cluster of 4 → forces wide squad before W4)
-        W4   + tank (focused-fire demand)
+        W3   + swarmer + tank (tank moved a world earlier for sniper targets)
+        W4   (heavier tank weight)
         W5   + bomber (AOE on death)
         W6   + splitter (overkill penalty)
     """
     if world <= 2:
         return [("grunt", 1.0)]
     if world == 3:
-        return [("grunt", 0.78), ("swarmer", 0.22)]
+        # Tank introduced a world earlier (was W4) so a high-HP target for the
+        # sniper niche exists by mid-game; modest weight keeps W3 fair.
+        return [("grunt", 0.63), ("swarmer", 0.22), ("tank", 0.15)]
     if world == 4:
-        return [("grunt", 0.55), ("swarmer", 0.20), ("tank", 0.25)]
+        return [("grunt", 0.50), ("swarmer", 0.20), ("tank", 0.30)]
     if world == 5:
         return [("grunt", 0.40), ("swarmer", 0.15),
                 ("tank", 0.20), ("bomber", 0.25)]
