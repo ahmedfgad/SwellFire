@@ -1083,6 +1083,10 @@ class GameScreen(ui.StyledScreen):
         # coin pickups). Persisted to state.coins_balance in _end_level so a
         # partial run still pays the player for whatever they collected.
         self._coins_earned = 0
+        # World-scaled amount actually banked at level end (set in
+        # _end_level); defaults to the raw tally for paths that don't bank
+        # (e.g. versus, or a partial run before banking runs).
+        self._coins_banked = 0
         # Split tracking: pickups (coins thrown into the level + the coin
         # rain from the double-coin power-up) vs everything else (kill
         # rewards, gate rewards, completion bonus). The in-level HUD shows
@@ -2478,6 +2482,9 @@ class GameScreen(ui.StyledScreen):
                           if running.current_level else 1)
                 _banked = int(round(self._coins_earned * coin_world_factor(_world)))
                 running.state.add_coins(_banked)
+                # Stat shown at level end must match what was actually banked
+                # (world-scaled), not the raw in-run tally.
+                self._coins_banked = _banked
             # Persist leftover booster balances. No more free-grenade baseline
             # — anything the player has at level end is what they earned or
             # carried into the level.
@@ -2584,8 +2591,14 @@ class GameScreen(ui.StyledScreen):
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
         squad_end = max(0, self.squad_count)
         squad_peak = max(squad_end, getattr(self, "_squad_peak", squad_end))
+        # Show the amount actually credited to the balance (world-scaled) in
+        # single-player; versus/partial paths that never banked fall back to
+        # the raw in-run tally.
+        coins_shown = (self._coins_banked
+                       if running.current_mode == "single" and self._coins_banked
+                       else self._coins_earned)
         stats = {
-            "coins_total": self._coins_earned,
+            "coins_total": coins_shown,
             "coins_pickup": self._coins_pickups,
             "kills": self.kills_total,
             "gates_hit": gates_hit,
