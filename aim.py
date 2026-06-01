@@ -45,7 +45,7 @@ def aim_angle(offset_px: float, full_px: float, max_rad: float) -> float:
 
 
 def reticle_point(hero_x: float, muzzle_y: float, angle_rad: float,
-                  lead_dist: float):
+                  lead_dist: float) -> tuple[float, float]:
     """The convergence point the guns aim at: `lead_dist` ahead of the
     muzzle along `angle_rad` (measured off straight-up, +right)."""
     rx = hero_x + math.sin(angle_rad) * lead_dist

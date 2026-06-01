@@ -49,6 +49,11 @@ def test_reticle_point_tilts_right_for_positive_angle():
     assert approx(rx, 300.0) and approx(ry, 0.0, eps=1e-4)
 
 
+def test_update_aim_lead_negative_ease_clamps_to_no_movement():
+    # ease < 0 must not move the lead backward.
+    assert approx(aim.update_aim_lead(0.0, 100.0, dt=1.0, ease=-5.0), 0.0)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
