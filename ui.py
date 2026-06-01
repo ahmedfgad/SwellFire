@@ -1719,6 +1719,16 @@ class SettingsScreen(StyledScreen):
         vol_row.add_widget(self.volume)
         box.add_widget(vol_row)
 
+        inset_row = BoxLayout(orientation="horizontal", spacing=dp(10),
+                              size_hint_y=None, height=BTN_HEIGHT)
+        inset_row.add_widget(Label(text="Top safe area", font_size=sp(18),
+                                   size_hint_x=0.35, color=[1, 1, 1, 1]))
+        self.top_inset = Slider(min=0, max=0.12, value=0.05, step=0.01,
+                                size_hint_x=0.65)
+        self.top_inset.bind(value=self._on_top_inset)
+        inset_row.add_widget(self.top_inset)
+        box.add_widget(inset_row)
+
         auto = StyledButton(text="Auto Player", bg=[0.3, 0.6, 0.55, 1],
                             size_hint_y=None, height=BTN_HEIGHT)
         auto.bind(on_release=lambda *_: app().go("autoplayer"))
@@ -1745,6 +1755,7 @@ class SettingsScreen(StyledScreen):
         running = app()
         running.audio.play_menu_music()
         self.volume.value = running.state.get_setting("volume")
+        self.top_inset.value = running.state.get_setting("top_safe_inset")
         self._refresh_labels()
 
     def _refresh_labels(self):
@@ -1783,6 +1794,10 @@ class SettingsScreen(StyledScreen):
         running = app()
         running.state.set_setting("volume", round(value, 2))
         running.audio.apply_settings(running.state)
+
+    def _on_top_inset(self, _slider, value):
+        running = app()
+        running.state.set_setting("top_safe_inset", round(value, 2))
 
     def _confirm_reset(self):
         def do_reset():
