@@ -181,9 +181,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # global ramp `t`, so later worlds field a denser army; within a
             # level the spawner tightens the interval further (game.py ramps
             # start->end by distance progress).
-            formation_columns = int(round(_lerp(5.0, 7.0, t)))
-            rank_interval_start = _lerp(240.0, 150.0, t)
-            rank_interval_end = _lerp(150.0, 90.0, t)
+            formation_columns = int(round(_lerp(6.0, 9.0, t)))
+            rank_interval_start = _lerp(220.0, 120.0, t)
+            rank_interval_end = _lerp(120.0, 60.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
             # player makes 10-24 decisions per run regardless of level
             # length. Earlier formulas used a fixed px interval, which gave

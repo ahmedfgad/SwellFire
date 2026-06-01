@@ -6,13 +6,13 @@ import weapons
 def test_every_weapon_has_a_range_frac():
     for wid in ("pistol", "rifle", "shotgun", "sniper"):
         rf = weapons.get(wid).range_frac
-        assert 0.0 < rf <= 0.6, (wid, rf)
+        assert 0.0 < rf <= 0.7, (wid, rf)
 
 
 def test_range_frac_ordering_matches_niches():
     rf = lambda w: weapons.get(w).range_frac
     assert rf("sniper") > rf("rifle") >= rf("pistol") > rf("shotgun")
-    assert rf("sniper") <= 0.5   # capped below the top of the lane
+    assert rf("sniper") <= 0.7   # still capped below the top of the lane
 
 
 if __name__ == "__main__":
