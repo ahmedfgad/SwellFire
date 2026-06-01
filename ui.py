@@ -2002,6 +2002,7 @@ class AutoPlayerScreen(StyledScreen):
     SPEEDS = [("slow", "Slow"), ("normal", "Normal"), ("fast", "Fast")]
 
     def build(self):
+        import game
         scroll, box = _scroll_panel(size_hint=(0.88, 0.94))
         box.add_widget(Label(text="Auto Player", font_size=sp(28), bold=True,
                              size_hint_y=None, height=TITLE_HEIGHT,
@@ -2012,6 +2013,14 @@ class AutoPlayerScreen(StyledScreen):
                       color=[1, 1, 1, 0.9], halign="center", valign="middle")
         intro.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         box.add_widget(intro)
+
+        cost_note = Label(
+            text="Using auto-play costs {} coins per level.".format(
+                game.AUTOPLAYER_COST),
+            font_size=sp(14), size_hint_y=None, height=INFO_HEIGHT,
+            color=[1.0, 0.85, 0.35, 1.0], halign="center", valign="middle")
+        cost_note.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
+        box.add_widget(cost_note)
 
         box.add_widget(Label(text="Play style  (safety vs firepower)", font_size=sp(16),
                              bold=True, size_hint_y=None, height=SUBTITLE_HEIGHT,
