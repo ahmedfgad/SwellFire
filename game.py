@@ -111,6 +111,14 @@ GATE_GAIN_COLOR = (0.55, 0.80, 1.0, 1.0)    # squad blue (gate gain)
 GATE_LOSS_COLOR = (1.0, 0.42, 0.40, 1.0)    # red (gate loss)
 GATE_WEAPON_COLOR = (1.0, 0.80, 0.30, 1.0)  # weapon amber
 AUTOPLAYER_COST = 30   # coins charged once per level to enable the autoplayer
+
+
+def coin_world_factor(world: int) -> float:
+    """Coin-income multiplier by world so income tracks rising upgrade costs:
+    W1 x1.0 ... W6 x3.0."""
+    return 1.0 + 0.4 * (max(1, int(world)) - 1)
+
+
 # Fractional coin rewards per archetype kill — accumulated via a remainder
 # counter so common grunts contribute meaningfully over many kills without
 # trivializing the shop. A run of ~70 grunt kills now pays ~21 coins
@@ -1075,6 +1083,10 @@ class GameScreen(ui.StyledScreen):
         # coin pickups). Persisted to state.coins_balance in _end_level so a
         # partial run still pays the player for whatever they collected.
         self._coins_earned = 0
+        # World-scaled amount actually banked at level end (set in
+        # _end_level); defaults to the raw tally for paths that don't bank
+        # (e.g. versus, or a partial run before banking runs).
+        self._coins_banked = 0
         # Split tracking: pickups (coins thrown into the level + the coin
         # rain from the double-coin power-up) vs everything else (kill
         # rewards, gate rewards, completion bonus). The in-level HUD shows
@@ -1116,17 +1128,20 @@ class GameScreen(ui.StyledScreen):
         # the next frame so positions are real.
         Clock.schedule_once(self._reset, 0)
 
-        # One-time hint the first time the player reaches world 2: the shop
-        # lets them upgrade weapons. Shown over a paused world with a direct
-        # "Go to Shop" button.
-        if (running.current_mode == "single"
-                and running.current_level == levels.LEVELS_PER_WORLD + 1
-                and running_app and running_app.state
-                and not running_app.state.world2_hint_shown):
-            running_app.state.mark_world2_hint_shown()
-            Clock.schedule_once(lambda *_: self._show_world2_hint(), 0.05)
+        # Once-per-world shop nudge (Task 6): on entering the first level of a
+        # new world (W2..W6), remind the player they can upgrade in the shop.
+        # Single-player only; shown over a paused/dimmed world via the proven
+        # pause-flow (see _show_world_intro).
+        if (running is not None and running.state is not None
+                and running.current_mode == "single" and running.current_level):
+            world = (running.current_level - 1) // levels.LEVELS_PER_WORLD + 1
+            in_world = (running.current_level - 1) % levels.LEVELS_PER_WORLD + 1
+            flag = "intro_seen_w{}".format(world)
+            if world >= 2 and in_world == 1 and not running.state.get_setting(flag):
+                running.state.set_setting(flag, True)
+                Clock.schedule_once(lambda *_: self._show_world_intro(world), 0.05)
 
-    def _show_world2_hint(self) -> None:
+    def _show_world_intro(self, world: int) -> None:
         if self._level_ended:
             return
         self.paused = True
@@ -1149,7 +1164,11 @@ class GameScreen(ui.StyledScreen):
             self._show_pause_dim(False)
             self._resume()
 
-        ui.WeaponUpgradeDialog(on_shop=go_shop, on_later=later).open()
+        running_app = ui.app()
+        max_tier = (running_app.state.max_tier_for_world(world)
+                    if running_app and running_app.state else world)
+        ui.WorldIntroModal(world, max_tier,
+                           on_shop=go_shop, on_continue=later).open()
 
     def on_leave(self):
         if self._update_event is not None:
@@ -2459,7 +2478,13 @@ class GameScreen(ui.StyledScreen):
             running.state.record_result(level_index, score, stars,
                                         distance=int(self.distance))
             if self._coins_earned > 0:
-                running.state.add_coins(self._coins_earned)
+                _world = (((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
+                          if running.current_level else 1)
+                _banked = int(round(self._coins_earned * coin_world_factor(_world)))
+                running.state.add_coins(_banked)
+                # Stat shown at level end must match what was actually banked
+                # (world-scaled), not the raw in-run tally.
+                self._coins_banked = _banked
             # Persist leftover booster balances. No more free-grenade baseline
             # — anything the player has at level end is what they earned or
             # carried into the level.
@@ -2566,8 +2591,14 @@ class GameScreen(ui.StyledScreen):
         gates_missed = self.gate_controller.missed_total if self.gate_controller else 0
         squad_end = max(0, self.squad_count)
         squad_peak = max(squad_end, getattr(self, "_squad_peak", squad_end))
+        # Show the amount actually credited to the balance (world-scaled) in
+        # single-player; versus/partial paths that never banked fall back to
+        # the raw in-run tally.
+        coins_shown = (self._coins_banked
+                       if running.current_mode == "single" and self._coins_banked
+                       else self._coins_earned)
         stats = {
-            "coins_total": self._coins_earned,
+            "coins_total": coins_shown,
             "coins_pickup": self._coins_pickups,
             "kills": self.kills_total,
             "gates_hit": gates_hit,

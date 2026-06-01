@@ -39,6 +39,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import weapons
+
 
 @dataclass(frozen=True)
 class ShopItem:
@@ -57,17 +59,17 @@ class ShopItem:
 # Per-weapon, per-tier prices: TIER_PRICES[weapon][tier] = coins.
 # Cheaper weapons have cheaper upgrades; tier 1 is always free for all weapons.
 TIER_PRICES: dict[str, dict[int, int]] = {
-    "pistol":  {2: 200,  3: 500,  4: 1200},
-    "rifle":   {2: 400,  3: 1000, 4: 2200},
-    "shotgun": {2: 700,  3: 1500, 4: 3000},
-    "sniper":  {2: 1000, 3: 2500, 4: 5000},
+    "pistol":  {2: 200,  3: 500,  4: 1200, 5: 2400,  6: 4500},
+    "rifle":   {2: 400,  3: 1000, 4: 2200, 5: 4500,  6: 8500},
+    "shotgun": {2: 700,  3: 1500, 4: 3000, 5: 6000,  6: 11000},
+    "sniper":  {2: 1000, 3: 2500, 4: 5000, 5: 10000, 6: 19000},
 }
 
 
 def next_tier_price(weapon_id: str, current_tier: int) -> int | None:
     """Price to upgrade `weapon_id` from `current_tier` to the next tier.
     Returns None if the weapon is already at the max tier."""
-    if current_tier >= 4:
+    if current_tier >= weapons.MAX_TIER:
         return None
     return TIER_PRICES.get(weapon_id, {}).get(current_tier + 1)
 
@@ -211,7 +213,7 @@ def is_owned(item: ShopItem, state) -> bool:
     if item.category == "weapon":
         # All weapons are owned at tier 1 by default; "owned" in the UI
         # sense means at MAX tier (no more upgrades to buy).
-        return state.get_weapon_tier(item.weapon_id) >= 4
+        return state.get_weapon_tier(item.weapon_id) >= weapons.MAX_TIER
     if item.category == "squad":
         return state.squad_bonus >= item.squad_target
     return False

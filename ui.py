@@ -33,6 +33,7 @@ import graphics
 import levels
 import net
 import shop
+import weapons
 
 
 ABOUT_TEXT = (
@@ -306,6 +307,50 @@ def _fade_in_modal(modal, duration: float = 0.18) -> None:
     modal.bind(on_open=_on_open)
 
 
+class WorldIntroModal(ModalView):
+    """Once-per-world shop nudge shown on entering the first level of a new
+    world (worlds 2..6). Reminds the player they can upgrade their weapon and
+    grow their squad in the shop now that tougher enemies are coming."""
+
+    def __init__(self, world, max_tier, on_shop=None, on_continue=None, **kwargs):
+        super().__init__(size_hint=(0.82, 0.5), auto_dismiss=False, **kwargs)
+        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
+        with box.canvas.before:
+            Color(0.12, 0.14, 0.22, 0.98)
+            self._bg = RoundedRectangle(radius=[dp(16)])
+        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
+                 size=lambda *a: setattr(self._bg, "size", box.size))
+        box.add_widget(Label(text="World {}".format(world), font_size=sp(28),
+                             bold=True, color=[1, 0.85, 0.2, 1], size_hint_y=0.26))
+        message = ("Tougher enemies ahead! Visit the Shop to upgrade your "
+                   "weapon (now up to tier {}) and grow your squad."
+                   .format(max_tier))
+        body = Label(text=message, font_size=sp(18), halign="center",
+                     valign="middle", color=[1, 1, 1, 1], size_hint_y=0.44)
+        body.bind(width=lambda *a: setattr(body, "text_size", (body.width, None)))
+        box.add_widget(body)
+        row = BoxLayout(orientation="horizontal", spacing=dp(16), size_hint_y=0.3)
+        later_btn = StyledButton(text="Continue", bg=[0.45, 0.45, 0.5, 1])
+        shop_btn = StyledButton(text="Go to Shop", bg=[0.95, 0.75, 0.20, 1])
+
+        def go_continue(*_):
+            self.dismiss()
+            if on_continue:
+                on_continue()
+        later_btn.bind(on_release=go_continue)
+
+        def go_shop(*_):
+            self.dismiss()
+            if on_shop:
+                on_shop()
+        shop_btn.bind(on_release=go_shop)
+        row.add_widget(later_btn)
+        row.add_widget(shop_btn)
+        box.add_widget(row)
+        self.add_widget(box)
+        _fade_in_modal(self)
+
+
 class PauseDialog(ModalView):
     """In-level pause menu: Resume / Shop / Quit, each an icon + button."""
 
@@ -345,71 +390,6 @@ class PauseDialog(ModalView):
         box.add_widget(option("resume", "Resume", [0.20, 0.70, 0.40, 1], on_resume))
         box.add_widget(option("shop", "Shop", [0.95, 0.75, 0.20, 1], on_shop))
         box.add_widget(option("quit", "Quit", [0.85, 0.30, 0.30, 1], on_quit))
-        self.add_widget(box)
-        _fade_in_modal(self)
-
-
-class WeaponUpgradeDialog(ModalView):
-    """One-time hint shown before world 2: weapons can be upgraded in the
-    shop. Shows an old→new weapon visual and a 'Go to Shop' button."""
-
-    def __init__(self, on_shop, on_later=None, **kwargs):
-        super().__init__(size_hint=(0.86, 0.66), auto_dismiss=False, **kwargs)
-        box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(12))
-        with box.canvas.before:
-            Color(0.12, 0.14, 0.22, 0.98)
-            self._bg = RoundedRectangle(radius=[dp(16)])
-        box.bind(pos=lambda *a: setattr(self._bg, "pos", box.pos),
-                 size=lambda *a: setattr(self._bg, "size", box.size))
-        box.add_widget(Label(text="Upgrade Your Weapons!", font_size=sp(26),
-                             bold=True, color=[1, 0.85, 0.2, 1], size_hint_y=0.18))
-
-        # Old → new weapon visual: current gun, an arrow, a stronger gun.
-        visual = BoxLayout(orientation="horizontal", size_hint_y=0.36,
-                           spacing=dp(8), padding=(dp(20), dp(6)))
-        old = BoxLayout(orientation="vertical")
-        old.add_widget(graphics.TextureSprite(
-            "assets/sprites/icon_weapon_pistol.png", size_hint=(1, 0.8)))
-        old.add_widget(Label(text="Now", font_size=sp(15), color=[0.8, 0.8, 0.85, 1],
-                             size_hint=(1, 0.2)))
-        visual.add_widget(old)
-        visual.add_widget(Label(text="[b]>[/b]", markup=True, font_size=sp(46),
-                                color=[1, 0.85, 0.2, 1], size_hint_x=0.5))
-        new = BoxLayout(orientation="vertical")
-        new.add_widget(graphics.TextureSprite(
-            "assets/sprites/icon_weapon_rifle.png", size_hint=(1, 0.8)))
-        new.add_widget(Label(text="Upgraded", font_size=sp(15),
-                             color=[0.55, 0.95, 0.55, 1], size_hint=(1, 0.2)))
-        visual.add_widget(new)
-        box.add_widget(visual)
-
-        body = Label(
-            text="Coins you earn unlock stronger guns and higher damage. In the "
-                 "Shop, tap a weapon to equip it, then tap Upgrade to raise its "
-                 "damage. Gear up before World 2 gets tougher!",
-            font_size=sp(17), halign="center", valign="middle",
-            color=[1, 1, 1, 1], size_hint_y=0.28,
-        )
-        body.bind(width=lambda *a: setattr(body, "text_size", (body.width, None)))
-        box.add_widget(body)
-
-        row = BoxLayout(orientation="horizontal", spacing=dp(16), size_hint_y=0.2)
-        later = StyledButton(text="Maybe later", bg=[0.45, 0.45, 0.5, 1])
-        shop_btn = StyledButton(text="Go to Shop", bg=[0.2, 0.7, 0.4, 1])
-
-        def do_later(*_):
-            self.dismiss()
-            if on_later:
-                on_later()
-        later.bind(on_release=do_later)
-
-        def do_shop(*_):
-            self.dismiss()
-            on_shop()
-        shop_btn.bind(on_release=do_shop)
-        row.add_widget(later)
-        row.add_widget(shop_btn)
-        box.add_widget(row)
         self.add_widget(box)
         _fade_in_modal(self)
 
@@ -826,6 +806,9 @@ class ShopScreen(StyledScreen):
             current_tier = state.get_weapon_tier(wid)
             next_price = shop.next_tier_price(wid, current_tier)
             is_max = (next_price is None)
+            cap = state.max_tier_for_world(state.max_world_reached)
+            world_locked = (not is_max) and (current_tier + 1 > cap)
+            unlock_world = current_tier + 1   # world that lifts the lock
             is_equipped = (state.starting_weapon == wid)
             # The "effective price" used to render the card.
             effective_price = next_price if next_price is not None else 0
@@ -833,13 +816,15 @@ class ShopScreen(StyledScreen):
             owned = is_max          # for the OWNED border treatment when at MAX
             squad_locked = False
             is_selected = is_equipped
-            can_buy = is_max or can_afford  # can interact: equip (always) or upgrade
+            can_buy = (is_max or can_afford) and not world_locked  # can interact: equip (always) or upgrade
             card = ShopItemCard(
                 item=item, can_buy=can_buy, owned=owned,
                 squad_locked=False, is_selected=is_selected,
                 on_buy=self._buy,
                 weapon_tier=current_tier, weapon_next_price=next_price,
                 weapon_is_max=is_max, weapon_is_equipped=is_equipped,
+                weapon_world_locked=world_locked,
+                weapon_unlock_world=unlock_world,
             )
             return card
 
@@ -849,11 +834,19 @@ class ShopScreen(StyledScreen):
         if item.category == "squad" and not owned:
             if state.squad_bonus < item.squad_target - 1:
                 squad_locked = True
-        can_buy = (not owned) and can_afford and (not squad_locked)
+        world_locked = False
+        world_unlock = 0
+        if item.category == "squad" and not owned:
+            cap = state.max_squad_bonus_for_world(state.max_world_reached)
+            if item.squad_target > cap:
+                world_locked = True
+                world_unlock = item.squad_target + 1   # bonus T needs world T+1
+        can_buy = (not owned) and can_afford and (not squad_locked) and (not world_locked)
         card = ShopItemCard(
             item=item, can_buy=can_buy, owned=owned,
             squad_locked=squad_locked, is_selected=False,
             on_buy=self._buy,
+            world_locked=world_locked, world_unlock_world=world_unlock,
         )
         return card
 
@@ -876,6 +869,11 @@ class ShopScreen(StyledScreen):
                     "non-boss level."
                 ).format(item.label)
                 self._confirm(msg, "Equip", lambda: self._do_equip_weapon(wid, item, card))
+                return
+            cap = state.max_tier_for_world(state.max_world_reached)
+            cur = state.get_weapon_tier(wid)
+            if cur < weapons.MAX_TIER and cur + 1 > cap:
+                app().audio.play_sfx("error")
                 return
             if next_price is None:
                 # Already MAX — nothing to do.
@@ -1044,6 +1042,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
                  weapon_tier: int = 1, weapon_next_price=None,
                  weapon_is_max: bool = False,
                  weapon_is_equipped: bool = False,
+                 weapon_world_locked: bool = False,
+                 weapon_unlock_world: int = 0,
+                 world_locked: bool = False,
+                 world_unlock_world: int = 0,
                  **kwargs):
         super().__init__(orientation="horizontal", spacing=dp(10),
                          size_hint_y=None, height=dp(114),
@@ -1059,6 +1061,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         self.weapon_next_price = weapon_next_price
         self.weapon_is_max = weapon_is_max
         self.weapon_is_equipped = weapon_is_equipped
+        self.weapon_world_locked = weapon_world_locked
+        self.weapon_unlock_world = weapon_unlock_world
+        self.world_locked = world_locked
+        self.world_unlock_world = world_unlock_world
 
         # Background card (color depends on state) + outer border.
         self._max_glow = None
@@ -1183,7 +1189,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         right.add_widget(price_lbl)
 
         # Bottom of right column = state line (Tap to buy / Need N coins / etc.)
-        if owned:
+        if self.world_locked:
+            state_text = "Reach World {}".format(self.world_unlock_world)
+            state_color = (0.95, 0.55, 0.55, 1)
+        elif owned:
             if is_selected:
                 state_text = "EQUIPPED"
                 state_color = (1.0, 0.85, 0.20, 1.0)
@@ -1239,7 +1248,10 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
         equip_lbl.bind(size=lambda l, *_: setattr(l, "text_size", l.size))
         right.add_widget(equip_lbl)
         # Bottom: upgrade chip — "Buy Lv X+1: Yc" / "MAX" / "Need +c"
-        if self.weapon_is_max:
+        if self.weapon_world_locked:
+            up_text = "Reach World {}".format(self.weapon_unlock_world)
+            up_color = (0.95, 0.55, 0.55, 1.0)
+        elif self.weapon_is_max:
             up_text = "[b]★ MAX ★[/b]"   # gold star badge
             up_color = (1.0, 0.85, 0.25, 1.0)
         else:
