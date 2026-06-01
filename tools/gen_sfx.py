@@ -166,6 +166,14 @@ GENERATORS = {
         tone(240, 0.08, kind="square")),
     # UI open: soft quick rising whoosh for modals appearing.
     "ui_open.wav": lambda: sweep(300, 620, 0.18, kind="sine", release=0.12),
+    # Enemy smash (death): low square crunch + filtered noise burst.
+    "smash.wav": lambda: mix(
+        tone(110, 0.18, kind="square", release=0.16),
+        noise(0.18, smooth=3, release=0.16)),
+    # Enemy hit (non-lethal): short mid thud, quick decay.
+    "enemy_hit.wav": lambda: mix(
+        sweep(220, 120, 0.09, kind="square", release=0.07),
+        noise(0.07, smooth=2, release=0.06)),
 }
 
 
