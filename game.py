@@ -32,6 +32,7 @@ from kivy.metrics import sp, dp
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+import aim
 import autoplay
 import boss as boss_module
 import boosters
@@ -50,6 +51,13 @@ SCROLL_SPEED_PX_PER_SEC = 360.0     # forward scroll rate (visual + distance)
 HERO_W = 64.0
 HERO_H = 80.0
 HERO_BOTTOM_FRAC = 0.16             # hero stays this fraction up from the road floor
+# --- manual aim tuning (world-px; wrapped in graphics.ws() at use) ---------
+AIM_LEAD_EASE = 7.0           # per-sec ease of the trailing aim-lead point
+AIM_OFFSET_FULL = 220.0       # lead-gap (px) that maps to the max tilt angle
+AIM_MAX_DEG = 35.0            # max firing tilt off vertical
+AIM_MAX_RAD = math.radians(AIM_MAX_DEG)
+RETICLE_LEAD_DIST = 360.0     # px ahead of the muzzle the reticle sits
+BOSS_ADD_THREAT_FRONT = 360.0 # px band: shoot an add this close, else the boss
 # Lateral speed cap used by the autoplayer (M12). Tuned to roughly the
 # top end of a sustained finger drag, so the GA reads like a real player
 # steering rather than teleporting between targets every retarget tick.
@@ -327,6 +335,15 @@ class GameScreen(ui.StyledScreen):
         self._drag_origin_touch_x = 0.0
         self._drag_origin_hero_x = 0.0
         self._hero_target_x = 0.0
+        # Manual-aim runtime state (see aim.py). _aim_mode is cached per
+        # level in _reset; the reticle/auto target are recomputed each frame.
+        self._aim_mode = "auto"
+        self._aim_lead_x = 0.0
+        self._aim_angle = 0.0
+        self._reticle_x = 0.0
+        self._reticle_y = 0.0
+        self._auto_target = None       # (x, y) stashed by the fire tick for #9
+        self.aim_reticle = None
         # Lane centers (M7 fills these per spawned gate pair).
         self.lane_centers: list[float] = []
         # Enemy systems (M5).
@@ -917,6 +934,13 @@ class GameScreen(ui.StyledScreen):
             )
             self.stage.add_widget(self.hero)
 
+        if self.aim_reticle is None:
+            self.aim_reticle = graphics.AimReticle(
+                radius=graphics.ws(graphics.AimReticle.R),
+                size_hint=(None, None), size=(1, 1),
+            )
+            self.stage.add_widget(self.aim_reticle)
+
         # Shield bubble — a glowing aura shown around the hero while a shield
         # is up (replaces the old rectangle tint). Added once, hidden until
         # _activate_shield shows it; repositioned to the hero each frame.
@@ -1113,6 +1137,11 @@ class GameScreen(ui.StyledScreen):
             if self.shield_aura.parent:
                 self.shield_aura.parent.remove_widget(self.shield_aura)
             self.shield_aura = None
+        # Cancel the manual-aim reticle's pulse so its Animation doesn't keep
+        # ticking on an off-stage widget between levels (the widget itself is
+        # reused on re-entry — _reset re-hides and the _update loop re-shows it).
+        if self.aim_reticle is not None:
+            self.aim_reticle.hide()
         # M13 — also tear the opponent hero off the stage; the on_enter
         # path checks "is None" before creating one, so without this the
         # next versus match would keep the stale ghost AND skip making
@@ -1179,6 +1208,16 @@ class GameScreen(ui.StyledScreen):
             self.hero.center_x = hero_cx
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC
             self._hero_target_x = hero_cx
+            self._aim_lead_x = hero_cx
+            self._aim_angle = 0.0
+            self._reticle_x = hero_cx
+            self._reticle_y = 0.0
+        running_app = ui.app()
+        self._aim_mode = (running_app.state.get_setting("aim_mode")
+                          if running_app and running_app.state else "auto")
+        self._auto_target = None
+        if self.aim_reticle is not None:
+            self.aim_reticle.hide()
         # Boss position was computed in `_apply_level_config` (via `_spawn_boss`)
         # off the *pre-layout* stage size, which is 0/100 right after on_enter —
         # leaving the boss pinned to the bottom-left corner. Now that the stage
@@ -1612,6 +1651,34 @@ class GameScreen(ui.StyledScreen):
             bob = math.sin(self.distance / graphics.ws(22.0)) * graphics.ws(5.0)
             self.hero.y = sy + sh * HERO_BOTTOM_FRAC + bob
 
+            # Manual-aim reticle. In manual mode + human control, the reticle
+            # is driven by the trailing aim-lead (aim follows steering). In
+            # manual mode while the autoplayer drives, it follows the auto-aim
+            # target stashed by the fire tick (#9 — show where the GA aims).
+            if self._aim_mode == "manual" and self.aim_reticle is not None:
+                muzzle_y = self.hero.center_y + graphics.ws(MUZZLE_OFFSET_Y)
+                if self.auto_mode:
+                    if self._auto_target is not None:
+                        rx, ry = self._auto_target
+                    else:
+                        rx = self.hero.center_x
+                        ry = muzzle_y + graphics.ws(RETICLE_LEAD_DIST)
+                else:
+                    self._aim_lead_x = aim.update_aim_lead(
+                        self._aim_lead_x, self._hero_target_x, dt, AIM_LEAD_EASE)
+                    offset = self._hero_target_x - self._aim_lead_x
+                    self._aim_angle = aim.aim_angle(
+                        offset, graphics.ws(AIM_OFFSET_FULL), AIM_MAX_RAD)
+                    rx, ry = aim.reticle_point(
+                        self.hero.center_x, muzzle_y, self._aim_angle,
+                        graphics.ws(RETICLE_LEAD_DIST))
+                self._reticle_x, self._reticle_y = rx, ry
+                self.aim_reticle.set_endpoints(
+                    self.hero.center_x, muzzle_y, rx, ry)
+                self.aim_reticle.show()
+            elif self.aim_reticle is not None:
+                self.aim_reticle.hide()
+
             # Hero identity marker — green ring under the local hero.
             if self.hero_marker is not None:
                 self.hero_marker.center_x = self.hero.center_x
@@ -1809,21 +1876,40 @@ class GameScreen(ui.StyledScreen):
             weapon = weapons.get(self.current_weapon_id)
             self._fire_cooldown -= dt
             if self._fire_cooldown <= 0.0:
-                # On boss levels aim at the boss itself so squad fire actually
-                # depletes it (shots travel up, clearing minions in the column
-                # on the way); otherwise aim at the most urgent minion.
-                if self.boss is not None and self.boss.alive:
-                    target_x, target_y, has_target = self.boss.cx, self.boss.cy, True
+                manual_human = (self._aim_mode == "manual"
+                                and not self.auto_mode)
+                if manual_human:
+                    # Player-aimed: fire at the reticle the _update block set.
+                    target_x, target_y, has_target = (
+                        self._reticle_x, self._reticle_y, True)
                 else:
-                    _ti = entities.find_nearest_enemy(
-                        self.hero.center_x, self.hero.center_y, self.enemy_controller,
-                    )
-                    if _ti >= 0:
-                        target_x = self.enemy_pool.cx[_ti]
-                        target_y = self.enemy_pool.cy[_ti]
+                    # Auto-aim (also used when the GA autoplayer drives, even
+                    # in manual mode — it aims at monsters per #9). On boss
+                    # levels prefer a close add over the boss so adds get
+                    # cleared instead of slipping into the squad (#5).
+                    target_x = target_y = 0.0
+                    has_target = False
+                    if self.boss is not None and self.boss.alive:
+                        _ti = entities.find_nearest_threat(
+                            self.hero.center_x, self.hero.center_y,
+                            self.enemy_controller,
+                            graphics.ws(BOSS_ADD_THREAT_FRONT))
+                        if _ti >= 0:
+                            target_x = self.enemy_pool.cx[_ti]
+                            target_y = self.enemy_pool.cy[_ti]
+                        else:
+                            target_x, target_y = self.boss.cx, self.boss.cy
                         has_target = True
                     else:
-                        has_target = False
+                        _ti = entities.find_nearest_enemy(
+                            self.hero.center_x, self.hero.center_y,
+                            self.enemy_controller)
+                        if _ti >= 0:
+                            target_x = self.enemy_pool.cx[_ti]
+                            target_y = self.enemy_pool.cy[_ti]
+                            has_target = True
+                    # Stash for the reticle when the GA drives in manual mode.
+                    self._auto_target = (target_x, target_y) if has_target else None
                 if has_target:
                     # Shooter positions: hero muzzle + every active follower's muzzle.
                     hero_muzzle = (self.hero.center_x,
@@ -1857,6 +1943,27 @@ class GameScreen(ui.StyledScreen):
                         effective_damage = max(
                             1, int(round(effective_damage
                                          * boosters.OVERDRIVE_DAMAGE_MULT)))
+                    if self._aim_mode == "manual" and self.aim_reticle is not None:
+                        # Lock-flash the reticle when the actual target sits
+                        # near the convergence point (clear "you will hit this"
+                        # cue). Compare the boss/enemy position to the reticle
+                        # in BOTH axes — comparing to target_x would be trivially
+                        # true in manual+human mode (target_x IS the reticle).
+                        lock_x = graphics.ws(60.0)
+                        lock_y = graphics.ws(80.0)
+                        locked = False
+                        if self.boss is not None and self.boss.alive:
+                            locked = (abs(self.boss.cx - self._reticle_x) < lock_x
+                                      and abs(self.boss.cy - self._reticle_y) < lock_y)
+                        else:
+                            near = entities.find_nearest_threat(
+                                self.hero.center_x, self.hero.center_y,
+                                self.enemy_controller,
+                                graphics.ws(RETICLE_LEAD_DIST * 1.4))
+                            if near >= 0:
+                                locked = (abs(self.enemy_pool.cx[near] - self._reticle_x) < lock_x
+                                          and abs(self.enemy_pool.cy[near] - self._reticle_y) < lock_y)
+                        self.aim_reticle.set_locked(locked)
                     entities.fire_from_positions(
                         positions, target_x, target_y, weapon,
                         self.projectile_controller, self._fire_rng,

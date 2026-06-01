@@ -528,6 +528,35 @@ def find_nearest_enemy(hero_cx: float, hero_cy: float,
     return best_idx
 
 
+def find_nearest_threat(hero_cx: float, hero_cy: float,
+                        enemy_controller: EnemyController,
+                        max_front: float) -> int:
+    """Nearest living enemy ahead of the hero AND within `max_front` px.
+
+    Used on boss levels: the boss's adds drift down the road, and we want
+    the squad to clear an add that has come close (a real threat to the
+    squad) rather than dumping every shot into the boss while adds slip
+    through. Returns -1 when no enemy is inside the band.
+    """
+    pool = enemy_controller.pool
+    active = pool.active
+    cx = pool.cx
+    cy = pool.cy
+    best_idx = -1
+    best_front = float("inf")
+    for i in range(pool.capacity):
+        if not active[i]:
+            continue
+        front = cy[i] - hero_cy            # ahead of hero = positive
+        if front < 0.0 or front > max_front:
+            continue
+        score = front + abs(cx[i] - hero_cx) * 0.30
+        if score < best_front:
+            best_front = score
+            best_idx = i
+    return best_idx
+
+
 def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,
                 weapon, projectile_controller: ProjectileController,
                 enemy_controller: EnemyController,
