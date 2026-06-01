@@ -29,7 +29,7 @@ the result at module load. Game logic reads per-level dicts via
 #     squad_target_3_star       20 → 80
 #
 #   ─── tiered (step changes by world / by t) ───
-#     enemy_hp                  1 (t<0.10) → 2 (t<0.40) → 3 (t<0.75) → 4
+#     enemy_hp                  1 (t<0.10) → 2 (t<0.45) → 3 (t<0.85) → 4
 #     boss_minion_hp            1 (W1-3) → 2 (W4-5) → 3 (W6)
 #     allowed_ops               per world (see _allowed_enemy_types below)
 #     allowed_weapons           per world (rifle / shotgun / sniper unlocks)
@@ -169,9 +169,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # spawn 2-HP enemies → a 1-damage rifle needs 2 shots.
             if t < 0.10:
                 enemy_hp = 1
-            elif t < 0.40:
+            elif t < 0.45:
                 enemy_hp = 2
-            elif t < 0.75:
+            elif t < 0.85:
                 enemy_hp = 3
             else:
                 enemy_hp = 4
@@ -181,9 +181,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # global ramp `t`, so later worlds field a denser army; within a
             # level the spawner tightens the interval further (game.py ramps
             # start->end by distance progress).
-            formation_columns = int(round(_lerp(5.0, 9.0, t)))
+            formation_columns = int(round(_lerp(5.0, 8.0, t)))
             rank_interval_start = _lerp(260.0, 120.0, t)
-            rank_interval_end = _lerp(140.0, 60.0, t)
+            rank_interval_end = _lerp(140.0, 75.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
             # player makes 10-24 decisions per run regardless of level
             # length. Earlier formulas used a fixed px interval, which gave
@@ -270,7 +270,7 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # fight lasts noticeably longer than any regular level in
             # the same world — players were finishing world-end bosses
             # in ~10-15 s before, defeating the "climax" feel.
-            boss_hp = int(round(_lerp(1100.0, 2800.0, t))) if is_boss else 0
+            boss_hp = int(round(_lerp(1100.0, 2200.0, t))) if is_boss else 0
             if is_boss:
                 # Lowered the top end from 3..12 to 2.5..11 so W3-W5 bosses
                 # don't auto-pass passive on starting squad alone.

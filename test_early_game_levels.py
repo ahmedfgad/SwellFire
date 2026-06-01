@@ -19,11 +19,11 @@ def test_w1_density_softened():
     assert abs(c["rank_interval_end"] - 140.0) < 1e-6      # was 120
 
 
-def test_late_density_unchanged():
+def test_late_density_high_end():
     c = levels.get_level(60)                                # W6 last, t=1
-    assert c["formation_columns"] == 9
+    assert c["formation_columns"] == 8                      # softened from 9 (Task 5)
     assert abs(c["rank_interval_start"] - 120.0) < 1e-6
-    assert abs(c["rank_interval_end"] - 60.0) < 1e-6
+    assert abs(c["rank_interval_end"] - 75.0) < 1e-6        # softened from 60 (Task 5)
 
 
 if __name__ == "__main__":
