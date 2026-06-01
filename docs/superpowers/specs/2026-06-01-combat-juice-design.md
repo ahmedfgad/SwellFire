@@ -60,12 +60,10 @@ approval. The user can retune.)
    `audio.py: SFX_FILES`:
    - `smash` — enemy death crunch: low square tone (~120 Hz) + filtered noise,
      short release (model on `explosion.wav`).
-   - `hit` — non-lethal impact thud: brief mid tone/sweep (~200→120 Hz), quick
-     release (model on `weapon_swap`'s low thunk). (Note: a `hit` name already
-     exists in `SFX_FILES`; reuse it for the non-lethal-hit thud if its current
-     cue fits, or regenerate it — confirm during implementation it isn't already
-     used elsewhere for a conflicting purpose; if it is, name the new one
-     `enemy_hit`.)
+   - `enemy_hit` — non-lethal impact thud: brief mid tone/sweep (~200→120 Hz),
+     quick release (model on `weapon_swap`'s low thunk). Use a **new** name
+     `enemy_hit` (the existing `hit` name in `SFX_FILES` is left untouched to
+     avoid repurposing a cue that may be used elsewhere).
 2. **Hit signal:** add an optional `on_hit=None` callback parameter to
    `entities.resolve_projectile_collisions`, fired once per projectile-enemy
    contact that does **not** kill. `GameScreen` passes a callback that just sets
@@ -92,7 +90,7 @@ existing unpooled `_float_text` is sufficient — no Label pool needed.
   flags + the `on_hit` callback wiring; reset flags/accumulators on level start.
 - `entities.py` — optional `on_hit` callback in `resolve_projectile_collisions`
   (non-lethal contacts).
-- `tools/gen_sfx.py` — `smash` and `hit`/`enemy_hit` builders.
+- `tools/gen_sfx.py` — `smash` and `smash` + `enemy_hit` builders.
 - `audio.py` — register the new cue name(s) in `SFX_FILES`.
 
 ## Testing / verification
