@@ -37,12 +37,14 @@ CRF = 18
 WARMUP = 60
 WORLD_NAMES = {1: "Meadow", 2: "Desert", 3: "Industrial",
                4: "Snowfield", 5: "Volcano", 6: "Cosmos"}
-# one representative level per world; all get upgraded weapons + a strong
-# starting squad (size still varies via gates) so the autoplayer genuinely
-# clears them. Worlds 1-4 pass 100%; 5-6 are best-effort.
-SEGMENTS = [(1, 6), (2, 16), (3, 26), (4, 36), (5, 46), (6, 56)]
-SQUAD_BONUS = 40        # strong starting squad (grows/shrinks naturally)
-POWER = 8               # weapon-damage multiplier ("upgraded weapons")
+# Worlds 1-3 only (kept short, per request). Each gets upgraded weapons + a
+# strong starting squad (size still varies via gates) so the autoplayer clears
+# the full level.
+SEGMENTS = [(1, 6), (2, 16), (3, 26)]
+# Tuned so the squad clears the level but enemies still get through sometimes —
+# the squad dynamically shrinks/grows and the new "damage" loss sfx is heard.
+SQUAD_BONUS = 18        # solid starting squad (grows/shrinks naturally)
+POWER = 3               # weapon-damage multiplier ("upgraded weapons")
 
 INTRO = os.path.join(VIDEOS, "vilvik_intro_1920p.mp4")
 TITLE = os.path.join(VIDEOS, "swellfire_title_1080x1920.mp4")
