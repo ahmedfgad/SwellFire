@@ -174,6 +174,13 @@ GENERATORS = {
     "enemy_hit.wav": lambda: mix(
         sweep(220, 120, 0.09, kind="square", release=0.07),
         noise(0.07, smooth=2, release=0.06)),
+    # Squad loss (an enemy broke through and the squad dropped by one): a quick
+    # descending "uh-oh" — falling square sweep over a low body + a little grit.
+    # Distinct from the generic hit tick so the player clearly hears a loss.
+    "damage.wav": lambda: mix(
+        sweep(540, 170, 0.20, kind="square", release=0.17),
+        tone(90, 0.20, kind="sine", release=0.18),
+        noise(0.10, smooth=3, release=0.09)),
 }
 
 

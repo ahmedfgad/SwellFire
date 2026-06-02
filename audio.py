@@ -31,8 +31,9 @@ SFX_FILES = {
     "click":          "click.wav",
     "shoot":          "shoot.wav",
     "hit":            "hit.wav",
-    # Squad-loss feedback reuses the hit sound (game.py plays "damage").
-    "damage":         "hit.wav",
+    # Squad-loss feedback: a dedicated "enemy broke through" cue (distinct from
+    # the generic hit tick) — played whenever the squad drops by one.
+    "damage":         "damage.wav",
     "enemy_death":    "enemy_death.wav",
     "gate_pickup":    "gate_pickup.wav",
     "coin":           "coin.wav",
