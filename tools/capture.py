@@ -25,8 +25,13 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import subprocess
+
 import numpy as np
 from PIL import Image
+import imageio_ffmpeg
+
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def seed_strong_squad(state):
@@ -54,6 +59,21 @@ def _build_argparser():
     ap.add_argument("--warmup", type=int, default=30, help="frames to settle before capturing")
     ap.add_argument("--shot", default=None, help="single PNG output path (implies 1 frame)")
     ap.add_argument("--out", default=None, help="frames dir for a sequence")
+    ap.add_argument("--mp4", default=None,
+                    help="(level/playthrough) pipe raw frames straight to ffmpeg "
+                         "-> this mp4 (video only), instead of dumping PNGs")
+    ap.add_argument("--crf", type=int, default=16, help="x264 CRF for --mp4")
+    ap.add_argument("--no-seed", action="store_true",
+                    help="(playthrough) do NOT seed a strong squad, so a hard "
+                         "level can genuinely fail")
+    ap.add_argument("--squad-bonus", type=int, default=None,
+                    help="(playthrough) override the starting squad_bonus (the "
+                         "in-game shop cap is 6, but a capture can go higher to "
+                         "reliably win); applied after seeding")
+    ap.add_argument("--squad-floor", type=int, default=None,
+                    help="(playthrough) keep squad_count at or above N each frame "
+                         "so the squad is never wiped and reaches the goal for a "
+                         "genuine win (capture-only marketing aid)")
     ap.add_argument("--audio", default=None, help="audio-event JSON output path")
     ap.add_argument("--size", default="1920x1080")
     ap.add_argument("--fps", type=int, default=60,
@@ -72,8 +92,8 @@ def _build_argparser():
 def main(argv=None):
     ap = _build_argparser()
     args = ap.parse_args(argv)
-    if args.playthrough and args.out is None:
-        ap.error("--playthrough requires --out (a frames directory)")
+    if args.playthrough and args.out is None and args.mp4 is None:
+        ap.error("--playthrough requires --out (frames dir) or --mp4 (pipe)")
 
     w, h = _parse_size(args.size)
 
@@ -100,8 +120,26 @@ def main(argv=None):
     app = appmod.SwellfireApp()
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
              "settle": 0, "ready": False, "won_triggered": False,
-             "modal_settle": 0, "modal_seen": False}
+             "modal_settle": 0, "modal_seen": False, "ff": None}
     DT = 1.0 / float(args.fps)
+
+    def _emit(arr, idx):
+        """Either pipe the raw frame to ffmpeg (--mp4) or save a PNG (--out)."""
+        if args.mp4 is not None:
+            if state["ff"] is None:
+                os.makedirs(os.path.dirname(args.mp4) or ".", exist_ok=True)
+                state["ff"] = subprocess.Popen(
+                    [FFMPEG, "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                     "-s", "%dx%d" % (w, h), "-r", str(args.fps), "-i", "-",
+                     "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                     "-crf", str(args.crf), "-preset", "fast",
+                     "-movflags", "+faststart", args.mp4],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+            state["ff"].stdin.write(arr.tobytes())
+        else:
+            os.makedirs(args.out, exist_ok=True)
+            Image.fromarray(arr).save(os.path.join(args.out, "f%05d.png" % idx))
     # The Xwayland/SDL2 window ignores Config width/height and opens at 800x600;
     # we force Window.size after build, but the resize is not always honoured by
     # the first rendered frame, so we let a few Clock frames pass (and re-assert
@@ -121,8 +159,12 @@ def main(argv=None):
         except Exception:
             pass
 
-        if args.playthrough:
+        if args.playthrough and not args.no_seed:
             seed_strong_squad(app.state)
+        if args.squad_bonus is not None:
+            # read path is unclamped (only the shop setter caps at 6), so a
+            # capture can start with a large squad to reliably clear a level.
+            app.state.data["squad_bonus"] = int(args.squad_bonus)
 
         if args.screen is not None:
             app.go(args.screen)
@@ -212,6 +254,11 @@ def main(argv=None):
                 gs._update_event = None
             # Step the sim by a fixed dt (decoupled from real time).
             gs._update(DT)
+            # Keep the squad alive (capture-only): the level auto-scrolls to the
+            # goal regardless of squad size, so a floor guarantees a genuine win.
+            if (args.squad_floor and not gs._level_ended
+                    and gs.squad_count < args.squad_floor):
+                gs.squad_count = args.squad_floor
             # Inline GA decision every RETARGET_DELAY of sim time.
             state["ap_accum"] += DT
             if state["ap_accum"] >= autoplay.RETARGET_DELAY:
@@ -266,13 +313,11 @@ def main(argv=None):
         # so the deferred result dialog — _open_result_dialog, ~1s real-time
         # after _end_level — actually opens) and keep grabbing until the dialog
         # has been visible for ~2s, then stop. A hard --frames cap bounds it.
-        if args.playthrough and args.out is not None:
+        if args.playthrough and (args.out is not None or args.mp4 is not None):
             from kivy.uix.modalview import ModalView
             if state["frame"] >= args.warmup:
-                arr = grab_frame(Window)
                 idx = state["frame"] - args.warmup
-                os.makedirs(args.out, exist_ok=True)
-                Image.fromarray(arr).save(os.path.join(args.out, "f%05d.png" % idx))
+                _emit(grab_frame(Window), idx)
                 state["frame"] += 1
                 # Hard safety cap.
                 if idx + 1 >= args.frames:
@@ -320,6 +365,10 @@ def main(argv=None):
         Clock.schedule_once(_drive, 0)
 
     def _finish():
+        if state["ff"] is not None:
+            state["ff"].stdin.close()
+            state["ff"].wait()
+            state["ff"] = None
         if args.audio is not None:
             os.makedirs(os.path.dirname(args.audio) or ".", exist_ok=True)
             with open(args.audio, "w") as f:
