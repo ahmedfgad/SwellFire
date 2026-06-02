@@ -122,11 +122,13 @@ def main(argv=None):
     app = appmod.SwellfireApp()
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
              "settle": 0, "ready": False, "won_triggered": False,
-             "modal_settle": 0, "modal_seen": False, "ff": None}
+             "modal_settle": 0, "modal_seen": False, "ff": None, "t0": None}
     DT = 1.0 / float(args.fps)
 
     def _emit(arr, idx):
         """Either pipe the raw frame to ffmpeg (--mp4) or save a PNG (--out)."""
+        if state["t0"] is None:
+            state["t0"] = state["simt"]   # sim time of the FIRST captured frame
         if args.mp4 is not None:
             if state["ff"] is None:
                 os.makedirs(os.path.dirname(args.mp4) or ".", exist_ok=True)
@@ -391,9 +393,25 @@ def main(argv=None):
             state["ff"].wait()
             state["ff"] = None
         if args.audio is not None:
+            # Re-base SFX timestamps to the FIRST captured frame so they line up
+            # with the video. The capture warms up for `warmup` frames before
+            # recording, so raw sim-time events sit ~warmup/fps seconds ahead and
+            # would otherwise land late in the final cut. Pre-video sfx are
+            # dropped; the music bed is clamped to start at 0.
+            t0 = state["t0"] or 0.0
+            evs = []
+            for ev in (app.audio.capture_log or []):
+                t, kind, name = ev[0], ev[1], ev[2]
+                nt = t - t0
+                if nt < 0:
+                    if kind == "music":
+                        nt = 0.0
+                    else:
+                        continue
+                evs.append([round(nt, 4), kind, name])
             os.makedirs(os.path.dirname(args.audio) or ".", exist_ok=True)
             with open(args.audio, "w") as f:
-                json.dump({"fps": args.fps, "events": app.audio.capture_log or []}, f)
+                json.dump({"fps": args.fps, "events": evs}, f)
         state["done"] = True
         app.stop()
 

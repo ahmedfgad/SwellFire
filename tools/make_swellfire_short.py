@@ -28,9 +28,8 @@ W, H, FPS, CRF = 1080, 1920, 60, 18
 SLICES = [
     (TITLE, 0.3, 3.0),
     (os.path.join(BUILD, "seg1.mp4"), 8.0, 6.0),    # Meadow
-    (os.path.join(BUILD, "seg2.mp4"), 22.0, 6.0),   # Desert
-    (os.path.join(BUILD, "seg3.mp4"), 40.0, 6.0),   # Industrial (big squad)
-    (os.path.join(BUILD, "seg4.mp4"), 60.0, 6.5),   # Snowfield (big squad)
+    (os.path.join(BUILD, "seg2.mp4"), 22.0, 6.5),   # Desert
+    (os.path.join(BUILD, "seg3.mp4"), 35.0, 7.0),   # Industrial (big squad + losses)
     (OUTRO, 0.0, 4.5),
 ]
 
