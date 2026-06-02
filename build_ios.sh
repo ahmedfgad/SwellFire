@@ -21,7 +21,7 @@ cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
 PROJECT_DIR="$(pwd)"
 
 APP_TITLE="Swellfire"
-BUNDLE_ID="com.ahmedgad.swellfire"   # change this if you want a different App Store id
+BUNDLE_ID="com.vilvik.swellfire"   # change this if you want a different App Store id
 IOS_VENV=".ios-venv"
 
 # Stop if this is not a Mac.
