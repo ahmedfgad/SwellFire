@@ -12,9 +12,11 @@ def test_score_for_kill_by_type():
     assert combat_juice.score_for_kill(999) == 10   # unknown → default 10
 
 
-def test_combat_cue_prefers_kill():
-    assert combat_juice.combat_cue(True, True) == "smash"
-    assert combat_juice.combat_cue(True, False) == "smash"
+def test_combat_cue_kill_is_silent():
+    # The noisy enemy-death "smash" crunch was removed: kill windows are silent;
+    # only a non-lethal impact (no kill) plays "enemy_hit".
+    assert combat_juice.combat_cue(True, True) is None
+    assert combat_juice.combat_cue(True, False) is None
     assert combat_juice.combat_cue(False, True) == "enemy_hit"
     assert combat_juice.combat_cue(False, False) is None
 

@@ -22,10 +22,14 @@ def score_for_kill(enemy_type: int) -> int:
 
 
 def combat_cue(had_kill: bool, had_hit: bool):
-    """Which combat sfx to play this window: death takes priority over hit.
-    Returns "smash", "enemy_hit", or None."""
+    """Which combat sfx to play this window.
+
+    The enemy-death "smash" crunch is intentionally NOT played: with the squad
+    killing constantly it stacked up far too noisily. A kill window is silent;
+    only a window with a non-lethal impact (and no kill) plays "enemy_hit".
+    Returns "enemy_hit" or None."""
     if had_kill:
-        return "smash"
+        return None
     if had_hit:
         return "enemy_hit"
     return None
