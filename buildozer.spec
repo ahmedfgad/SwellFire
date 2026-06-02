@@ -4,10 +4,10 @@
 title = Swellfire
 
 # Package name and domain. Together they form the application id
-# com.ahmedgad.swellfire. Keep these consistent across builds or Google Play
+# com.vilvik.swellfire. Keep these consistent across builds or Google Play
 # will treat the build as a different app.
 package.name = swellfire
-package.domain = com.ahmedgad
+package.domain = com.vilvik
 
 # Folder that holds main.py.
 source.dir = .
