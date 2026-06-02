@@ -30,16 +30,19 @@ BUILD = os.path.join(VIDEOS, ".promo_build")
 MUSIC = os.path.join(ROOT, "assets", "music")
 SFX = os.path.join(ROOT, "assets", "sfx")
 
-SIZE = "1080x1920"
+SIZE = "540x960"        # capture at the game's logical size (correct scale)
+OUT_SCALE = "1080:1920"  # upscale the image to 1080p portrait on mux
 FPS = 60
 CRF = 18
 WARMUP = 60
 WORLD_NAMES = {1: "Meadow", 2: "Desert", 3: "Industrial",
                4: "Snowfield", 5: "Volcano", 6: "Cosmos"}
-# one representative level per world; seed worlds 1-4 to win, leave 5-6 unseeded
-# so the advanced levels genuinely fail (autoplayer can't beat them unaided).
-SEGMENTS = [(1, 6, True), (2, 16, True), (3, 26, True), (4, 36, True),
-            (5, 46, False), (6, 56, False)]
+# one representative level per world; all get upgraded weapons + a strong
+# starting squad (size still varies via gates) so the autoplayer genuinely
+# clears them. Worlds 1-4 pass 100%; 5-6 are best-effort.
+SEGMENTS = [(1, 6), (2, 16), (3, 26), (4, 36), (5, 46), (6, 56)]
+SQUAD_BONUS = 40        # strong starting squad (grows/shrinks naturally)
+POWER = 8               # weapon-damage multiplier ("upgraded weapons")
 
 INTRO = os.path.join(VIDEOS, "vilvik_intro_1920p.mp4")
 TITLE = os.path.join(VIDEOS, "swellfire_title_1080x1920.mp4")
@@ -66,18 +69,12 @@ def dur(path):
     raise RuntimeError("no duration: " + path)
 
 
-SQUAD_FLOOR = 20   # keep seeded worlds' squad alive so they win the full level
-
-
-def capture(level, seed, seg_video, seg_json):
+def capture(level, seg_video, seg_json):
     args = ["--level", str(level), "--playthrough", "--size", SIZE,
             "--fps", str(FPS), "--warmup", str(WARMUP),
-            "--frames", str(cap_frames(level)), "--crf", "16",
-            "--mp4", seg_video, "--audio", seg_json]
-    if seed:
-        args += ["--squad-floor", str(SQUAD_FLOOR)]   # reliably reach the goal
-    else:
-        args.append("--no-seed")                      # advanced level genuinely fails
+            "--frames", str(cap_frames(level)), "--crf", "18",
+            "--squad-bonus", str(SQUAD_BONUS), "--power", str(POWER),
+            "--auto-indicator", "--mp4", seg_video, "--audio", seg_json]
     subprocess.run(capture_run.capture_cmd(args), cwd=ROOT,
                    env=capture_run.capture_env(), check=True, timeout=3000)
 
@@ -89,8 +86,12 @@ def won(json_path):
 
 
 def mux(seg_video, seg_wav, out_mp4):
+    # upscale the 540x960 capture to 1080x1920 (lanczos) and add the soundtrack
     subprocess.run([FF, "-y", "-i", seg_video, "-i", seg_wav,
-                    "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                    "-vf", "scale=%s:flags=lanczos" % OUT_SCALE,
+                    "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p",
+                    "-crf", str(CRF), "-preset", "medium",
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2",
                     "-b:a", "192k", "-shortest", "-movflags", "+faststart", out_mp4],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -120,18 +121,16 @@ def main():
             sys.exit("missing card: " + p)
     os.makedirs(BUILD, exist_ok=True)
 
-    seg_mp4s, outcomes = [], []
-    for world, level, seed in SEGMENTS:
+    seg_mp4s = []
+    for world, level in SEGMENTS:
         seg_mp4 = os.path.join(BUILD, "seg%d.mp4" % world)
         if not os.path.exists(seg_mp4):
-            print("== capturing world %d (level %d, %s) ==" % (
-                world, level, "win" if seed else "fail"), flush=True)
+            print("== capturing world %d (level %d) ==" % (world, level), flush=True)
             sv = os.path.join(BUILD, "seg%d_video.mp4" % world)
             sj = os.path.join(BUILD, "seg%d.json" % world)
-            tries = 3 if seed else 1     # seeded worlds must win; retry if not
-            for attempt in range(tries):
-                capture(level, seed, sv, sj)
-                if (not seed) or won(sj):
+            for attempt in range(3):     # retry until the level is cleared
+                capture(level, sv, sj)
+                if won(sj):
                     break
                 print("   world %d attempt %d did not win; retrying" % (
                     world, attempt + 1), flush=True)
@@ -139,7 +138,10 @@ def main():
             sw = os.path.join(BUILD, "seg%d.wav" % world)
             mix_audio.build_mix(sj, d, sw, MUSIC, SFX)
             mux(sv, sw, seg_mp4)
-        print("   world %d: %.1fs" % (world, dur(seg_mp4)), flush=True)
+        print("   world %d: %.1fs (%s)" % (
+            world, dur(seg_mp4),
+            "win" if won(os.path.join(BUILD, "seg%d.json" % world)) else "fail"),
+            flush=True)
         seg_mp4s.append(seg_mp4)
 
     clips = [INTRO, TITLE] + seg_mp4s + [OUTRO]
@@ -149,7 +151,7 @@ def main():
     # chapters
     lines = ["0:00 Intro"]
     t = dur(INTRO) + dur(TITLE)
-    for (world, level, seed), seg in zip(SEGMENTS, seg_mp4s):
+    for (world, level), seg in zip(SEGMENTS, seg_mp4s):
         lines.append("%s World %d - %s" % (ts(t), world, WORLD_NAMES[world]))
         t += dur(seg)
     lines.append("%s Outro" % ts(t))

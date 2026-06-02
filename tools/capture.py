@@ -70,10 +70,12 @@ def _build_argparser():
                     help="(playthrough) override the starting squad_bonus (the "
                          "in-game shop cap is 6, but a capture can go higher to "
                          "reliably win); applied after seeding")
-    ap.add_argument("--squad-floor", type=int, default=None,
-                    help="(playthrough) keep squad_count at or above N each frame "
-                         "so the squad is never wiped and reaches the goal for a "
-                         "genuine win (capture-only marketing aid)")
+    ap.add_argument("--power", type=float, default=None,
+                    help="(playthrough) multiply weapon damage by N (capture-only "
+                         "'upgraded weapons') so the squad shreds enemies and "
+                         "clears the level naturally; squad size still varies")
+    ap.add_argument("--auto-indicator", action="store_true",
+                    help="show the in-game 'Auto: On' button (the GA is driving)")
     ap.add_argument("--audio", default=None, help="audio-event JSON output path")
     ap.add_argument("--size", default="1920x1080")
     ap.add_argument("--fps", type=int, default=60,
@@ -163,8 +165,16 @@ def main(argv=None):
             seed_strong_squad(app.state)
         if args.squad_bonus is not None:
             # read path is unclamped (only the shop setter caps at 6), so a
-            # capture can start with a large squad to reliably clear a level.
+            # capture can start with a larger squad; the size still varies.
             app.state.data["squad_bonus"] = int(args.squad_bonus)
+        if args.power is not None:
+            # Capture-only "upgraded weapons": scale weapon damage so the squad
+            # genuinely shreds enemies and clears the level (squad still grows/
+            # shrinks via gates and losses — nothing is pinned).
+            import weapons as _wp
+            _orig_td = _wp.tier_damage
+            _wp.tier_damage = (lambda w, t, _o=_orig_td, _k=float(args.power):
+                               max(1, int(round(_o(w, t) * _k))))
 
         if args.screen is not None:
             app.go(args.screen)
@@ -199,6 +209,16 @@ def main(argv=None):
         # marketing shots (the overlay is a dev aid, never shipped UI).
         if getattr(gs, "debug", None) is not None:
             gs.debug.opacity = 0.0
+        # Show the autoplayer is driving: flip the flag (capped, player-like
+        # steering toward the GA's target) and light the "Auto: On" button.
+        # We do NOT call _toggle_auto (which would charge coins / spin up the
+        # wall-clock GA thread); the inline GA below sets _hero_target_x.
+        if args.auto_indicator:
+            try:
+                gs.auto_mode = True
+                gs._refresh_auto_button()
+            except Exception:
+                pass
         state["ready"] = True
         return True
 
@@ -252,13 +272,14 @@ def main(argv=None):
             if gs._update_event is not None:
                 gs._update_event.cancel()
                 gs._update_event = None
+            # Re-assert the autoplayer indicator each frame: the level's _reset
+            # (deferred) flips auto_mode back off, so set it here so "Auto: On"
+            # stays lit and steering uses the capped, player-like path.
+            if args.auto_indicator and not gs.auto_mode:
+                gs.auto_mode = True
+                gs._refresh_auto_button()
             # Step the sim by a fixed dt (decoupled from real time).
             gs._update(DT)
-            # Keep the squad alive (capture-only): the level auto-scrolls to the
-            # goal regardless of squad size, so a floor guarantees a genuine win.
-            if (args.squad_floor and not gs._level_ended
-                    and gs.squad_count < args.squad_floor):
-                gs.squad_count = args.squad_floor
             # Inline GA decision every RETARGET_DELAY of sim time.
             state["ap_accum"] += DT
             if state["ap_accum"] >= autoplay.RETARGET_DELAY:
