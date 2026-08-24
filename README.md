@@ -85,7 +85,17 @@ The Android app is built with [Buildozer](https://github.com/kivy/buildozer) usi
 ./build_android.sh
 ```
 
-It produces an `.aab` for Google Play and an `.apk` for testing in the `bin` folder. Signing the release is described in [SIGNING.md](SIGNING.md).
+The checked-in configuration targets Android 16 (API 36), uses NDK r28c and
+pins the python-for-android packaging toolchain. To validate those Play-critical
+settings without downloading an SDK, building, or signing anything, run:
+
+```
+./build_android.sh --check
+```
+
+A full release build produces an `.aab` for Google Play and an `.apk` for
+testing in the `bin` folder. Signing the release is described in
+[SIGNING.md](SIGNING.md).
 
 ### iPhone
 

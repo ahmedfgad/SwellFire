@@ -15,7 +15,8 @@ builds that run on demand or when a version tag is pushed.
 ## Per-push smoke (`desktop-ci.yml`)
 
 Runs on every push and pull request against `main`/`master`. It installs the
-requirements on a clean Ubuntu runner, byte-compiles every `.py` (catching
+requirements on a clean Ubuntu runner, validates the Play-critical Android
+target/toolchain settings without building, byte-compiles every `.py` (catching
 syntax errors), and boots `main.py` under xvfb for a few seconds (catching
 import errors and first-frame crashes). It deliberately does **not** package
 anything — it is the cheap gate that catches the regressions a 30–90 minute
@@ -36,8 +37,10 @@ from the Actions tab with **Run workflow** (`workflow_dispatch`), or let
   packaged-asset-path class of bugs (see CLAUDE.md) that source-tree runs miss.
 - **android-build.yml** — runs `buildozer android debug` (the same thing as
   `build_android.sh --debug`, reading the shared `buildozer.spec`) and uploads
-  an unsigned `.apk`. No secrets needed; the signed Play `.aab` is built
-  locally. The SDK/NDK are cached, keyed on `buildozer.spec`.
+  an unsigned `.apk`. It runs `tools/check_android_config.py` first so an old
+  target API or packaging toolchain fails before the long build. No secrets
+  needed; the signed Play `.aab` is built locally. The SDK/NDK are cached,
+  keyed on `buildozer.spec`.
 - **ios-build.yml** — unsigned `.ipa` plus the Xcode project on a macOS runner.
   Full notes in `IOS_BUILD_WORKFLOW.md`.
 

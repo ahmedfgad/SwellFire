@@ -44,11 +44,24 @@ fullscreen = 1
 
 # Android settings
 
-# Target Android version. Google Play requires updates to target API 35.
-android.api = 35
+# Compile against and target Android 16. Google Play requires API 36 for app
+# updates starting August 31, 2026. This does not change the minimum Android
+# version supported below.
+android.api = 36
 
 # Lowest Android version the app runs on. python-for-android needs 21 or higher.
 android.minapi = 21
+
+# Use the NDK recommended by python-for-android's 2026 release. NDK r28c also
+# emits native libraries that are compatible with Android's 16 KB page sizes.
+android.ndk = 28c
+android.ndk_api = 21
+
+# API 36 support depends on the modern python-for-android toolchain. Keep the
+# upstream develop branch selected as Buildozer recommends, but pin the checkout
+# to the signed v2026.05.09 release so local and CI builds are reproducible.
+p4a.branch = develop
+p4a.commit = 58d21141f17c889bf8585f5665921d72028f8831
 
 # Build for 64-bit and 32-bit. Google Play requires the 64-bit arm64-v8a.
 android.archs = arm64-v8a, armeabi-v7a
@@ -60,10 +73,10 @@ android.accept_sdk_license = True
 # build_android.sh switches this when it also builds the apk for testing.
 android.release_artifact = aab
 
-# Version code. It must be higher than the version code already on Google Play,
-# or the upload is rejected. Increment by 1 (or by 100 to leave room for hot
-# fixes) for each release.
-android.numeric_version = 10000
+# Version code for the API 36 compliance update, raised from 10000. It must be
+# higher than the version code already on Google Play or the upload is rejected;
+# confirm the live value in Play Console before building.
+android.numeric_version = 10001
 
 # Background color of the splash screen.
 android.presplash_color = #000000

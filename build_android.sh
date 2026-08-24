@@ -3,17 +3,19 @@
 # Builds the Swellfire Android package, ready to upload to Google Play.
 #
 # What it does:
-#   1. Activates the venv and makes sure buildozer and Cython are installed.
-#   2. Checks that the Android build tools are present (installed by setup_venv.sh).
-#   3. Creates a release upload key the first time, and exports its certificate.
-#   4. Builds the signed release files in ./bin (an .aab for Google Play and an
+#   1. Verifies the Play-critical target SDK and Android toolchain settings.
+#   2. Activates the venv and makes sure buildozer and Cython are installed.
+#   3. Checks that the Android build tools are present (installed by setup_venv.sh).
+#   4. Creates a release upload key the first time, and exports its certificate.
+#   5. Builds the signed release files in ./bin (an .aab for Google Play and an
 #      .apk you can install on a device for testing).
-#   5. Prints the files and their package id, target SDK and architectures.
+#   6. Prints the files and their package id, target SDK and architectures.
 #
 # Options:
 #   ./build_android.sh             build the release .aab and .apk
 #   ./build_android.sh --debug     build a quick unsigned debug .apk only
 #   ./build_android.sh --skip-deps do not check the system build tools
+#   ./build_android.sh --check     validate config only; do not build or sign
 #
 # The first build downloads the Android SDK and NDK (a few GB) and can take
 # 30 to 60 minutes. It must run on Linux.
@@ -24,13 +26,22 @@ PROJECT_DIR="$(pwd)"
 
 MODE="release"
 SKIP_DEPS=0
+CHECK_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --debug)     MODE="debug" ;;
         --skip-deps) SKIP_DEPS=1 ;;
+        --check)     CHECK_ONLY=1 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done
+
+# Fail before downloads or signing if a Play-critical setting regresses. The
+# check-only path deliberately stops here and never creates a venv or keystore.
+python3 tools/check_android_config.py
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    exit 0
+fi
 
 VENV_DIR="venv"
 KEYSTORE_FILE="$PROJECT_DIR/swellfire-upload.keystore"

@@ -47,6 +47,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Check Google Play target configuration
+        run: python tools/check_android_config.py
+
       # System packages python-for-android needs to compile the toolchain.
       - name: Install Buildozer system dependencies
         run: |
