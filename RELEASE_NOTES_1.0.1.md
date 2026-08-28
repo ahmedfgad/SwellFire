@@ -30,6 +30,17 @@ across phones, tablets and desktop systems.
 
 - `Swellfire-1.0.1-android.apk` is the signed Android release APK.
 - `Swellfire-1.0.1-linux-x86_64` is the standalone 64-bit Linux application.
+- `Swellfire-1.0.1-windows-x86_64.exe` is the standalone 64-bit Windows
+  application.
+- `Swellfire-1.0.1-macos-arm64.zip` contains the app for Apple Silicon Macs.
+- `Swellfire-1.0.1-ios-unsigned.ipa` is the unsigned iPhone and iPad build for
+  developer signing and testing. It cannot be installed or submitted to the
+  App Store until it is signed with an Apple Developer account.
+- `Swellfire-1.0.1-ios-xcode-project.zip` contains the configured Xcode project
+  for signing, archiving and App Store submission.
 
 The Linux download may need executable permission after downloading:
 `chmod +x Swellfire-1.0.1-linux-x86_64`.
+
+The macOS app is not Developer ID signed or notarized, so macOS may show a
+Gatekeeper warning when it is opened for the first time.
