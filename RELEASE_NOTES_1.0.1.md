@@ -36,8 +36,6 @@ across phones, tablets and desktop systems.
 - `Swellfire-1.0.1-ios-unsigned.ipa` is the unsigned iPhone and iPad build for
   developer signing and testing. It cannot be installed or submitted to the
   App Store until it is signed with an Apple Developer account.
-- `Swellfire-1.0.1-ios-xcode-project.zip` contains the configured Xcode project
-  for signing, archiving and App Store submission.
 
 The Linux download may need executable permission after downloading:
 `chmod +x Swellfire-1.0.1-linux-x86_64`.
