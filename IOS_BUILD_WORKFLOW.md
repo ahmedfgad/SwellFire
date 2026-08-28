@@ -1,6 +1,6 @@
-# Building the Swellfire iOS files with GitHub Actions
+# Building and archiving Swellfire for iOS
 
-iOS apps must be built on a Mac. This project uses a GitHub Actions workflow to build the app on a Mac in the cloud, so you do not need to own one. The repo is public, so these macOS runners are free.
+iOS apps must be built on a Mac. This project uses Xcode 26 GitHub Actions runners, so you do not need to own one. The unsigned test workflow needs no Apple credentials; App Store signing is a separate manual workflow.
 
 The workflow file is `.github/workflows/ios-build.yml`. This document explains how to run it and where the built files appear.
 
@@ -23,7 +23,7 @@ git push
 
 The run starts in a few seconds and shows up in the list.
 
-Another way to start it is to push a tag that begins with `v`, for example a tag named `v1.0`. That starts the same build automatically.
+The combined `Release` workflow can also call this unsigned build. It does not create a signed App Store artifact.
 
 ## How long it takes
 
@@ -37,7 +37,7 @@ When the run finishes with a green check mark:
 2. Scroll to the **Artifacts** section at the bottom of the run summary page.
 3. You will see two items:
    - **Swellfire-unsigned-ipa**: download it. It arrives as a zip. Unzip it to get `Swellfire-unsigned.ipa`. This is the file you install on an iPhone.
-   - **Swellfire-xcode-project**: the Xcode project. You only need this if you later decide to publish the game on the App Store from a Mac.
+   - **Swellfire-xcode-project**: the configured Xcode project, including the App Store identity, icons, privacy manifest, and version settings.
 
 GitHub keeps these artifacts for 30 days. After that, run the workflow again to get fresh files.
 
@@ -45,8 +45,19 @@ GitHub keeps these artifacts for 30 days. After that, run the workflow again to 
 
 Use `Swellfire-unsigned.ipa` with the steps in `IOS_INSTALL.md`.
 
+## Create an App Store archive
+
+After joining the Apple Developer Program and configuring the four protected
+signing secrets, manually run **Archive iOS for App Store**. It creates and
+validates a signed IPA and xcarchive but does not upload them to Apple. Follow
+the complete account, signing, TestFlight, metadata, privacy, screenshot, and
+submission checklist in `APP_STORE_RELEASE.md`.
+
 ## If a run fails
 
 1. Open the failed run and read the step shown in red.
-2. The most common fix is the macOS version. Edit `.github/workflows/ios-build.yml` and change `runs-on: macos-14` to `runs-on: macos-13`, then run the workflow again.
-3. To rebuild the toolchain from scratch, change the cache key suffix in the workflow from `v1` to `v2`, or delete the cache from the Actions cache list.
+2. Do not downgrade the runner: App Store uploads now require Xcode 26 and the
+   iOS 26 SDK, enforced by the workflow.
+3. To rebuild the toolchain from scratch, change the cache-key suffix from `v1`
+   to `v2`, or delete the cache from the Actions cache list.
+4. Run `./build_ios.sh --check` locally for fast configuration validation.

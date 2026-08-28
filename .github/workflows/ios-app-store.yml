@@ -1,0 +1,231 @@
+# Creates a signed App Store Connect .ipa, but deliberately does not upload it.
+# Run only after completing APP_STORE_RELEASE.md and adding the listed secrets.
+
+name: Archive iOS for App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Unique App Store build number (positive integer)
+        required: true
+        default: "10001"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-app-store-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  archive-ios:
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate inputs and signing secrets
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "build_number must be a positive integer." >&2
+            exit 1
+          fi
+          for NAME in APPLE_TEAM_ID CERTIFICATE_BASE64 CERTIFICATE_PASSWORD PROFILE_BASE64; do
+            if [ -z "${!NAME}" ]; then
+              echo "Missing required App Store signing secret: $NAME" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify the App Store SDK baseline
+        run: |
+          source ios/app.env
+          xcodebuild -version
+          SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version)
+          SDK_MAJOR=${SDK_VERSION%%.*}
+          echo "iPhoneOS SDK $SDK_VERSION"
+          if [ "$SDK_MAJOR" -lt "$IOS_MIN_XCODE_MAJOR" ]; then
+            echo "App Store uploads require the iOS 26 SDK or newer." >&2
+            exit 1
+          fi
+
+      - name: Install build tools
+        run: |
+          brew install autoconf automake libtool pkg-config libjpeg
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ios.txt
+
+      - name: Cache the kivy-ios toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            dist
+          key: ${{ runner.os }}-xcode26-kivyios-${{ hashFiles('requirements-ios.txt') }}-v1
+
+      - name: Build the iOS toolchain
+        run: |
+          toolchain build python3 kivy
+          toolchain pip install certifi
+
+      - name: Stage the runtime files
+        run: |
+          mkdir -p ios_app/assets
+          rsync -a --exclude='test_*.py' --include='*.py' --exclude='*' ./ ios_app/
+          rsync -a --exclude='raw/' assets/ ios_app/assets/
+
+      - name: Create and configure the Xcode project
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          source ios/app.env
+          toolchain create "$IOS_APP_NAME" ios_app
+          PROJ_DIR=$(find . -maxdepth 1 -type d -name '*-ios' | head -1)
+          tools/ios_apply_assets.sh "$PROJ_DIR" icon.png presplash.png
+          python tools/ios_configure_project.py "$PROJ_DIR" --build-number "$BUILD_NUMBER"
+          XCODEPROJ=$(find "$PROJ_DIR" -maxdepth 1 -name '*.xcodeproj' | head -1)
+          SCHEME=$(basename "$XCODEPROJ" .xcodeproj)
+          echo "PROJ_DIR=$PROJ_DIR" >> "$GITHUB_ENV"
+          echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          xcodebuild -list -project "$XCODEPROJ"
+
+      - name: Import the distribution certificate and provisioning profile
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          source ios/app.env
+          CERTIFICATE_PATH="$RUNNER_TEMP/distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/app-store.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/app-store-profile.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/swellfire-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          PB=/usr/libexec/PlistBuddy
+          PROFILE_UUID=$($PB -c 'Print :UUID' "$PROFILE_PLIST")
+          PROFILE_NAME=$($PB -c 'Print :Name' "$PROFILE_PLIST")
+          PROFILE_TEAM=$($PB -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")
+          PROFILE_APP_ID=$($PB -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST")
+          if [ "$PROFILE_TEAM" != "$APPLE_TEAM_ID" ]; then
+            echo "Provisioning profile team does not match APPLE_TEAM_ID." >&2
+            exit 1
+          fi
+          case "$PROFILE_APP_ID" in
+            *."$IOS_BUNDLE_ID") ;;
+            *) echo "Provisioning profile does not cover $IOS_BUNDLE_ID." >&2; exit 1 ;;
+          esac
+
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          PROFILE_DEST="$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+          cp "$PROFILE_PATH" "$PROFILE_DEST"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "PROFILE_DEST=$PROFILE_DEST" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Create the signed App Store archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          source ios/app.env
+          xcodebuild archive \
+            -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Swellfire.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            clean archive
+
+      - name: Export and validate the App Store IPA
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          source ios/app.env
+          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+          EXPORT_DIR="$RUNNER_TEMP/app-store-export"
+          PB=/usr/libexec/PlistBuddy
+          plutil -create xml1 "$EXPORT_OPTIONS"
+          $PB -c 'Add :method string app-store-connect' "$EXPORT_OPTIONS"
+          $PB -c 'Add :destination string export' "$EXPORT_OPTIONS"
+          $PB -c 'Add :signingStyle string manual' "$EXPORT_OPTIONS"
+          $PB -c "Add :teamID string $APPLE_TEAM_ID" "$EXPORT_OPTIONS"
+          $PB -c 'Add :manageAppVersionAndBuildNumber bool false' "$EXPORT_OPTIONS"
+          $PB -c 'Add :uploadSymbols bool true' "$EXPORT_OPTIONS"
+          $PB -c 'Add :stripSwiftSymbols bool true' "$EXPORT_OPTIONS"
+          $PB -c 'Add :provisioningProfiles dict' "$EXPORT_OPTIONS"
+          $PB -c "Add :provisioningProfiles:$IOS_BUNDLE_ID string $PROFILE_NAME" "$EXPORT_OPTIONS"
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Swellfire.xcarchive" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist "$EXPORT_OPTIONS"
+
+          IPA=$(find "$EXPORT_DIR" -maxdepth 1 -name '*.ipa' | head -1)
+          test -n "$IPA"
+          mkdir "$RUNNER_TEMP/ipa-check"
+          unzip -q "$IPA" -d "$RUNNER_TEMP/ipa-check"
+          APP=$(find "$RUNNER_TEMP/ipa-check/Payload" -maxdepth 1 -name '*.app' | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          $PB -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          $PB -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          $PB -c 'Print :CFBundleVersion' "$APP/Info.plist"
+
+      - name: Upload the signed IPA and archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swellfire-App-Store-${{ inputs.build_number }}
+          path: |
+            ${{ runner.temp }}/app-store-export/*.ipa
+            ${{ runner.temp }}/Swellfire.xcarchive
+          retention-days: 14
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          if [ -n "${PROFILE_DEST:-}" ]; then rm -f "$PROFILE_DEST"; fi
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
+
+      - name: Write a run summary
+        run: |
+          {
+            echo "## Swellfire App Store archive"
+            echo ""
+            echo "The signed IPA and xcarchive are in this run's artifacts."
+            echo "They were validated but were **not uploaded** to App Store Connect."
+            echo "Follow APP_STORE_RELEASE.md for Transporter, TestFlight, and submission."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,4 +4,5 @@
 # pipeline tools/ (atlas packing, AI sprite generation pre/post processing)
 # and is pulled in transitively by Kivy on most platforms anyway.
 kivy[base]>=2.3.0
-pillow>=10.0.0
+pillow>=10.0.0,<11
+certifi>=2025.1.31

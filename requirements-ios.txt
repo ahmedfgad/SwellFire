@@ -1,0 +1,4 @@
+# Reproducible kivy-ios host tooling. This current upstream revision includes
+# the Xcode 16 fixes and is used with Xcode 26 by our workflow.
+kivy-ios @ git+https://github.com/kivy/kivy-ios.git@892c4b72ee4eb3537310b0694d5fb73cb6a18d53
+Cython==0.29.36

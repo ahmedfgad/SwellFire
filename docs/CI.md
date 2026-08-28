@@ -2,15 +2,16 @@
 
 Swellfire's GitHub Actions workflows live in `.github/workflows/`. There are two
 tiers: a fast smoke test that runs on every push, and the real per-platform
-builds that run on demand or when a version tag is pushed.
+builds that run on demand, directly or through the manual combined release workflow.
 
 | Workflow | File | Trigger | What it does |
 | --- | --- | --- | --- |
 | Desktop CI | `desktop-ci.yml` | every push and PR | Installs deps, byte-compiles, boots the app headless under xvfb. |
-| Build desktop apps | `desktop-build.yml` | manual + release | PyInstaller binaries for Linux, Windows and macOS, one artifact each. |
-| Build Android app | `android-build.yml` | manual + release | Buildozer debug `.apk` artifact. |
-| Build iOS app | `ios-build.yml` | manual + release | Unsigned `.ipa` and the Xcode project on a macOS runner. |
-| Release | `release.yml` | `v*` tags | Runs the three build workflows and attaches every artifact to one GitHub Release. |
+| Build desktop apps | `desktop-build.yml` | manual + called by Release | PyInstaller binaries for Linux, Windows and macOS, one artifact each. |
+| Build Android app | `android-build.yml` | manual + called by Release | Buildozer debug `.apk` artifact. |
+| Build iOS app | `ios-build.yml` | manual + called by Release | Xcode 26 unsigned `.ipa` and configured Xcode project. |
+| Archive iOS for App Store | `ios-app-store.yml` | manual only | Signed, validated App Store `.ipa` and xcarchive; never uploads. |
+| Release | `release.yml` | manual | Runs the three unsigned build workflows together; does not publish. |
 
 ## Per-push smoke (`desktop-ci.yml`)
 
@@ -27,8 +28,8 @@ buildozer / kivy-ios build would otherwise only surface much later.
 `desktop-build.yml`, `android-build.yml` and `ios-build.yml` run the real
 packaging for each platform. They are **not** run on every push — that would
 burn CI minutes (the Android toolchain build alone is 30–60 minutes). Run one
-from the Actions tab with **Run workflow** (`workflow_dispatch`), or let
-`release.yml` run them all on a version tag.
+from the Actions tab with **Run workflow** (`workflow_dispatch`), or manually
+run `release.yml` to call all three in one workflow run.
 
 - **desktop-build.yml** — a Linux/Windows/macOS matrix that runs
   `build_desktop.sh` (PyInstaller) on each OS and uploads the binary
@@ -41,22 +42,19 @@ from the Actions tab with **Run workflow** (`workflow_dispatch`), or let
   target API or packaging toolchain fails before the long build. No secrets
   needed; the signed Play `.aab` is built locally. The SDK/NDK are cached,
   keyed on `buildozer.spec`.
-- **ios-build.yml** — unsigned `.ipa` plus the Xcode project on a macOS runner.
-  Full notes in `IOS_BUILD_WORKFLOW.md`.
+- **ios-build.yml** — unsigned `.ipa` plus the App Store-configured Xcode
+  project on an Xcode 26 runner. **ios-app-store.yml** is a separate manual
+  signing/archive workflow that requires protected Apple secrets and never
+  uploads automatically. Full notes are in `IOS_BUILD_WORKFLOW.md` and
+  `APP_STORE_RELEASE.md`.
 
-## Releases (tag-triggered)
+## Combined release build (manual)
 
-Push a version tag and `release.yml` builds every platform and gathers the
-artifacts into a single GitHub Release for that tag:
-
-```
-git tag v1.0 && git push origin v1.0
-```
-
-It reuses the three build workflows via `uses:` (no duplicated build logic), so
-each platform also stays independently runnable from the Actions tab. The build
-workflows themselves expose `workflow_call` and no longer trigger on tags, so a
-tag fires `release.yml` only — nothing builds twice.
+Run `release.yml` from the Actions tab when you want all three unsigned/public
+artifacts built together. It reuses the platform workflows via `workflow_call`
+and gathers their artifacts in one workflow run. It does not create a GitHub
+Release, publish to either store, or sign the mobile packages; attach the
+artifacts to a public release only after reviewing them.
 
 The signed Google Play `.aab` is intentionally **not** built in CI: it needs the
 private upload keystore, which must never live in a workflow. Build it locally

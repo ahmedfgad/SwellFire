@@ -59,6 +59,9 @@ def _build_argparser():
     ap.add_argument("--warmup", type=int, default=30, help="frames to settle before capturing")
     ap.add_argument("--shot", default=None, help="single PNG output path (implies 1 frame)")
     ap.add_argument("--out", default=None, help="frames dir for a sequence")
+    ap.add_argument("--static-shot", action="store_true",
+                    help="capture an initialized level without advancing combat; "
+                         "requires --level and --shot")
     ap.add_argument("--mp4", default=None,
                     help="(level/playthrough) pipe raw frames straight to ffmpeg "
                          "-> this mp4 (video only), instead of dumping PNGs")
@@ -96,6 +99,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.playthrough and args.out is None and args.mp4 is None:
         ap.error("--playthrough requires --out (frames dir) or --mp4 (pipe)")
+    if args.static_shot and (args.level is None or args.shot is None):
+        ap.error("--static-shot requires --level and --shot")
 
     w, h = _parse_size(args.size)
 
@@ -122,7 +127,8 @@ def main(argv=None):
     app = appmod.SwellfireApp()
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
              "settle": 0, "ready": False, "won_triggered": False,
-             "modal_settle": 0, "modal_seen": False, "ff": None, "t0": None}
+             "modal_settle": 0, "modal_seen": False, "static_settle": 0,
+             "ff": None, "t0": None}
     DT = 1.0 / float(args.fps)
 
     def _emit(arr, idx):
@@ -158,6 +164,11 @@ def main(argv=None):
         # On a fresh save the menu auto-routes to the one-shot tutorial, which
         # would steal focus from the level we want to capture. Mark it seen so
         # that deferred navigation is suppressed.
+        # Captures do not need animated screen transitions, and no-transition
+        # mode also makes the target screen deterministic when the fresh-
+        # install tutorial has already begun its initial fade.
+        from kivy.uix.screenmanager import NoTransition
+        app.sm.transition = NoTransition()
         try:
             app.state.set_setting("tutorial_seen", True)
         except Exception:
@@ -234,6 +245,15 @@ def main(argv=None):
             Clock.schedule_once(_drive, 0)
             return
 
+        # A fresh profile queues the first-launch tutorial while the app is
+        # building. If that deferred callback lands after after_build(), put a
+        # requested static screen back on target before counting warmup frames.
+        if args.screen is not None and app.sm.current != args.screen:
+            app.go(args.screen)
+            state["frame"] = 0
+            Clock.schedule_once(_drive, 0)
+            return
+
         gs = _game_screen()
 
         # For a level capture, block until the running game is actually live.
@@ -242,6 +262,20 @@ def main(argv=None):
             if not state["ready"]:
                 Clock.schedule_once(_drive, 0)
                 return
+
+        # Store screenshots sometimes need the genuine initialized scene but
+        # not an expensive high-resolution combat simulation. Let a few render
+        # frames settle, then capture the real level widgets as they stand.
+        if args.static_shot and args.level is not None and state["ready"]:
+            if state["static_settle"] < 3:
+                state["static_settle"] += 1
+                Clock.schedule_once(_drive, 0)
+                return
+            arr = grab_frame(Window)
+            os.makedirs(os.path.dirname(args.shot) or ".", exist_ok=True)
+            Image.fromarray(arr).save(args.shot)
+            _finish()
+            return
 
         # Stop a gameplay sequence cleanly the instant the level ends (squad
         # wiped or won) so video clips never include the DEFEATED / Level-

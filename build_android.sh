@@ -55,7 +55,9 @@ if [[ ! -d "$VENV_DIR" ]]; then
 fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
-python -m pip install --upgrade buildozer cython
+# Keep a compatible shared environment stable while allowing p4a's host Python
+# to download its own build prerequisites later in the build.
+python -m pip install 'buildozer>=1.5,<2' 'Cython>=0.29.34,<3.2'
 
 # Check the Android build tools. setup_venv.sh installs them.
 if [[ "$SKIP_DEPS" -eq 0 ]]; then
@@ -121,6 +123,11 @@ export P4A_RELEASE_KEYSTORE="$KEYSTORE_FILE"
 export P4A_RELEASE_KEYSTORE_PASSWD="$KEYSTORE_PASSWORD"
 export P4A_RELEASE_KEYALIAS="$KEYSTORE_ALIAS"
 export P4A_RELEASE_KEYALIAS_PASSWD="$KEYSTORE_PASSWORD"
+# Keep p4a's generated Python 3.14 venv on its bundled, known-good pip. This is
+# exported only after the host build dependencies above have been checked, so
+# it does not constrain the reusable developer venv.
+export PIP_CONSTRAINT="$PROJECT_DIR/android/pip-constraints.txt"
+
 
 # python-for-android builds one file type per run, so build the aab and the apk
 # in two passes. Always leave buildozer.spec set back to aab when done.

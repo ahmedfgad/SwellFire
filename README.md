@@ -18,7 +18,7 @@ It is the second cross-platform Kivy game by Ahmed Gad, following [CoinTex](http
 
 ## Get the game
 
-**Android, iPhone, App Store, Play Store**: not yet — the game is in active development. The [iOS GitHub Actions workflow](#iphone) already produces an installable file for sideloading; an Android `.aab` for Play upload is produced by `./build_android.sh`.
+The Android edition is the current public mobile release. The iPhone/iPad edition is prepared for App Store signing and submission but is not published yet. The [unsigned iOS workflow](IOS_BUILD_WORKFLOW.md) remains available for testing; see the [App Store release guide](APP_STORE_RELEASE.md) for publication.
 
 ## How to play
 
@@ -86,8 +86,10 @@ The Android app is built with [Buildozer](https://github.com/kivy/buildozer) usi
 ```
 
 The checked-in configuration targets Android 16 (API 36), uses NDK r28c and
-pins the python-for-android packaging toolchain. To validate those Play-critical
-settings without downloading an SDK, building, or signing anything, run:
+pins the python-for-android packaging toolchain. It also protects the
+portrait game layout, preserves in-app Back navigation under API 36, excludes
+test code from the package, and applies safe-area spacing for edge-to-edge
+displays. To validate those Play-critical settings without downloading an SDK, building, or signing anything, run:
 
 ```
 ./build_android.sh --check
@@ -99,7 +101,7 @@ testing in the `bin` folder. Signing the release is described in
 
 ### iPhone
 
-iOS apps must be built on a Mac. You do not need to own one: the GitHub Actions workflow at `.github/workflows/ios-build.yml` builds the app on a free macOS runner and gives you the files to install. See [IOS_BUILD_WORKFLOW.md](IOS_BUILD_WORKFLOW.md). If you do have a Mac, the `build_ios.sh` script builds the Xcode project locally.
+iOS apps must be built on a Mac. The Xcode 26 GitHub workflows can create either an unsigned test IPA (`ios-build.yml`) or, after Apple credentials are configured, a signed App Store archive (`ios-app-store.yml`). If you have a Mac, `build_ios.sh` generates the configured Xcode project locally. Run `./build_ios.sh --check` anywhere for a no-build validation. See [IOS_BUILD_WORKFLOW.md](IOS_BUILD_WORKFLOW.md) and [APP_STORE_RELEASE.md](APP_STORE_RELEASE.md).
 
 ### Desktop (Windows, Linux, macOS)
 
@@ -141,6 +143,8 @@ and three videos (long autoplay, promo, vertical short). The graphics derive fro
 hand-authored art + the game's own sprites; the videos are captured from the running
 game with its own music/SFX. Everything is reproducible via `tools/` — see
 [`swellfire_media/README.md`](swellfire_media/README.md) for the regen commands.
+Store names, descriptions, privacy answers, release copy, and asset locations
+are indexed in [`STORE_METADATA.md`](STORE_METADATA.md).
 Dev-only deps: `venv/bin/pip install -r requirements-media.txt` (plus `xvfb` for
 portrait gameplay capture).
 

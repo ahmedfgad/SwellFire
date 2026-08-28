@@ -33,9 +33,14 @@ _HEADER = struct.Struct(">I")   # 4-byte big-endian length prefix
 
 
 def pack_message(obj):
-    # Turn a Python object into a length-prefixed JSON frame ready to send.
-    data = json.dumps(obj).encode("utf-8")
+    """Return one bounded, length-prefixed JSON object frame."""
+    if not isinstance(obj, dict):
+        raise TypeError("network messages must be JSON objects")
+    data = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+    if not data or len(data) > MAX_FRAME:
+        raise ValueError("network message exceeds frame limit")
     return _HEADER.pack(len(data)) + data
+
 
 
 def get_local_ip():
@@ -57,24 +62,19 @@ def get_local_ip():
 # Services that report back the caller's internet-facing IP address. Used only
 # to help set up internet play (the host needs to share this address).
 PUBLIC_IP_SERVICES = ("https://api.ipify.org", "https://ifconfig.me/ip",
-                      "http://icanhazip.com")
+                      "https://icanhazip.com")
 
 
 def _ssl_contexts():
-    # SSL contexts to try for the HTTPS lookups, most-trusted first.
+    # Verified SSL contexts to try for the HTTPS lookups.
     #
     # Desktop Python finds the system CA bundle, so the default verified context
     # works. The Python shipped inside the iOS / Android builds has no CA bundle,
-    # so certificate verification raises SSLCertVerificationError and every HTTPS
-    # request fails there (which is why the public IP never showed up on mobile,
-    # while the socket-based local IP did). The unverified context is the fallback
-    # that makes the lookup work on mobile. We only read back our *own* IP and
-    # send no secrets, so doing that single request without verification is an
-    # acceptable trade-off. certifi is used automatically if it happens to be
-    # installed, but it is not required.
+    # so mobile packages include certifi and use its CA store. Never fall back to
+    # an unverified request: a failed lookup is safer and the host screen already
+    # explains how to find and share the address manually.
     if ssl is None:
-        # No ssl module at all — let urllib use its own default handling.
-        return [None]
+        return []
     contexts = []
     try:
         import certifi
@@ -85,33 +85,36 @@ def _ssl_contexts():
         contexts.append(ssl.create_default_context())
     except Exception:
         pass
-    unverified = ssl.create_default_context()
-    unverified.check_hostname = False
-    unverified.verify_mode = ssl.CERT_NONE
-    contexts.append(unverified)
     return contexts
 
 
 def get_public_ip(timeout=4.0):
-    # Ask a public service for this device's internet-facing IP. Returns the IP
-    # as a string, or None if there is no internet or no service answered. This
-    # makes one outbound request and reveals this device's IP to that service,
-    # so it is only called when the user opens the Host screen. This is blocking,
-    # so call it from a background thread.
+    # Ask a public service for this device's internet-facing IPv4 address.
+    # The request is made only when the Host screen opens and always uses
+    # certificate verification. Response size is capped before decoding.
     contexts = _ssl_contexts()
+    request_headers = {"User-Agent": "Swellfire/1.0"}
     for url in PUBLIC_IP_SERVICES:
+        request = urllib.request.Request(url, headers=request_headers)
         for ctx in contexts:
             try:
-                with urllib.request.urlopen(url, timeout=timeout,
-                                            context=ctx) as response:
-                    text = response.read().decode("utf-8").strip()
+                with urllib.request.urlopen(
+                    request, timeout=timeout, context=ctx
+                ) as response:
+                    raw = response.read(65)
+                if len(raw) > 64:
+                    continue
+                text = raw.decode("ascii").strip()
             except Exception:
                 continue
             parts = text.split(".")
-            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255
-                                       for p in parts):
+            if len(parts) == 4 and all(
+                part.isdigit() and 0 <= int(part) <= 255 for part in parts
+            ):
                 return text
     return None
+
+
 
 
 def local_subnet_prefix():
@@ -127,7 +130,7 @@ def local_subnet_prefix():
 
 
 def _recv_loop(sock, inbox, on_closed):
-    # Read framed JSON messages from sock and put each decoded one on inbox.
+    # Read framed JSON objects from sock and put each decoded one on inbox.
     # Runs on its own thread and calls on_closed when the link ends.
     buffer = bytearray()
     need = None
@@ -143,22 +146,25 @@ def _recv_loop(sock, inbox, on_closed):
                         break
                     need = _HEADER.unpack(bytes(buffer[:_HEADER.size]))[0]
                     del buffer[:_HEADER.size]
-                    if need > MAX_FRAME:
-                        raise ValueError("frame too large")
+                    if need == 0 or need > MAX_FRAME:
+                        raise ValueError("invalid frame size")
                 if len(buffer) < need:
                     break
                 payload = bytes(buffer[:need])
                 del buffer[:need]
                 need = None
                 try:
-                    inbox.put(json.loads(payload.decode("utf-8")))
-                except Exception:
-                    # Skip a single bad message rather than dropping the link.
+                    decoded = json.loads(payload.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    # Skip one malformed message without killing a healthy link.
                     continue
+                if isinstance(decoded, dict):
+                    inbox.put(decoded)
     except Exception:
         pass
     finally:
         on_closed()
+
 
 
 class _Link:
@@ -175,10 +181,18 @@ class _Link:
                          daemon=True).start()
 
     def _on_closed(self):
-        # Tell the game the link dropped, but only if we did not close on purpose.
+        # Release the descriptor and report an unexpected disconnect once.
+        sock = self.sock
+        self.sock = None
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
         if not self._closed:
             self._closed = True
             self.inbox.put({"t": "_disconnected"})
+
 
     def send(self, obj):
         sock = self.sock
@@ -214,16 +228,25 @@ class NetHost(_Link):
     # Waits for one joining player, then exchanges messages with them.
     def __init__(self, port=DEFAULT_PORT):
         super().__init__()
+        port = int(port)
+        if not 1 <= port <= 65535:
+            raise ValueError("port must be between 1 and 65535")
         self.port = port
         self.connected = False
         self._server = None
         self._accept_thread = None
 
     def start_listening(self):
-        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server.bind(("0.0.0.0", self.port))
-        self._server.listen(1)
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("0.0.0.0", self.port))
+            server.listen(1)
+        except Exception:
+            server.close()
+            self._server = None
+            raise
+        self._server = server
         self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._accept_thread.start()
 
@@ -294,7 +317,15 @@ class NetClient(_Link):
     def connect(self, ip, port=DEFAULT_PORT):
         # The connect itself can block, so do it on a thread and report the
         # result through inbox. The UI stays responsive either way.
-        threading.Thread(target=self._connect, args=(ip, port), daemon=True).start()
+        host = ip.strip() if isinstance(ip, str) else ""
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            port = 0
+        if not host or len(host) > 253 or not 1 <= port <= 65535:
+            self.inbox.put({"t": "_connect_failed", "why": "invalid address"})
+            return
+        threading.Thread(target=self._connect, args=(host, port), daemon=True).start()
 
     def _connect(self, ip, port):
         try:

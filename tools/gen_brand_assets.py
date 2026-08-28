@@ -18,8 +18,14 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MEDIA = os.path.join(ROOT, "swellfire_media")
 RE = os.path.join(MEDIA, "re")
 
-LOGO_SRC = os.path.join(RE, "swellfire_logo.png")
-PRESPLASH_SRC = os.path.join(RE, "swellfire_presplash.png")
+RAW_LOGO_SRC = os.path.join(RE, "swellfire_logo.png")
+RAW_PRESPLASH_SRC = os.path.join(RE, "swellfire_presplash.png")
+# Clean release clones may omit the optional hand-authored source directory.
+# The tracked canonical outputs are lossless fallbacks, so the pipeline remains
+# reproducible without inventing or downloading replacement artwork.
+LOGO_SRC = RAW_LOGO_SRC if os.path.exists(RAW_LOGO_SRC) else os.path.join(ROOT, "icon.png")
+PRESPLASH_SRC = (RAW_PRESPLASH_SRC if os.path.exists(RAW_PRESPLASH_SRC)
+                 else os.path.join(ROOT, "presplash.png"))
 
 
 def make_icon():
@@ -40,7 +46,7 @@ def main():
     presplash.save(os.path.join(ROOT, "presplash.png"))
     shutil.copy(os.path.join(ROOT, "icon.png"), os.path.join(MEDIA, "icon.png"))
     shutil.copy(os.path.join(ROOT, "presplash.png"), os.path.join(MEDIA, "presplash.png"))
-    print("applied icon.png (512x512) + presplash.png from swellfire_media/re/")
+    print("applied icon.png (512x512) + presplash.png from canonical brand art")
 
 
 if __name__ == "__main__":

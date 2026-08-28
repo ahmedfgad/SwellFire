@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 PROJ_DIR="${1:?missing project dir}"
 LOGO="${2:?missing logo path}"
 PRESPLASH="${3:?missing presplash path}"
@@ -44,27 +46,13 @@ cp "$PRESPLASH" "$PROJ_DIR/icon.png"
 #    falls back to icon.png, which is now the presplash and not square).
 APPICON=$(find "$PROJ_DIR" -type d -name AppIcon.appiconset | head -1)
 if [ -n "$APPICON" ]; then
-    sips -z 58  58   "$LOGO" --out "$APPICON/icon-29@2x.png" >/dev/null
-    sips -z 87  87   "$LOGO" --out "$APPICON/icon-29@3x.png" >/dev/null
-    sips -z 80  80   "$LOGO" --out "$APPICON/icon-40@2x.png" >/dev/null
-    sips -z 120 120  "$LOGO" --out "$APPICON/icon-40@3x.png" >/dev/null
-    sips -z 120 120  "$LOGO" --out "$APPICON/icon-60@2x.png" >/dev/null
-    sips -z 180 180  "$LOGO" --out "$APPICON/icon-60@3x.png" >/dev/null
-    cat > "$APPICON/Contents.json" <<'JSON'
-{
-  "images" : [
-    {"idiom":"iphone","size":"29x29","scale":"2x","filename":"icon-29@2x.png"},
-    {"idiom":"iphone","size":"29x29","scale":"3x","filename":"icon-29@3x.png"},
-    {"idiom":"iphone","size":"40x40","scale":"2x","filename":"icon-40@2x.png"},
-    {"idiom":"iphone","size":"40x40","scale":"3x","filename":"icon-40@3x.png"},
-    {"idiom":"iphone","size":"60x60","scale":"2x","filename":"icon-60@2x.png"},
-    {"idiom":"iphone","size":"60x60","scale":"3x","filename":"icon-60@3x.png"}
-  ],
-  "info" : { "version" : 1, "author" : "xcode" }
-}
-JSON
+    # Generate every iPhone/iPad size and the required 1024x1024 ios-marketing
+    # image. The generator converts to RGB so no icon contains an alpha channel.
+    # Pillow is installed as a dependency of the pinned kivy-ios toolchain.
+    python3 "$SCRIPT_DIR/ios_generate_icons.py" "$LOGO" "$APPICON"
 else
-    echo "AppIcon.appiconset not found - leaving icon catalog alone." >&2
+    echo "AppIcon.appiconset not found." >&2
+    exit 1
 fi
 
 # 3. Rewrite Launch Screen.storyboard so the presplash fills the screen with a

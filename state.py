@@ -3,13 +3,16 @@
 # (the Kivy user_data_dir, which can be written to on all platforms).
 
 import json
+import math
 import os
 
 import weapons
 
 # Keep in sync with levels.LEVELS_PER_WORLD (kept local to avoid an import cycle).
 _LEVELS_PER_WORLD = 10
+_TOTAL_LEVELS = 60
 SQUAD_BONUS_MAX = 6
+BOOSTER_IDS = ("grenade", "shield", "reinforce", "freeze", "overdrive", "magnet")
 
 # Settings and their starting values. The "seen" flags remember one-time things:
 # the tutorial auto-shows once, and each world's heads-up message shows once.
@@ -43,19 +46,16 @@ DEFAULT_SETTINGS = {
     "mp_last_ip": "",         # the host address the joiner typed last time
 }
 
-# Starting weapon — pistol unlocked at boot, the rest gated behind shop
-# purchases. `weapon_unlocks` records what the player owns; the highest
-# weapon they've purchased is automatically the new default starting
-# weapon (see `state.starting_weapon`).
+# All starting weapons are available at tier 1. The legacy `weapon_unlocks`
+# mapping remains in the save format for backward compatibility.
 DEFAULT_WEAPON_UNLOCKS = {
     "pistol": True,
-    "rifle": False,
-    "shotgun": False,
-    "sniper": False,
+    "rifle": True,
+    "shotgun": True,
+    "sniper": True,
 }
 
-# Order of weapons from worst → best. Used by `starting_weapon` to pick
-# the highest-tier unlocked weapon as the default.
+# Stable weapon order retained for old saves and UI helpers.
 WEAPON_TIERS = ["pistol", "rifle", "shotgun", "sniper"]
 
 SAVE_NAME = "swellfire_save.json"
@@ -85,9 +85,8 @@ class GameState:
             "overdrive_balance": 0,
             "magnet_balance": 0,
             "weapon_unlocks": dict(DEFAULT_WEAPON_UNLOCKS),
-            # Per-weapon upgrade tiers (1-4). All four weapons start at
-            # tier 1 (free). The shop sells tier 2 → 3 → 4 upgrades; higher
-            # tier → more damage per projectile.
+            # Per-weapon upgrade tiers (1 to weapons.MAX_TIER). All four
+            # weapons start at tier 1; higher tiers deal more damage.
             "weapon_tiers": {"pistol": 1, "rifle": 1, "shotgun": 1, "sniper": 1},
             # Equipped weapon = which one the player starts every non-boss
             # level with. Default pistol; the shop lets the player tap any
@@ -101,21 +100,123 @@ class GameState:
             "settings": dict(DEFAULT_SETTINGS),
         }
 
+
+    @staticmethod
+    def _safe_int(value, default=0):
+        if isinstance(value, bool):
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        if isinstance(value, bool):
+            return default
+        try:
+            result = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return result if math.isfinite(result) else default
+
+    @classmethod
+    def _normalise_level_map(cls, value, minimum=0, maximum=None):
+        if not isinstance(value, dict):
+            return {}
+        result = {}
+        for raw_level, raw_value in value.items():
+            level = cls._safe_int(raw_level, 0)
+            if not 1 <= level <= _TOTAL_LEVELS:
+                continue
+            parsed = max(minimum, cls._safe_int(raw_value, minimum))
+            if maximum is not None:
+                parsed = min(maximum, parsed)
+            result[str(level)] = parsed
+        return result
+
+    @staticmethod
+    def _normalise_setting(key, value):
+        if key not in DEFAULT_SETTINGS:
+            raise KeyError("unknown setting: {}".format(key))
+        default = DEFAULT_SETTINGS[key]
+        if isinstance(default, bool):
+            if isinstance(value, bool):
+                return value
+            if value in (0, 1):
+                return bool(value)
+            return default
+        if key == "volume":
+            return max(0.0, min(1.0, GameState._safe_float(value, default)))
+        if key == "top_safe_inset":
+            return max(0.0, min(0.12, GameState._safe_float(value, default)))
+        if key == "ga_style":
+            return value if value in ("cautious", "balanced", "aggressive") else default
+        if key == "ga_speed":
+            return value if value in ("slow", "normal", "fast") else default
+        if key == "mp_last_ip":
+            return value.strip()[:253] if isinstance(value, str) else default
+        return value
+
+    def _normalise(self, data):
+        """Return a complete, bounded save even when JSON was edited or corrupt."""
+        if not isinstance(data, dict):
+            return self._default()
+        clean = self._default()
+        clean["highest_unlocked"] = max(
+            1, min(_TOTAL_LEVELS, self._safe_int(data.get("highest_unlocked"), 1))
+        )
+        clean["scores"] = self._normalise_level_map(data.get("scores"))
+        clean["stars"] = self._normalise_level_map(data.get("stars"), maximum=3)
+        clean["best_distance"] = self._normalise_level_map(data.get("best_distance"))
+        clean["coins_balance"] = max(
+            0, self._safe_int(data.get("coins_balance"), clean["coins_balance"])
+        )
+        for booster_id in BOOSTER_IDS:
+            key = "{}_balance".format(booster_id)
+            clean[key] = max(0, self._safe_int(data.get(key), 0))
+
+        # Tier-1 ownership is universal in the current shop design. Retaining
+        # the legacy mapping keeps old saves readable without reviving locks.
+        clean["weapon_unlocks"] = dict(DEFAULT_WEAPON_UNLOCKS)
+        raw_tiers = data.get("weapon_tiers")
+        if not isinstance(raw_tiers, dict):
+            raw_tiers = {}
+        clean["weapon_tiers"] = {
+            weapon_id: max(
+                1,
+                min(
+                    weapons.MAX_TIER,
+                    self._safe_int(raw_tiers.get(weapon_id), 1),
+                ),
+            )
+            for weapon_id in weapons.WEAPONS
+        }
+        equipped = data.get("equipped_weapon")
+        clean["equipped_weapon"] = equipped if equipped in weapons.WEAPONS else "pistol"
+        clean["squad_bonus"] = max(
+            0, min(SQUAD_BONUS_MAX, self._safe_int(data.get("squad_bonus"), 0))
+        )
+        clean["world2_hint_shown"] = bool(data.get("world2_hint_shown") is True)
+
+        raw_settings = data.get("settings")
+        if not isinstance(raw_settings, dict):
+            raw_settings = {}
+        clean["settings"] = {
+            key: self._normalise_setting(key, raw_settings.get(key, default))
+            for key, default in DEFAULT_SETTINGS.items()
+        }
+        return clean
     def _load(self):
         data = self._default()
         if os.path.exists(self.path):
             try:
                 with open(self.path) as save_file:
                     loaded = json.load(save_file)
+                if not isinstance(loaded, dict):
+                    raise ValueError("save root must be a JSON object")
                 data.update(loaded)
-                # Fill in any setting / unlock that an older save did not have.
-                settings = dict(DEFAULT_SETTINGS)
-                settings.update(data.get("settings", {}))
-                data["settings"] = settings
-                unlocks = dict(DEFAULT_WEAPON_UNLOCKS)
-                unlocks.update(data.get("weapon_unlocks", {}))
-                data["weapon_unlocks"] = unlocks
-                return data
+                return self._normalise(data)
             except Exception as error:
                 print("Swellfire: could not read save, starting fresh.", error)
         return data
@@ -136,15 +237,23 @@ class GameState:
         return self.data["highest_unlocked"]
 
     def is_unlocked(self, level_num):
-        return level_num <= self.data["highest_unlocked"]
+        level_num = self._safe_int(level_num, 0)
+        return 1 <= level_num <= self.highest_unlocked
 
     def unlock_up_to(self, level_num):
-        if level_num > self.data["highest_unlocked"]:
+        level_num = max(1, min(_TOTAL_LEVELS, self._safe_int(level_num, 1)))
+        if level_num > self.highest_unlocked:
             self.data["highest_unlocked"] = level_num
             self.save()
 
     def record_result(self, level_num, score, stars=0, distance=0):
-        # Store a level result. Returns True if the score is a new best.
+        """Store a bounded level result; return whether the best score improved."""
+        level_num = self._safe_int(level_num, 0)
+        if not 1 <= level_num <= _TOTAL_LEVELS:
+            return False
+        score = max(0, self._safe_int(score, 0))
+        stars = max(0, min(3, self._safe_int(stars, 0)))
+        distance = max(0, self._safe_int(distance, 0))
         key = str(level_num)
         best = self.data["scores"].get(key, 0)
         improved = score > best
@@ -157,72 +266,79 @@ class GameState:
         self.save()
         return improved
 
+    def _level_value(self, collection, level_num):
+        level_num = self._safe_int(level_num, 0)
+        if not 1 <= level_num <= _TOTAL_LEVELS:
+            return 0
+        return self.data[collection].get(str(level_num), 0)
+
     def get_score(self, level_num):
-        return self.data["scores"].get(str(level_num), 0)
+        return self._level_value("scores", level_num)
 
     def get_stars(self, level_num):
-        return self.data["stars"].get(str(level_num), 0)
+        return self._level_value("stars", level_num)
 
     def get_distance(self, level_num):
-        return self.data["best_distance"].get(str(level_num), 0)
+        return self._level_value("best_distance", level_num)
 
     def total_stars(self):
         return sum(self.data["stars"].values())
 
     def reset_progress(self):
-        # Clear progress and scores but keep the player's settings.
-        settings = self.data["settings"]
+        # Clear progress and scores but keep a detached copy of settings.
+        settings = dict(self.data["settings"])
         self.data = self._default()
         self.data["settings"] = settings
         self.save()
 
-    # coins / weapons (the shop wiring lands in a later milestone but the store
-    # is in place so M1's settings/about screens can show real numbers)
+    # coins / weapons
     @property
     def coins_balance(self):
         return self.data["coins_balance"]
 
     def add_coins(self, amount):
-        self.data["coins_balance"] = max(0, self.data["coins_balance"] + int(amount))
+        amount = self._safe_int(amount, 0)
+        if amount <= 0:
+            return
+        self.data["coins_balance"] += amount
         self.save()
 
     @property
     def grenade_balance(self):
-        return int(self.data.get("grenade_balance", 0))
+        return self.get_booster_balance("grenade")
 
     def add_grenades(self, amount):
-        self.data["grenade_balance"] = max(0, self.grenade_balance + int(amount))
-        self.save()
+        self.add_booster("grenade", amount)
 
     def get_booster_balance(self, booster_id: str) -> int:
-        return int(self.data.get(f"{booster_id}_balance", 0))
+        if booster_id not in BOOSTER_IDS:
+            return 0
+        return max(0, self._safe_int(self.data.get("{}_balance".format(booster_id)), 0))
 
     def add_booster(self, booster_id: str, amount: int) -> None:
-        key = f"{booster_id}_balance"
-        current = int(self.data.get(key, 0))
-        self.data[key] = max(0, current + int(amount))
+        if booster_id not in BOOSTER_IDS:
+            return
+        amount = self._safe_int(amount, 0)
+        if amount == 0:
+            return
+        key = "{}_balance".format(booster_id)
+        self.data[key] = max(0, self.get_booster_balance(booster_id) + amount)
         self.save()
 
     def is_weapon_unlocked(self, weapon_id):
-        return bool(self.data["weapon_unlocks"].get(weapon_id, False))
+        return weapon_id in weapons.WEAPONS
 
     def unlock_weapon(self, weapon_id):
-        if not self.is_weapon_unlocked(weapon_id):
+        # Retained for compatibility with old callers; tier-1 weapons are free.
+        if weapon_id in weapons.WEAPONS and not self.data["weapon_unlocks"].get(weapon_id):
             self.data["weapon_unlocks"][weapon_id] = True
             self.save()
 
     @property
     def starting_weapon(self) -> str:
-        """The player's currently-equipped weapon (set via the shop). All
-        four weapons are owned at tier 1 by default, so this is whichever
-        one the player tapped to equip — pistol initially.
-
-        Boss levels override with their own `starting_weapon` field.
-        """
+        """The currently equipped tier-1-or-better starting weapon."""
         equipped = self.data.get("equipped_weapon", "pistol")
-        if equipped not in DEFAULT_WEAPON_UNLOCKS:
-            return "pistol"
-        return equipped
+        return equipped if equipped in weapons.WEAPONS else "pistol"
 
     @property
     def max_world_reached(self) -> int:
@@ -231,32 +347,38 @@ class GameState:
 
     def max_tier_for_world(self, world: int) -> int:
         """Weapon-tier cap at `world`: min(MAX_TIER, world) — W1=1 ... W6=6."""
-        return min(weapons.MAX_TIER, max(1, int(world)))
+        return min(weapons.MAX_TIER, max(1, self._safe_int(world, 1)))
 
     def max_squad_bonus_for_world(self, world: int) -> int:
         """Squad-bonus cap at `world`: min(SQUAD_BONUS_MAX, world-1)."""
-        return min(SQUAD_BONUS_MAX, max(0, int(world) - 1))
+        return min(SQUAD_BONUS_MAX, max(0, self._safe_int(world, 1) - 1))
 
     def get_weapon_tier(self, weapon_id: str) -> int:
+        if weapon_id not in weapons.WEAPONS:
+            return 1
         tiers = self.data.get("weapon_tiers", {})
-        return max(1, int(tiers.get(weapon_id, 1)))
+        return max(1, min(weapons.MAX_TIER, self._safe_int(tiers.get(weapon_id), 1)))
 
     def equip_weapon(self, weapon_id: str) -> None:
-        if weapon_id in DEFAULT_WEAPON_UNLOCKS:
+        if weapon_id in weapons.WEAPONS:
             self.data["equipped_weapon"] = weapon_id
             self.save()
 
     def upgrade_weapon_tier(self, weapon_id: str, target_tier: int,
                             price: int) -> bool:
-        """Raise this weapon's tier from current to target. Returns True
-        on success (deducts coins, persists)."""
+        """Atomically deduct coins and raise a known weapon by one tier."""
+        if weapon_id not in weapons.WEAPONS:
+            return False
+        target_tier = self._safe_int(target_tier, 0)
+        price = self._safe_int(price, -1)
         current = self.get_weapon_tier(weapon_id)
-        if target_tier != current + 1:
-            return False    # only one tier at a time
+        if target_tier != current + 1 or price <= 0:
+            return False
         if target_tier > self.max_tier_for_world(self.max_world_reached):
             return False
-        if not self.spend_coins(price):
+        if not self.can_afford(price):
             return False
+        self.data["coins_balance"] -= price
         tiers = dict(self.data.get("weapon_tiers", {}))
         tiers[weapon_id] = target_tier
         self.data["weapon_tiers"] = tiers
@@ -265,10 +387,12 @@ class GameState:
 
     @property
     def squad_bonus(self) -> int:
-        return int(self.data.get("squad_bonus", 0))
+        return max(0, min(SQUAD_BONUS_MAX, self._safe_int(self.data.get("squad_bonus"), 0)))
 
     def set_squad_bonus(self, n: int) -> None:
-        self.data["squad_bonus"] = max(0, min(6, int(n)))
+        self.data["squad_bonus"] = max(
+            0, min(SQUAD_BONUS_MAX, self._safe_int(n, 0))
+        )
         self.save()
 
     @property
@@ -280,45 +404,51 @@ class GameState:
         self.save()
 
     # --- shop API --------------------------------------------------------
-    #
-    # The shop UI calls these. Each returns True if the purchase succeeded
-    # (caller used them to gate the button). Coins are deducted atomically;
-    # if the resulting state is rejected the deduction is rolled back.
 
     def can_afford(self, price: int) -> bool:
-        return self.coins_balance >= int(price)
+        price = self._safe_int(price, -1)
+        return price >= 0 and self.coins_balance >= price
 
     def spend_coins(self, price: int) -> bool:
-        price = int(price)
-        if not self.can_afford(price):
+        price = self._safe_int(price, -1)
+        if price < 0 or not self.can_afford(price):
             return False
         self.data["coins_balance"] -= price
         self.save()
         return True
 
     def purchase_weapon(self, weapon_id: str, price: int) -> bool:
-        if self.is_weapon_unlocked(weapon_id):
+        # Legacy API: all current weapons are already owned at tier 1.
+        if weapon_id not in weapons.WEAPONS or self.is_weapon_unlocked(weapon_id):
             return False
-        if not self.spend_coins(price):
+        return False
+
+    def purchase_booster(self, booster_id: str, qty: int, price: int) -> bool:
+        qty = self._safe_int(qty, 0)
+        price = self._safe_int(price, -1)
+        if booster_id not in BOOSTER_IDS or qty <= 0 or price <= 0:
             return False
-        self.data["weapon_unlocks"][weapon_id] = True
+        if not self.can_afford(price):
+            return False
+        self.data["coins_balance"] -= price
+        key = "{}_balance".format(booster_id)
+        self.data[key] = self.get_booster_balance(booster_id) + qty
         self.save()
         return True
 
-    def purchase_booster(self, booster_id: str, qty: int, price: int) -> bool:
-        if not self.spend_coins(price):
-            return False
-        self.add_booster(booster_id, int(qty))
-        return True
-
     def purchase_squad_bonus(self, target: int, price: int) -> bool:
-        if self.squad_bonus >= target:
+        target = self._safe_int(target, 0)
+        price = self._safe_int(price, -1)
+        if (target <= self.squad_bonus or target > SQUAD_BONUS_MAX
+                or price <= 0):
             return False
         if target > self.max_squad_bonus_for_world(self.max_world_reached):
             return False
-        if not self.spend_coins(price):
+        if not self.can_afford(price):
             return False
-        self.set_squad_bonus(target)
+        self.data["coins_balance"] -= price
+        self.data["squad_bonus"] = target
+        self.save()
         return True
 
     # settings
@@ -326,5 +456,5 @@ class GameState:
         return self.data["settings"].get(key, DEFAULT_SETTINGS.get(key))
 
     def set_setting(self, key, value):
-        self.data["settings"][key] = value
+        self.data["settings"][key] = self._normalise_setting(key, value)
         self.save()

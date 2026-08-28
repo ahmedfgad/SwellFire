@@ -12,7 +12,7 @@ stay reproducible. This document tracks what is automated and how to run it.
 | Windows (desktop) | `build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.exe` on a `windows-latest` runner. |
 | macOS (desktop) | `build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.app` (zipped with `ditto`) on a `macos-14` runner. |
 | Android | `buildozer android debug` | ✅ full build | `android-build.yml` | Unsigned debug `.apk`. Signed Play `.aab` stays local. |
-| iOS | kivy-ios + xcodebuild | ✅ full build | `ios-build.yml` | Unsigned ipa + Xcode project. |
+| iOS | kivy-ios + Xcode 26 | ✅ unsigned build; signed archive ready | `ios-build.yml`, `ios-app-store.yml` | Universal iPhone/iPad; signed workflow requires Apple secrets. |
 | Web (optional) | — | ❌ | — | Out of scope unless requested. |
 
 ## What M15 adds

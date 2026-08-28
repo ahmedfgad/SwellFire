@@ -11,11 +11,12 @@ the real display when Xvfb is absent.
 import os
 import shutil
 import sys
+import tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Virtual screen big enough for a 1080x1920 portrait window with margin.
-_XVFB_SCREEN = "1280x2160x24"
+# Virtual screen big enough for App Store's 2064x2752 iPad capture with margin.
+_XVFB_SCREEN = "2304x3072x24"
 
 
 def have_xvfb():
@@ -30,9 +31,15 @@ def capture_cmd(args):
     return base
 
 
-def capture_env():
-    """Env for a capture subprocess: dummy audio, x11 video under Xvfb."""
+def capture_env(density=None):
+    """Isolated capture env with optional mobile display density."""
     env = dict(os.environ)
+    capture_home = tempfile.mkdtemp(prefix="swellfire-capture-")
+    env["XDG_DATA_HOME"] = capture_home
+    env["XDG_CONFIG_HOME"] = capture_home
+    env["KIVY_HOME"] = os.path.join(capture_home, "kivy")
+    if density is not None:
+        env["KIVY_METRICS_DENSITY"] = str(density)
     env["SDL_AUDIODRIVER"] = "dummy"
     if have_xvfb():
         env["SDL_VIDEODRIVER"] = "x11"

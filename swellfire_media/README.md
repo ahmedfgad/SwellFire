@@ -11,6 +11,8 @@ repo. Install the dev deps once: `venv/bin/pip install -r requirements-media.txt
 | Splash screen | `presplash.png` (repo root) | 1080×1920 |
 | Phone screenshots ×8 | `01..08_*.png` | 720×1280 (portrait) |
 | Tablet screenshots ×8 | `tablet_screenshots/01..08_*.png` | 1080×1920 |
+| App Store iPhone screenshots ×8 | `app_store/iphone_6_9/` | 1284×2778 |
+| App Store iPad screenshots ×8 | `app_store/ipad_13/` | 2064×2752 |
 | Google Play feature graphic | `feature_graphic_1024x500.png` | 1024×500 |
 | YouTube cover | `youtube_thumbnail_1280x720.png` | 1280×720 |
 | Long autoplay video | `swellfire_autoplay_1080p.mp4` | 1080×1920, 60 fps, ~4:11 |
@@ -31,6 +33,7 @@ Run from the repo root with the venv.
 | YouTube cover | `venv/bin/python tools/make_youtube_thumbnail.py` |
 | 8 phone screenshots | `venv/bin/python tools/make_screenshots.py` |
 | 8 tablet screenshots | `venv/bin/python tools/upscale_screenshots.py` |
+| App Store iPhone + iPad screenshots | `venv/bin/python tools/make_app_store_screenshots.py` |
 | long autoplay video | `venv/bin/python tools/make_videos.py long` |
 | promo video | `venv/bin/python tools/make_promo.py` |
 | vertical short | `venv/bin/python tools/make_short.py` |

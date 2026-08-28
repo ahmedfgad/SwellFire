@@ -14,6 +14,7 @@ import sys
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
+from kivy.uix.modalview import ModalView
 from kivy.config import Config
 from kivy.resources import resource_add_path
 
@@ -104,6 +105,7 @@ class SwellfireApp(App):
         self.current_mode = "single"   # "single" | "versus"
         self.mp_net = None       # live NetHost / NetClient during a versus match
         self.mp_seed = 0
+        self._resume_game_after_pause = False
 
     def build(self):
         # State first so AudioManager can read settings on attach.
@@ -140,7 +142,42 @@ class SwellfireApp(App):
         self.sm.add_widget(ui.ShopScreen(name="shop"))
         self.sm.add_widget(game.GameScreen(name="game"))
         self.sm.add_widget(stresstest.StressTestScreen(name="stresstest"))
+        Window.bind(on_keyboard=self._on_keyboard)
         return self.sm
+
+    def _game_screen(self):
+        if self.sm is None:
+            return None
+        try:
+            return self.sm.get_screen("game")
+        except Exception:
+            return None
+
+    def on_pause(self):
+        """Freeze active play and checkpoint state before mobile backgrounding."""
+        self._resume_game_after_pause = False
+        game_screen = self._game_screen()
+        if self.sm is not None and self.sm.current == "game" and game_screen is not None:
+            self._resume_game_after_pause = game_screen.pause_for_lifecycle()
+        if self.state is not None:
+            self.state.save()
+        if self.audio is not None:
+            self.audio.stop_music()
+        # Returning True tells Kivy/Android that the app can be resumed.
+        return True
+
+    def on_resume(self):
+        game_screen = self._game_screen()
+        if (
+            self.sm is not None
+            and self.sm.current == "game"
+            and game_screen is not None
+            and self._resume_game_after_pause
+        ):
+            game_screen.resume_from_lifecycle()
+        elif self.sm is not None and self.sm.current != "game" and self.audio is not None:
+            self.audio.play_menu_music()
+        self._resume_game_after_pause = False
 
     def on_stop(self):
         # Persist whatever changed during the session even if the OS killed us.
@@ -152,6 +189,51 @@ class SwellfireApp(App):
             except Exception:
                 pass
             self.mp_net = None
+        try:
+            from kivy.core.window import Window
+            Window.unbind(on_keyboard=self._on_keyboard)
+        except Exception:
+            pass
+
+    def _on_keyboard(self, _window, key, *_args):
+        """Route Escape/legacy Android Back through the visible app hierarchy."""
+        if key != 27 or self.sm is None:
+            return False
+
+        # Non-auto-dismiss dialogs need an explicit cancel/resume action;
+        # navigating the ScreenManager underneath them leaves an orphan modal.
+        try:
+            from kivy.core.window import Window
+            for child in list(Window.children):
+                if isinstance(child, ModalView) and getattr(child, "_is_open", False):
+                    handler = getattr(child, "handle_back", None)
+                    if handler is not None:
+                        handler()
+                    return True
+        except Exception:
+            return True
+
+        current = self.sm.current
+        screen = self.sm.current_screen
+        if current == "menu":
+            return False
+        if current == "game":
+            if getattr(screen, "_level_ended", False):
+                screen._exit()
+            else:
+                screen._open_pause()
+            return True
+        if current == "levelselect":
+            self.go("worldmap")
+        elif current in ("autoplayer", "stresstest"):
+            self.go("settings")
+        elif current in ("mphost", "mpjoin"):
+            screen._leave()
+        elif current == "tutorial":
+            screen._finish()
+        else:
+            self.go("menu")
+        return True
 
     # --- navigation called by ui screens -----------------------------------
 

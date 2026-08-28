@@ -19,7 +19,6 @@ Not yet here (later milestones, each leaves a runnable build):
 from __future__ import annotations
 
 import math
-import os
 import random
 
 from kivy.animation import Animation
@@ -264,7 +263,7 @@ class _IconStyledButton(ui.StyledButton):
         # Fallback: if the icon file is missing/unloadable, the button still
         # shows its count text — we just skip the glyph rather than crash.
         tex = None
-        if path is not None and os.path.exists(path):
+        if path is not None:
             try:
                 tex = graphics.load_texture(path)
             except Exception:
@@ -349,6 +348,9 @@ class GameScreen(ui.StyledScreen):
     def build(self):
         # Runtime state.
         self._update_event = None
+        self._reset_event = None
+        self._world_intro_event = None
+        self._result_event = None
         self._atlas = None
         self.hero: graphics.AtlasSprite | None = None
         self.distance = 0.0
@@ -431,6 +433,8 @@ class GameScreen(ui.StyledScreen):
         self.overdrive_btn = None
         self.magnet_btn = None
         self.pause_btn = None
+        self.back_btn = None
+        self.booster_row = None
         self.coins_label = None
         # HUD chip-row widgets. Built in build(); None-initialised so the
         # per-frame updater can skip cleanly before the screen is built.
@@ -695,72 +699,62 @@ class GameScreen(ui.StyledScreen):
         self.dc_panel.add_widget(self.dc_label)
         self.root_layout.add_widget(self.dc_panel)
 
-        # Pause button — top-right. CoinTex pattern: "II" double-bar glyph.
+        # Fixed-height mobile controls provide reliable 48dp+ touch targets.
         self.pause_btn = ui.StyledButton(
             text="II", bg=[0.30, 0.30, 0.40, 0.95], font_size=sp(20), bold=True,
-            size_hint=(0.07, 0.08), pos_hint={"right": 0.98, "top": 0.99},
+            size_hint=(None, None), size=(dp(52), dp(52)),
+            pos_hint={"right": 0.98, "top": 0.99},
         )
         self.pause_btn.bind(on_release=lambda *_: self._open_pause())
         self.root_layout.add_widget(self.pause_btn)
 
-        # Auto-play toggle (top-left). When green the GA is driving.
         self.auto_btn = ui.StyledButton(
             text="Auto: Off", bg=[0.45, 0.45, 0.5, 1], font_size=sp(14), bold=True,
-            size_hint=(0.14, 0.08), pos_hint={"x": 0.02, "top": 0.99},
+            size_hint=(None, None), size=(dp(100), dp(52)),
+            pos_hint={"x": 0.02, "top": 0.99},
         )
         self.auto_btn.bind(on_release=lambda *_: self._toggle_auto())
         self.root_layout.add_widget(self.auto_btn)
 
-        # Back button (bottom right)
-        self.back_btn = ui.StyledButton(
-            text="Back", bg=[0.45, 0.45, 0.5, 1], font_size=sp(16),
-            size_hint=(0.14, 0.08), pos_hint={"right": 0.98, "y": 0.03},
+        # Quit/Shop live in Pause, so the old bottom Back control was
+        # redundant and squeezed all six boosters below mobile touch guidance.
+        self.back_btn = None
+        self.booster_row = BoxLayout(
+            orientation="horizontal", spacing=dp(4),
+            size_hint=(0.96, None), height=dp(58),
+            pos_hint={"x": 0.02, "y": 0.045},
         )
-        self.back_btn.bind(on_release=lambda *_: self._exit())
-        self.root_layout.add_widget(self.back_btn)
+        self.root_layout.add_widget(self.booster_row)
 
-        # Bottom-left touch HUD: grenade + shield buttons. Visible during
-        # gameplay; tap to fire/activate. Counts update every frame; greyed
-        # out when the player has none.
         self.grenade_btn = _IconStyledButton(
-            "grenade",
-            text="0", bg=[0.20, 0.80, 0.95, 1], font_size=sp(14),
-            size_hint=(0.10, 0.10),
-            pos_hint={"x": 0.02, "y": 0.03},
+            "grenade", text="0", bg=[0.20, 0.80, 0.95, 1],
+            size_hint=(1, 1),
         )
         self.grenade_btn.bind(on_release=lambda *_: self._detonate_grenade())
-        self.root_layout.add_widget(self.grenade_btn)
+        self.booster_row.add_widget(self.grenade_btn)
 
         self.shield_btn = _IconStyledButton(
-            "shield",
-            text="0", bg=[0.50, 0.85, 1.00, 1], font_size=sp(14),
-            size_hint=(0.10, 0.10),
-            pos_hint={"x": 0.14, "y": 0.03},
+            "shield", text="0", bg=[0.50, 0.85, 1.00, 1],
+            size_hint=(1, 1),
         )
         self.shield_btn.bind(on_release=lambda *_: self._activate_shield())
-        self.root_layout.add_widget(self.shield_btn)
+        self.booster_row.add_widget(self.shield_btn)
 
-        # New consumable boosters continue the bottom-left row. Each binds to
-        # its activation; counts + active countdowns update in _update_hud.
-        for kind, x, activate in (
-            ("reinforce", 0.26, self._activate_reinforce),
-            ("freeze",    0.38, self._activate_freeze),
-            ("overdrive", 0.50, self._activate_overdrive),
-            ("magnet",    0.62, self._activate_magnet),
+        for kind, activate in (
+            ("reinforce", self._activate_reinforce),
+            ("freeze", self._activate_freeze),
+            ("overdrive", self._activate_overdrive),
+            ("magnet", self._activate_magnet),
         ):
-            # Background is a *darkened* version of the booster's hue so the
-            # bright same-hue icon stays clearly visible (a same-color bg made
-            # the icon look hidden); the colour identity is preserved.
             btn = _IconStyledButton(
                 kind,
                 text="0", bg=_dim_color(boosters.BOOSTERS[kind].hud_color),
-                font_size=sp(14),
-                size_hint=(0.10, 0.10),
-                pos_hint={"x": x, "y": 0.03},
+                size_hint=(1, 1),
             )
             btn.bind(on_release=lambda *_a, _f=activate: _f())
-            self.root_layout.add_widget(btn)
+            self.booster_row.add_widget(btn)
             setattr(self, "{}_btn".format(kind), btn)
+
 
     # --- layout ----------------------------------------------------------
 
@@ -1126,7 +1120,9 @@ class GameScreen(ui.StyledScreen):
 
         # Stage might be size 0 right after on_enter; do the actual reset on
         # the next frame so positions are real.
-        Clock.schedule_once(self._reset, 0)
+        if self._reset_event is not None:
+            self._reset_event.cancel()
+        self._reset_event = Clock.schedule_once(self._reset, 0)
 
         # Once-per-world shop nudge (Task 6): on entering the first level of a
         # new world (W2..W6), remind the player they can upgrade in the shop.
@@ -1139,10 +1135,14 @@ class GameScreen(ui.StyledScreen):
             flag = "intro_seen_w{}".format(world)
             if world >= 2 and in_world == 1 and not running.state.get_setting(flag):
                 running.state.set_setting(flag, True)
-                Clock.schedule_once(lambda *_: self._show_world_intro(world), 0.05)
+                self._world_intro_event = Clock.schedule_once(
+                    lambda *_: self._show_world_intro(world), 0.05
+                )
 
     def _show_world_intro(self, world: int) -> None:
-        if self._level_ended:
+        self._world_intro_event = None
+        if (self._level_ended or self.manager is None
+                or self.manager.current != self.name):
             return
         self.paused = True
         try:
@@ -1171,6 +1171,15 @@ class GameScreen(ui.StyledScreen):
                            on_shop=go_shop, on_continue=later).open()
 
     def on_leave(self):
+        for event_name in ("_reset_event", "_world_intro_event", "_result_event"):
+            event = getattr(self, event_name, None)
+            if event is not None:
+                event.cancel()
+                setattr(self, event_name, None)
+        if getattr(self, "_end_banner", None) is not None:
+            if self._end_banner.parent is not None:
+                self._end_banner.parent.remove_widget(self._end_banner)
+            self._end_banner = None
         if self._update_event is not None:
             self._update_event.cancel()
             self._update_event = None
@@ -1255,6 +1264,9 @@ class GameScreen(ui.StyledScreen):
         self._dragging = False
 
     def _reset(self, _dt):
+        self._reset_event = None
+        if self.manager is None or self.manager.current != self.name:
+            return
         self.distance = 0.0
         if self.formation_spawner is not None:
             self.formation_spawner.reset_per_level(0.0)
@@ -2509,8 +2521,10 @@ class GameScreen(ui.StyledScreen):
 
         # Show the banner immediately; dialog opens after a short pause.
         self._show_end_banner(won)
-        Clock.schedule_once(
-            lambda dt: self._open_result_dialog(won, stars, score, level_cfg, level_index),
+        self._result_event = Clock.schedule_once(
+            lambda dt: self._open_result_dialog(
+                won, stars, score, level_cfg, level_index
+            ),
             1.0,
         )
 
@@ -2531,6 +2545,9 @@ class GameScreen(ui.StyledScreen):
 
     def _open_result_dialog(self, won: bool, stars: int, score: int,
                             level_cfg, level_index) -> None:
+        self._result_event = None
+        if self.manager is None or self.manager.current != self.name:
+            return
         # Dismiss the banner before the modal opens so we don't stack.
         if hasattr(self, "_end_banner") and self._end_banner is not None:
             if self._end_banner.parent is not None:
@@ -2660,6 +2677,26 @@ class GameScreen(ui.StyledScreen):
             return True
         return False
 
+    def _consume_booster(self, booster_id: str) -> bool:
+        """Consume and persist one shop booster before applying its effect."""
+        if booster_id not in boosters.BOOSTERS:
+            return False
+        attr = "{}_count".format(booster_id)
+        current = max(0, int(getattr(self, attr, 0)))
+        if current <= 0:
+            return False
+        remaining = current - 1
+        running = ui.app()
+        if (
+            running is not None
+            and running.state is not None
+            and running.current_mode == "single"
+        ):
+            persisted = running.state.get_booster_balance(booster_id)
+            running.state.add_booster(booster_id, remaining - persisted)
+        setattr(self, attr, remaining)
+        return True
+
     def _activate_shield(self) -> None:
         if self._level_ended:
             return
@@ -2669,7 +2706,7 @@ class GameScreen(ui.StyledScreen):
         # Don't waste a shield if one is already up.
         if self.shield_active_until > self._run_time:
             return
-        self.shield_count -= 1
+        self._consume_booster("shield")
         self.shield_active_until = self._run_time + boosters.SHIELD_DURATION_SEC
         ui.app().audio.play_sfx("shield")
         # Glowing shield bubble around the hero (prettier than a flat tint);
@@ -2707,7 +2744,7 @@ class GameScreen(ui.StyledScreen):
         if self.squad_count >= MAX_SQUAD:
             self._booster_unavailable("reinforce", message="SQUAD FULL!")
             return
-        self.reinforce_count -= 1
+        self._consume_booster("reinforce")
         self._apply_reinforce_effect(1)
 
     def _apply_freeze_effect(self, scale: int = 1) -> None:
@@ -2731,7 +2768,7 @@ class GameScreen(ui.StyledScreen):
             return
         if self.freeze_active_until > self._run_time:
             return
-        self.freeze_count -= 1
+        self._consume_booster("freeze")
         self._apply_freeze_effect(1)
 
     def _apply_overdrive_effect(self, scale: int = 1) -> None:
@@ -2757,7 +2794,7 @@ class GameScreen(ui.StyledScreen):
             return
         if self.overdrive_active_until > self._run_time:
             return
-        self.overdrive_count -= 1
+        self._consume_booster("overdrive")
         self._apply_overdrive_effect(1)
 
     def _apply_magnet_effect(self, scale: int = 1) -> None:
@@ -2782,7 +2819,7 @@ class GameScreen(ui.StyledScreen):
             return
         if self.magnet_active_until > self._run_time:
             return
-        self.magnet_count -= 1
+        self._consume_booster("magnet")
         self._apply_magnet_effect(1)
 
     def _booster_burst(self, r: float, g: float, b: float) -> None:
@@ -2915,13 +2952,13 @@ class GameScreen(ui.StyledScreen):
         if self.grenade_count <= 0:
             self._booster_unavailable("grenade")
             return
-        self.grenade_count -= 1
+        self._consume_booster("grenade")
         self._apply_grenade_effect(1)
 
     # --- input ------------------------------------------------------------
 
     def on_touch_down(self, touch):
-        # Let child widgets (Back button) consume the touch first.
+        # Let the HUD controls consume the touch first.
         if super().on_touch_down(touch):
             return True
         # Drag starts when the touch lands in the stage and a hero exists.
@@ -2963,6 +3000,10 @@ class GameScreen(ui.StyledScreen):
     def _exit_to(self, destination):
         """Leave the level. ``destination`` forces a target screen (e.g.
         "shop" from the pause menu); otherwise route by mode as usual."""
+        self._level_ended = True
+        if self._update_event is not None:
+            self._update_event.cancel()
+            self._update_event = None
         # Cut the GA loose if we're leaving the level — it'll re-start on
         # the next _reset if auto_mode is still on.
         if self.auto is not None:
@@ -3877,9 +3918,7 @@ class GameScreen(ui.StyledScreen):
             self.debug.opacity = 1.0 if show else 0.0
 
     def _apply_top_safe_inset(self) -> None:
-        """Shift the top-center HUD (progress bar + 2x-coins timer) down by the
-        player's safe-area inset so a notch / dynamic island doesn't cover them.
-        The stats top bar is intentionally left at the very top."""
+        """Keep every top HUD element below notches and edge-to-edge bars."""
         running = ui.app()
         inset = running.state.get_setting("top_safe_inset") \
             if (running and running.state) else 0.0
@@ -3888,14 +3927,20 @@ class GameScreen(ui.StyledScreen):
         except (TypeError, ValueError):
             inset = 0.0
         inset = max(0.0, min(TOP_SAFE_INSET_MAX, inset))
-        if self.dist_bar_holder is not None:
-            ph = dict(self.dist_bar_holder.pos_hint)
-            ph["top"] = DIST_BAR_TOP - inset
-            self.dist_bar_holder.pos_hint = ph
-        if self.dc_panel is not None:
-            ph = dict(self.dc_panel.pos_hint)
-            ph["top"] = DC_PANEL_TOP - inset
-            self.dc_panel.pos_hint = ph
+        for widget, default_top in (
+            (self.top_bar, 1.0),
+            (self.chip_row, 0.91),
+            (self.debug, 0.79),
+            (self.dist_bar_holder, DIST_BAR_TOP),
+            (self.dc_panel, DC_PANEL_TOP),
+            (self.pause_btn, 0.99),
+            (self.auto_btn, 0.99),
+        ):
+            if widget is None:
+                continue
+            pos_hint = dict(widget.pos_hint)
+            pos_hint["top"] = default_top - inset
+            widget.pos_hint = pos_hint
 
     def _level_progress(self) -> float:
         """Fraction of the level completed (0..1), for the top progress bar.
@@ -4070,6 +4115,28 @@ class GameScreen(ui.StyledScreen):
             Animation(a=0.45, duration=0.18).start(self._pause_dim_color)
         elif getattr(self, "_pause_dim", None) is not None:
             Animation(a=0.0, duration=0.18).start(self._pause_dim_color)
+
+    def pause_for_lifecycle(self) -> bool:
+        """Freeze an active run while Android/iOS moves to the background."""
+        if self._level_ended or self.paused:
+            return False
+        self.paused = True
+        self._dragging = False
+        if self.auto is not None:
+            self.auto.stop()
+        self._show_pause_dim(True)
+        return True
+
+    def resume_from_lifecycle(self) -> None:
+        """Resume only a run that this app lifecycle handler paused."""
+        if self._level_ended:
+            return
+        self._show_pause_dim(False)
+        self._resume()
+        if self.auto_mode:
+            if self.auto is None:
+                self.auto = autoplay.AutoPlayer(self)
+            self.auto.start()
 
     def _open_pause(self) -> None:
         """Open the pause modal (Resume / Shop / Quit). Update loop respects

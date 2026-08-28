@@ -9,8 +9,9 @@ import os
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC = os.path.join(ROOT, "swellfire_media", "re", "swellfire_youtube_cover.png")
+RAW_SRC = os.path.join(ROOT, "swellfire_media", "re", "swellfire_youtube_cover.png")
 OUT = os.path.join(ROOT, "swellfire_media", "youtube_thumbnail_1280x720.png")
+SRC = RAW_SRC if os.path.exists(RAW_SRC) else OUT
 
 
 def make():

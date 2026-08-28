@@ -7,7 +7,6 @@
 # menu, host, join). Content is rewritten for the Swellfire gate-runner /
 # squad-multiplier loop.
 
-import os
 import random
 import threading
 
@@ -225,10 +224,33 @@ class StyledButton(ButtonBehavior, Label):
         self._color.rgba = self.bg
 
 
-class ConfirmDialog(ModalView):
+class _AppModal(ModalView):
+    """Modal with one explicit action for system Back/Escape."""
+
+    def __init__(self, **kwargs):
+        self._back_action = None
+        self._back_handled = False
+        super().__init__(**kwargs)
+
+    def set_back_action(self, callback):
+        self._back_action = callback
+
+    def handle_back(self):
+        if self._back_handled:
+            return True
+        self._back_handled = True
+        callback = self._back_action
+        self.dismiss()
+        if callback is not None:
+            callback()
+        return True
+
+
+class ConfirmDialog(_AppModal):
     def __init__(self, message, on_yes, yes_text="Yes", no_text="No",
                  on_no=None, *, markup: bool = False, **kwargs):
         super().__init__(size_hint=(0.78, 0.52), auto_dismiss=False, **kwargs)
+        self.set_back_action(on_no)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(16))
         with box.canvas.before:
             Color(0.12, 0.14, 0.22, 0.98)
@@ -262,7 +284,7 @@ class ConfirmDialog(ModalView):
         _fade_in_modal(self)
 
 
-class InfoDialog(ModalView):
+class InfoDialog(_AppModal):
     """Simple titled message box with one OK button.
 
     Used for the one-shot hints (first gate seen, first boss seen, etc.).
@@ -270,6 +292,7 @@ class InfoDialog(ModalView):
 
     def __init__(self, title, message, on_ok=None, ok_text="Got it", **kwargs):
         super().__init__(size_hint=(0.82, 0.5), auto_dismiss=False, **kwargs)
+        self.set_back_action(on_ok)
         box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
         with box.canvas.before:
             Color(0.12, 0.14, 0.22, 0.98)
@@ -307,13 +330,14 @@ def _fade_in_modal(modal, duration: float = 0.18) -> None:
     modal.bind(on_open=_on_open)
 
 
-class WorldIntroModal(ModalView):
+class WorldIntroModal(_AppModal):
     """Once-per-world shop nudge shown on entering the first level of a new
     world (worlds 2..6). Reminds the player they can upgrade their weapon and
     grow their squad in the shop now that tougher enemies are coming."""
 
     def __init__(self, world, max_tier, on_shop=None, on_continue=None, **kwargs):
         super().__init__(size_hint=(0.82, 0.5), auto_dismiss=False, **kwargs)
+        self.set_back_action(on_continue)
         box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
         with box.canvas.before:
             Color(0.12, 0.14, 0.22, 0.98)
@@ -351,7 +375,7 @@ class WorldIntroModal(ModalView):
         _fade_in_modal(self)
 
 
-class PauseDialog(ModalView):
+class PauseDialog(_AppModal):
     """In-level pause menu: Resume / Shop / Quit, each an icon + button."""
 
     _ICONS = {
@@ -362,6 +386,7 @@ class PauseDialog(ModalView):
 
     def __init__(self, on_resume, on_shop, on_quit, **kwargs):
         super().__init__(size_hint=(0.72, 0.62), auto_dismiss=False, **kwargs)
+        self.set_back_action(on_resume)
         box = BoxLayout(orientation="vertical", padding=dp(22), spacing=dp(14))
         with box.canvas.before:
             Color(0.12, 0.14, 0.22, 0.98)
@@ -375,7 +400,7 @@ class PauseDialog(ModalView):
             row = BoxLayout(orientation="horizontal", spacing=dp(12),
                             size_hint_y=0.26)
             path = self._ICONS.get(icon_key)
-            if path and os.path.exists(path):
+            if path:
                 row.add_widget(graphics.TextureSprite(
                     path, size_hint=(None, 1), width=dp(46)))
             btn = StyledButton(text=label, bg=bg)
@@ -465,7 +490,7 @@ def _add_stat_row(grid, label_text: str, value_text: str, *,
     )))
 
 
-class LevelResultDialog(ModalView):
+class LevelResultDialog(_AppModal):
     """Modal shown at level end: title, stars (if won), score, action buttons."""
 
     def __init__(self, won: bool, stars: int, score: int, level_label: str,
@@ -478,6 +503,7 @@ class LevelResultDialog(ModalView):
         versus = opponent_stats is not None
         # Slightly taller now to fit the stats block + the two-row button area.
         super().__init__(size_hint=(0.80, 0.84), auto_dismiss=False, **kwargs)
+        self.set_back_action(on_roadmap or on_menu)
         box = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         with box.canvas.before:
             Color(0.10, 0.12, 0.18, 0.98)
@@ -2193,9 +2219,14 @@ class HostScreen(StyledScreen):
             self.net.start_listening()
             self.addr_label.text = "Same Wi-Fi address\n{}   port {}".format(
                 net.get_local_ip(), self.net.port)
-        except Exception as error:
+        except Exception:
+            if self.net is not None:
+                self.net.stop()
+            self.net = None
             self.addr_label.text = "Could not start hosting."
-            self.status.text = str(error)
+            self.status.text = ("Port {} is unavailable. Close any other host "
+                                "and try again.".format(net.DEFAULT_PORT))
+            app().audio.play_sfx("error")
 
     def _fetch_public_ip(self, token, port):
         ip = net.get_public_ip()
@@ -2232,6 +2263,8 @@ class HostScreen(StyledScreen):
                 msg = self.net.inbox.get_nowait()
             except Exception:
                 break
+            if not isinstance(msg, dict):
+                continue
             kind = msg.get("t")
             if kind == "_connected":
                 self.status.text = "A player is connecting..."
@@ -2285,6 +2318,7 @@ class JoinScreen(StyledScreen):
         self.ip_input = TextInput(text="", multiline=False, font_size=sp(20),
                                   size_hint_y=None, height=INPUT_HEIGHT,
                                   write_tab=False)
+        self.ip_input.bind(on_text_validate=lambda *_: self._connect())
         box.add_widget(self.ip_input)
         self.status = Label(text="", font_size=sp(15), color=[1, 1, 1, 0.9],
                             size_hint_y=None, height=dp(48))
@@ -2318,9 +2352,12 @@ class JoinScreen(StyledScreen):
             self.net = None
 
     def _connect(self):
+        if self.connect_btn.disabled:
+            return
         ip = self.ip_input.text.strip()
         if not ip:
             self.status.text = "Please type the host's address."
+            app().audio.play_sfx("error")
             return
         self.status.text = "Connecting..."
         self.connect_btn.disabled = True
@@ -2337,9 +2374,12 @@ class JoinScreen(StyledScreen):
                 msg = self.net.inbox.get_nowait()
             except Exception:
                 break
+            if not isinstance(msg, dict):
+                continue
             kind = msg.get("t")
             if kind == "_connect_failed":
                 self.status.text = "Could not connect. Check the address and Wi-Fi."
+                app().audio.play_sfx("error")
                 self.connect_btn.disabled = False
                 self.net.stop()
                 self.net = None
@@ -2349,6 +2389,7 @@ class JoinScreen(StyledScreen):
             elif kind == "start":
                 if msg.get("version") != net.PROTOCOL_VERSION:
                     self.status.text = "The host has a different game version."
+                    app().audio.play_sfx("error")
                     self.connect_btn.disabled = False
                     self.net.stop()
                     self.net = None
@@ -2359,6 +2400,7 @@ class JoinScreen(StyledScreen):
                 return
             elif kind in ("leave", "_disconnected"):
                 self.status.text = "The host closed the game."
+                app().audio.play_sfx("error")
                 self.connect_btn.disabled = False
                 self.net.stop()
                 self.net = None

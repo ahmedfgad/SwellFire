@@ -16,8 +16,7 @@ def test_icon_is_512_square_rgba_nonblank():
 def test_presplash_matches_source_size():
     # presplash is the hand-authored portrait splash from swellfire_media/re/.
     img = g.make_presplash()
-    src = Image.open(os.path.join(ROOT, "swellfire_media", "re",
-                                  "swellfire_presplash.png"))
+    src = Image.open(g.PRESPLASH_SRC)
     assert img.size == src.size
 
 

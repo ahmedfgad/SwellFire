@@ -1,0 +1,3 @@
+# Python-for-android's Python 3.14 host build bundles pip 25.3. Upgrading that
+# temporary venv to pip 26 currently leaves mixed internals during cross-builds.
+pip==25.3

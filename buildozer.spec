@@ -20,11 +20,14 @@ source.include_exts = py,png,wav,json,atlas
 # auto-player and pulls in pygad+numpy. tools/ is dev-only.
 source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache__, PlayerGA, tools, assets/raw, swellfire_media
 
+# Root-level regression tests are not runtime code and must not inflate the app.
+source.exclude_patterns = test_*.py
+
 # Version shown to users.
-version = 1.0
+version = 1.0.1
 
 # Packages the app needs. Networking uses the Python standard library.
-requirements = python3,kivy
+requirements = python3,kivy,certifi
 
 # The 2-player feature opens a network connection between the two devices.
 android.permissions = INTERNET
@@ -38,8 +41,16 @@ icon.filename = %(source.dir)s/icon.png
 # Screen orientation.
 orientation = portrait
 
-# Run the app full screen.
+# Run the app full screen. Android 16 enforces edge-to-edge, so the Kivy HUD
+# applies its persisted safe-area inset to every top control.
 fullscreen = 1
+
+# The pinned Kivy/SDL activity still consumes legacy Back key events. API 36
+# otherwise stops dispatching those events when predictive Back is enabled, so
+# use Android's documented temporary migration opt-out. appCategory=game is
+# semantically correct and preserves the portrait-first game layout on large
+# Android 16 screens while the shared Kivy UI remains freely resizable.
+android.extra_manifest_application_arguments = android/manifest_application_attributes.xml
 
 
 # Android settings
@@ -58,9 +69,9 @@ android.ndk = 28c
 android.ndk_api = 21
 
 # API 36 support depends on the modern python-for-android toolchain. Keep the
-# upstream develop branch selected as Buildozer recommends, but pin the checkout
-# to the signed v2026.05.09 release so local and CI builds are reproducible.
-p4a.branch = develop
+# upstream branch that contains the signed v2026.05.09 release commit selected,
+# then pin the exact checkout so local and CI builds are reproducible.
+p4a.branch = master
 p4a.commit = 58d21141f17c889bf8585f5665921d72028f8831
 
 # Build for 64-bit and 32-bit. Google Play requires the 64-bit arm64-v8a.

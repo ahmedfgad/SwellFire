@@ -12,7 +12,7 @@ from pathlib import Path
 MIN_TARGET_API = 36
 MIN_VERSION_CODE = 10001
 PINNED_NDK = "28c"
-PINNED_P4A_BRANCH = "develop"
+PINNED_P4A_BRANCH = "master"
 PINNED_P4A_COMMIT = "58d21141f17c889bf8585f5665921d72028f8831"
 
 
@@ -80,6 +80,37 @@ def main() -> int:
             "p4a.commit must pin the approved API 36 toolchain commit "
             f"{PINNED_P4A_COMMIT}"
         )
+
+    manifest_args = value("android.extra_manifest_application_arguments")
+    expected_manifest_args = "android/manifest_application_attributes.xml"
+    if manifest_args != expected_manifest_args:
+        errors.append(
+            "android.extra_manifest_application_arguments must reference "
+            f"{expected_manifest_args!r}"
+        )
+    else:
+        manifest_path = project_dir / manifest_args
+        try:
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"could not read {manifest_path}: {error}")
+        else:
+            required_attributes = (
+                'android:appCategory="game"',
+                'android:enableOnBackInvokedCallback="false"',
+            )
+            for attribute in required_attributes:
+                if attribute not in manifest_text:
+                    errors.append(
+                        f"{manifest_path} must contain {attribute} for API 36"
+                    )
+
+    exclude_patterns = {
+        pattern.strip()
+        for pattern in value("source.exclude_patterns").split(",")
+    }
+    if "test_*.py" not in exclude_patterns:
+        errors.append("source.exclude_patterns must exclude root test_*.py files")
 
     archs = {arch.strip() for arch in value("android.archs").split(",")}
     if "arm64-v8a" not in archs:
