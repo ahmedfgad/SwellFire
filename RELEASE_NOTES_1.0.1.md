@@ -31,9 +31,5 @@ across phones, tablets and desktop systems.
 - `Swellfire-1.0.1-android.apk` is the signed Android release APK.
 - `Swellfire-1.0.1-linux-x86_64` is the standalone 64-bit Linux application.
 
-The Android signing identity changed for this release. Android will not install
-it over an older APK downloaded from GitHub; uninstall that copy first, then
-install 1.0.1. Uninstalling removes its locally saved game progress.
-
 The Linux download may need executable permission after downloading:
 `chmod +x Swellfire-1.0.1-linux-x86_64`.

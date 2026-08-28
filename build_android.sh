@@ -47,6 +47,7 @@ VENV_DIR="venv"
 KEYSTORE_FILE="$PROJECT_DIR/swellfire-upload.keystore"
 KEYSTORE_ALIAS="swellfire-upload"
 ENV_FILE="$PROJECT_DIR/.env"
+EXPECTED_UPLOAD_CERT_SHA256="564b9f2769f6bd80eda784cb29886cc28f0375531d653718e4c3e52f7c889b96"
 
 # Make sure the venv and buildozer are ready.
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -82,40 +83,41 @@ if [[ "$MODE" == "debug" ]]; then
     exit 0
 fi
 
-# Create the upload key the first time. A PKCS12 keystore (the modern default)
-# uses one password for both the store and the key, so we generate a single one.
-if [[ ! -f "$ENV_FILE" ]]; then
-    echo "Creating signing details in .env. Keep this file private and backed up."
-    PW="$(python -c "import secrets; print(secrets.token_urlsafe(24))")"
-    {
-        echo "KEYSTORE_PATH=$KEYSTORE_FILE"
-        echo "KEYSTORE_ALIAS=$KEYSTORE_ALIAS"
-        echo "KEYSTORE_PASSWORD=$PW"
-    } > "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
+# Swellfire already has a production upload identity. Never create a new key
+# automatically: doing so produces a valid-looking build that Google Play and
+# existing direct installs will reject.
+if [[ ! -f "$ENV_FILE" || ! -f "$KEYSTORE_FILE" ]]; then
+    echo "Swellfire production signing files are missing." >&2
+    echo "Restore .env and swellfire-upload.keystore from the secure backup." >&2
+    exit 1
 fi
 # shellcheck disable=SC1091
 source "$ENV_FILE"
+: "${KEYSTORE_PASSWORD:?KEYSTORE_PASSWORD is missing from .env}"
+: "${KEYSTORE_ALIAS:?KEYSTORE_ALIAS is missing from .env}"
 
-if [[ ! -f "$KEYSTORE_FILE" ]]; then
-    echo "Creating the upload keystore: $KEYSTORE_FILE"
-    keytool -genkeypair -v \
+ACTUAL_UPLOAD_CERT_SHA256="$(
+    keytool -exportcert \
         -keystore "$KEYSTORE_FILE" \
         -alias "$KEYSTORE_ALIAS" \
-        -keyalg RSA -keysize 2048 -validity 10000 \
-        -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" \
-        -dname "CN=Ahmed Gad, OU=Swellfire, O=Swellfire, L=Unknown, ST=Unknown, C=US"
-
-    echo "Exporting upload_certificate.pem for Play Console"
-    keytool -export -rfc \
-        -keystore "$KEYSTORE_FILE" \
-        -alias "$KEYSTORE_ALIAS" \
-        -storepass "$KEYSTORE_PASSWORD" \
-        -file "$PROJECT_DIR/upload_certificate.pem"
-
-    echo "Back up swellfire-upload.keystore and .env now. Without them you cannot"
-    echo "sign new uploads. See SIGNING.md for details."
+        -storepass "$KEYSTORE_PASSWORD" 2>/dev/null \
+        | sha256sum | awk '{print $1}'
+)"
+if [[ "$ACTUAL_UPLOAD_CERT_SHA256" != "$EXPECTED_UPLOAD_CERT_SHA256" ]]; then
+    echo "Refusing to build with an unrecognized Android signing key." >&2
+    echo "Expected certificate SHA-256: $EXPECTED_UPLOAD_CERT_SHA256" >&2
+    echo "Actual certificate SHA-256:   $ACTUAL_UPLOAD_CERT_SHA256" >&2
+    exit 1
 fi
+if [[ -f "$PROJECT_DIR/upload_certificate.pem" ]]; then
+    PEM_CERT_SHA256="$(openssl x509 -in "$PROJECT_DIR/upload_certificate.pem" \
+        -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+    if [[ "$PEM_CERT_SHA256" != "$EXPECTED_UPLOAD_CERT_SHA256" ]]; then
+        echo "upload_certificate.pem does not match the production key." >&2
+        exit 1
+    fi
+fi
+echo "Verified Swellfire production upload certificate: $EXPECTED_UPLOAD_CERT_SHA256"
 
 # Pass the keystore to python-for-android. The key password is the same as the
 # store password because the keystore is in PKCS12 format.
