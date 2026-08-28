@@ -1250,9 +1250,9 @@ class ShopItemCard(ButtonBehavior, BoxLayout):
     def _build_weapon_right_column(self, right):
         """Special right-column layout for weapon cards."""
         tier = self.weapon_tier
-        # Top: tier indicator "Lv 2 / 4"
+        # Top: tier indicator.
         tier_lbl = Label(
-            text="[b]Lv {} / 4[/b]".format(tier),
+            text="[b]Lv {} / {}[/b]".format(tier, weapons.MAX_TIER),
             font_size=sp(18), color=(1, 1, 1, 0.92), markup=True,
             halign="center", valign="middle",
             size_hint_y=0.30,

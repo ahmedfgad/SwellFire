@@ -356,6 +356,15 @@ class FormationSpawner:
 
     EDGE = 40.0          # world-px inset from each rail
     SPAWN_ABOVE_TOP = 30.0
+    # Mixed formations need bounded burst pressure. Without per-rank caps a
+    # legal random roll could fill every column with tanks, bombers, or four-
+    # unit swarmer clusters and turn the same level from easy to impossible.
+    MIXED_RANK_CAPS = {
+        TYPE_TANK: 1,
+        TYPE_BOMBER: 1,
+        TYPE_SPLITTER: 1,
+        TYPE_SWARMER: 1,
+    }
 
     def __init__(self, controller: "EnemyController", seed: int | None = None):
         self.controller = controller
@@ -366,10 +375,13 @@ class FormationSpawner:
         self.enemy_hp = 1
         self.hp_scale = 1.0
         self.spawn_table: list[tuple[int, float]] = [(TYPE_GRUNT, 1.0)]
+        # Opening grace expressed in the same scroll-distance domain as ranks.
+        # GameScreen sets this from the intended per-world intro delay.
+        self.intro_distance_px = 0.0
         self._last_spawn_distance = 0.0
 
     def reset_per_level(self, distance: float) -> None:
-        self._last_spawn_distance = distance
+        self._last_spawn_distance = distance + max(0.0, self.intro_distance_px)
 
     def update(self, distance: float, x_min: float, y_min: float,
                x_max: float, y_max: float) -> int:
@@ -417,8 +429,23 @@ class FormationSpawner:
                     x_max: float, y_max: float) -> None:
         spawn_y = y_max + graphics.ws(self.SPAWN_ABOVE_TOP)
         cell = self._max_cell_size()
+        rank_counts: dict[int, int] = {}
+        mixed_rank = len(self.spawn_table) > 1
+        special_cells = 0
+        max_special_cells = max(1, int(self.columns) // 3)
         for cx in self._column_xs(x_min, x_max, cell):
             enemy_type = self._pick_type()
+            cap = self.MIXED_RANK_CAPS.get(enemy_type)
+            over_type_cap = (cap is not None
+                             and rank_counts.get(enemy_type, 0) >= cap)
+            over_special_cap = (enemy_type != TYPE_GRUNT
+                                and special_cells >= max_special_cells)
+            if mixed_rank and (over_type_cap or over_special_cap):
+                enemy_type = TYPE_GRUNT
+            elif enemy_type != TYPE_GRUNT:
+                special_cells += 1
+            rank_counts[enemy_type] = rank_counts.get(enemy_type, 0) + 1
+
             arch = ARCHETYPES[enemy_type]
             hp = max(1, int(round(self.enemy_hp * arch["hp_mult"] * self.hp_scale)))
             size = graphics.ws(float(arch["size"])) * hp_size_factor(hp)
@@ -685,6 +712,28 @@ def find_nearest_threat(hero_cx: float, hero_cy: float,
             best_front = score
             best_idx = i
     return best_idx
+
+
+def find_nearest_threats(hero_cx: float, hero_cy: float,
+                         enemy_controller: EnemyController,
+                         max_front: float, max_count: int) -> list[int]:
+    """Return the most urgent enemies in range, nearest threat first.
+
+    This lets a squad divide a volley across a bounded number of targets
+    instead of wasting every projectile on the same low-HP enemy.
+    """
+    pool = enemy_controller.pool
+    scored: list[tuple[float, int]] = []
+    for i in range(pool.capacity):
+        if not pool.active[i]:
+            continue
+        front = pool.cy[i] - hero_cy
+        if front < 0.0 or front > max_front:
+            continue
+        score = front + abs(pool.cx[i] - hero_cx) * 0.30
+        scored.append((score, i))
+    scored.sort(key=lambda item: item[0])
+    return [i for _, i in scored[:max(1, int(max_count))]]
 
 
 def fire_weapon(hero_cx: float, hero_cy: float, muzzle_offset_y: float,

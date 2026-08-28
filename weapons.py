@@ -63,16 +63,28 @@ WEAPONS: dict[str, Weapon] = {
 ORDERED_IDS: list[str] = list(WEAPONS.keys())
 
 # Weapon tier scaling. Tier 1 is the base weapon (free for all); each
-# higher tier multiplies projectile damage. Index by tier 1..4 so the
-# zero slot is unused.
+# higher tier increases projectile damage. Index by tier 1..MAX_TIER; the zero
+# slot is unused.
 MAX_TIER = 6
 TIER_DAMAGE_MULT: list[float] = [None, 1.0, 1.5, 2.0, 3.0, 4.0, 5.5]
+TIER_DAMAGE_FLOOR_BONUS: list[int] = [None, 0, 1, 2, 3, 5, 7]
 
 
 def tier_damage(weapon: "Weapon", tier: int) -> int:
     """Effective damage for `weapon` at tier `tier` (clamped to MAX_TIER)."""
     tier = max(1, min(MAX_TIER, int(tier)))
-    return max(1, int(round(weapon.damage * TIER_DAMAGE_MULT[tier])))
+    scaled = int(round(weapon.damage * TIER_DAMAGE_MULT[tier]))
+    # Low-base-damage automatic weapons used to repeat the same integer damage
+    # at adjacent tiers (for example rifle T2 and T3 both dealt 2). Every paid
+    # tier must be a real upgrade, while high-damage weapons retain their
+    # multiplier curve.
+    return max(1, weapon.damage + TIER_DAMAGE_FLOOR_BONUS[tier], scaled)
+
+
+def combat_power(weapon: "Weapon", tier: int) -> float:
+    """Comparable sustained projectile power for upgrade/swap decisions."""
+    return (weapon.fire_rate * weapon.projectiles_per_shot
+            * tier_damage(weapon, tier))
 
 
 def get(weapon_id: str) -> Weapon:

@@ -73,17 +73,19 @@ PICKUP_POOL_CAPACITY = 40           # in-level coin + double-coin spawns
 PICKUP_COLLECT_RADIUS = 56.0        # px; hero auto-collects pickups within this
 # Sub-linear firepower cap: above this many active shooters in the squad,
 # only a rotating subset fires each shot. Keeps a 100-runner squad from
-# trivializing late-world levels at 700 bullets/sec while still letting
-# big squads absorb attrition. The cap value is tuned against the late-world
-# enemy density — 22 keeps roughly 150 bullets/sec which lets W6 levels
-# stay challenging at any squad size.
-MAX_SHOOTERS_PER_SHOT = 22
-# Boss fights are sized by *time*, not a flat HP number: at spawn we set boss
-# HP so that a player firing at the squad-cap with the boss's reference weapon
-# takes ~this many seconds. That makes the world-end boss the climax — longer
-# than any normal level early/mid game — regardless of the player's build,
-# while staying a capped "sweet spot" rather than a multi-minute slog.
-BOSS_TARGET_SECONDS = 82.0
+# reaching its full 700 bullets/sec while still letting successful gate choices
+# provide enough firepower for late-world special enemies. Thirty-six rifle
+# shooters produce about 250 bullets/sec at the cap.
+MAX_SHOOTERS_PER_SHOT = 36
+# A large squad divides each automatic volley across several urgent enemies.
+# Six-way fan-out reduces grunt overkill while retaining enough focused fire
+# to burn down tanks and splitters.
+MAX_AUTO_TARGETS = 6
+MAX_BOSS_ADD_TARGETS = 2
+# Boss HP is sized from the authored starting squad, the player's equipped
+# weapon path, and the previous world's expected tier. Current-world upgrades
+# therefore shorten the fight instead of being cancelled by HP scaling.
+BOSS_TARGET_SECONDS = 45.0
 GRID_CELL_PX = 100.0                # spatial-grid cell size (broad-phase)
 MUZZLE_OFFSET_Y = HERO_H * 0.55     # spawn projectiles roughly from the gun
 # Top-center HUD default top anchors (fraction of screen height). The safe-area
@@ -98,6 +100,9 @@ DEFAULT_WEAPON_ID = "pistol"
 MAX_SQUAD = 100                     # cap for squad_count; squad pool sized to MAX_SQUAD-1
 ATTRITION_ZONE_HALF_W = 170.0       # half-width of the squad-contact zone (px)
 ATTRITION_FRONT_OFFSET = HERO_H * 0.35   # how far above hero's center the squad's "front line" sits
+# A horizontal rank can cross on one frame. Bound that burst so a healthy
+# squad cannot disappear before the player sees or can react to the impact.
+MAX_ATTRITION_LOSSES_PER_TICK = 3
 MAX_GRENADES = 9                    # in-run cap; HUD shows current count
 GRENADE_RADIUS = 520.0              # px; detonation kills every enemy within this
                                     # (sized to cover the full stage in front of the hero)
@@ -132,11 +137,11 @@ COIN_PARTIAL_REWARD = {
     entities.TYPE_SPLITTER: 0.15,
     entities.TYPE_TANK:     0.40,
 }
-# Per-gate reward dropped to 0 — gates are the gameplay mechanic, not
-# a coin faucet. Level-end completion bonus + per-star also halved.
+# Gates are the gameplay mechanic rather than a coin faucet. Completion and
+# star rewards provide the dependable income floor for one upgrade per world.
 COIN_REWARD_GATE = 0
-COIN_BONUS_LEVEL_COMPLETE = 10
-COIN_BONUS_PER_STAR = 5
+COIN_BONUS_LEVEL_COMPLETE = 30
+COIN_BONUS_PER_STAR = 10
 
 
 def lane_gravity_target(current_x: float, lane_centers: list[float], dt: float,
@@ -421,6 +426,7 @@ class GameScreen(ui.StyledScreen):
         self.opponent_squad_controller: entities.SquadController | None = None
         self.opponent_squad_renderer: graphics.BatchedRenderer | None = None
         self.attrition_total = 0
+        self._attrition_hits_this_tick = 0
         # Level config + result handling (M9).
         self.level_config: dict | None = None
         self.distance_goal = 0.0
@@ -1043,6 +1049,7 @@ class GameScreen(ui.StyledScreen):
         # summary so the player sees their crowd peaked at e.g. 47.
         self._squad_peak = 1
         self.attrition_total = 0
+        self._attrition_hits_this_tick = 0
         self._level_ended = False
         # Carry over the per-save booster balances into the run; level-end
         # writes back what's left so they persist between runs.
@@ -1314,9 +1321,8 @@ class GameScreen(ui.StyledScreen):
     def _apply_level_config(self) -> None:
         """Look up the per-level config and push it to the spawners.
 
-        Boss levels (M10) disable the regular enemy + gate spawners — the
-        boss controller handles all enemy spawning, and the player gets a
-        head-start squad/weapon so the fight isn't pistol+1.
+        Boss levels (M10) disable regular formations; the boss controller owns
+        its adds while sparse rescue gates and a head-start squad remain active.
         """
         running = ui.app()
         # Multiplayer (versus) gets its own dedicated config — fixed
@@ -1367,20 +1373,16 @@ class GameScreen(ui.StyledScreen):
                     for name, weight in cfg["allowed_enemy_types"]
                 ]
                 # World-scaling intro delay: higher worlds get more breathing
-                # room because their base spawn rate and enemy speed would
-                # otherwise overwhelm the starting squad before the player
-                # can react to the first gate. Verified by the difficulty
-                # sim against passive (must still fail) and greedy (must
-                # survive long enough to pick gates).
+                # room because formations can otherwise reach a small squad
+                # before it has made two useful gate choices.
                 world = ((running.current_level - 1) // levels.LEVELS_PER_WORLD) + 1
-                self.enemy_spawner.intro_delay = 1.5 + 0.5 * (world - 1)
+                self.enemy_spawner.intro_delay = 2.5 + 0.35 * (world - 1)
             self.enemy_spawner.reset_per_level()
 
         if self.gate_spawner is not None:
             if is_boss:
-                # Boss levels keep gates available but sparser: ~5 pairs over
-                # the whole fight, so the player has rescue options without
-                # the gate-stream trivializing the fight.
+                # Boss levels keep gates available but substantially sparser,
+                # providing recovery choices without a regular-level gate stream.
                 self.gate_spawner.interval_px = graphics.ws(1500.0)
                 self.gate_spawner.max_grenade_gates = 1
             else:
@@ -1392,18 +1394,25 @@ class GameScreen(ui.StyledScreen):
             # world. Plain numbers on W1, multi-op expressions on W6.
             self.gate_spawner.world_tier = int(cfg.get("world", 1))
             self.gate_spawner.reset_per_level()
+            if is_boss:
+                # Bosses start with a head-start squad, so skip the opening x3
+                # but retain two x2 rescue choices before normal gate rolls.
+                self.gate_spawner._pairs_spawned = 1
 
         # Boss spawn / teardown.
         self._teardown_boss()
         if is_boss:
             self._spawn_boss(cfg)
-            # Head-start squad + weapon so the fight has weight.
+            # Head-start squad plus the player's invested weapon path. Falling
+            # back to the authored weapon keeps old/invalid saves playable.
             self.squad_count = int(cfg.get("starting_squad", 1))
-            self.current_weapon_id = cfg.get("starting_weapon", DEFAULT_WEAPON_ID)
+            self.current_weapon_id = (running.state.starting_weapon
+                                      if running and running.state
+                                      else cfg.get("starting_weapon", DEFAULT_WEAPON_ID))
             self._fire_cooldown = 0.0
         else:
-            # Non-boss levels also get a (smaller) starting squad now —
-            # `levels.starting_squad` scales 1→6 across W1→W6 so the player
+            # Non-boss levels also get a starting squad —
+            # `levels.starting_squad` scales 5→10 across W1→W6 so the player
             # can survive the intro before reaching the first gate. Plus
             # the persistent shop bonus (state.squad_bonus) so a player
             # who invested coins gets a tangible boost.
@@ -1417,15 +1426,12 @@ class GameScreen(ui.StyledScreen):
             if running_app and running_app.state:
                 self.current_weapon_id = running_app.state.starting_weapon
 
-        # Mild power-scaling (#11/#12): snapshot the equipped weapon tier at
-        # level start and make enemies proportionally tougher, so an upgraded
-        # weapon no longer trivializes early worlds. Damage scales faster than
-        # this HP bump, so an upgrade is still a net win.
+        # Enemy HP follows the authored level/archetype curve only. Scaling HP
+        # from the purchased weapon tier made adjacent upgrades cross rounding
+        # thresholds and take *more* shots to kill the same enemy. Strong squads
+        # are challenged by the bounded formation-pressure system instead.
         if self.enemy_spawner is not None:
-            running_app = ui.app()
-            tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
-                    if (running_app and running_app.state) else 1)
-            self.enemy_spawner.hp_scale = 1.0 + 0.25 * (max(1, tier) - 1)
+            self.enemy_spawner.hp_scale = 1.0
             # Appearance poof for on-screen (top-half) spawns (#16).
             self.enemy_spawner.spawn_poof = self._enemy_spawn_poof
 
@@ -1438,6 +1444,10 @@ class GameScreen(ui.StyledScreen):
             fs.enemy_speed = cfg["enemy_speed"]
             fs.enemy_hp = cfg["enemy_hp"]
             fs.hp_scale = self.enemy_spawner.hp_scale if self.enemy_spawner else 1.0
+            intro_seconds = (self.enemy_spawner.intro_delay
+                             if self.enemy_spawner is not None else 0.0)
+            fs.intro_distance_px = (0.0 if cfg.get("boss") else graphics.ws(
+                SCROLL_SPEED_PX_PER_SEC * intro_seconds))
             if cfg.get("boss"):
                 fs.spawn_table = [(entities.TYPE_GRUNT, 1.0)]
             else:
@@ -1496,25 +1506,23 @@ class GameScreen(ui.StyledScreen):
         boss_h = graphics.ws(160.0)
         boss_cx = sx + sw * 0.5
         boss_cy = sy + sh * 0.82
-        # Time-scaled HP: sized to the firepower the player ACTUALLY brings to
-        # the fight — the boss-level starting squad firing the reference weapon
-        # at its current tier — so the fight lasts ~BOSS_TARGET_SECONDS.
-        #
-        # NOTE: the squad now targets the boss directly (see the fire loop), so
-        # this DPS estimate is what really lands. The earlier formula used the
-        # squad *cap* (22) as the reference, which — combined with the squad
-        # only targeting minions — made the boss take ~80s × (cap/actual) ≈
-        # many minutes and effectively unwinnable. Use the real spawn squad.
+        # Time-scaled HP uses the previous world's expected weapon tier. This
+        # keeps each boss substantial for an on-curve player while ensuring a
+        # newly purchased current-world upgrade genuinely shortens the fight.
+        # The authored boss_hp remains a floor rather than dead level data.
         running = ui.app()
-        wid = cfg.get("starting_weapon", DEFAULT_WEAPON_ID)
+        wid = (running.state.starting_weapon
+               if running and running.state
+               else cfg.get("starting_weapon", DEFAULT_WEAPON_ID))
         ref_weapon = weapons.get(wid)
-        tier = (running.state.get_weapon_tier(wid)
-                if running and running.state else 1)
+        world = max(1, int(cfg.get("world", 1)))
+        expected_tier = max(1, min(weapons.MAX_TIER, world - 1))
         ref_squad = max(1, min(MAX_SHOOTERS_PER_SHOT,
                                int(cfg.get("starting_squad", 1))))
         ref_dps = (ref_squad * ref_weapon.fire_rate
-                   * weapons.tier_damage(ref_weapon, tier))
-        boss_hp = max(600, int(round(BOSS_TARGET_SECONDS * ref_dps)))
+                   * weapons.tier_damage(ref_weapon, expected_tier))
+        boss_hp = max(600, int(cfg.get("boss_hp", 0)),
+                      int(round(BOSS_TARGET_SECONDS * ref_dps)))
         self.boss = boss_module.Boss(
             max_hp=boss_hp,
             cx=boss_cx, cy=boss_cy,
@@ -1655,8 +1663,12 @@ class GameScreen(ui.StyledScreen):
             if dx * dx + dy * dy <= r2:
                 hero_caught = True
         total_losses = losses + (1 if hero_caught else 0)
+        remaining = max(0, MAX_ATTRITION_LOSSES_PER_TICK
+                        - self._attrition_hits_this_tick)
+        total_losses = min(total_losses, remaining)
         if total_losses == 0:
             return
+        self._attrition_hits_this_tick += total_losses
         self.squad_count = max(0, self.squad_count - total_losses)
         self.attrition_total += total_losses
         if self.hero is not None:
@@ -1873,9 +1885,15 @@ class GameScreen(ui.StyledScreen):
             self.formation_spawner.rank_interval_px = graphics.ws(
                 self._rank_interval_start
                 + (self._rank_interval_end - self._rank_interval_start) * progress)
+            self.formation_spawner.rank_interval_px *= levels.formation_pressure_factor(
+                self.level_config.get("type", levels.TYPE_STATIC),
+                self.squad_count,
+                self.level_config.get("squad_target_2_star", 1),
+            )
             self.formation_spawner.update(
                 self.distance, x_min, y_min, x_max, y_max)
 
+        self._attrition_hits_this_tick = 0
         if (self.enemy_controller is not None
                 and self.enemy_spawner is not None
                 and self.hero is not None):
@@ -2016,38 +2034,55 @@ class GameScreen(ui.StyledScreen):
             if self._fire_cooldown <= 0.0:
                 manual_human = (self._aim_mode == "manual"
                                 and not self.auto_mode)
+                target_points: list[tuple[float, float]] = []
                 if manual_human:
                     # Player-aimed: fire at the reticle the _update block set.
                     target_x, target_y, has_target = (
                         self._reticle_x, self._reticle_y, True)
+                    target_points = [(target_x, target_y)]
                 else:
                     # Auto-aim (also used when the GA autoplayer drives, even
-                    # in manual mode — it aims at monsters per #9). On boss
-                    # levels prefer a close add over the boss so adds get
-                    # cleared instead of slipping into the squad (#5).
+                    # in manual mode — it aims at monsters per #9). Boss volleys
+                    # favor the objective while reserving bounded groups for
+                    # close adds that could otherwise slip into the squad.
                     target_x = target_y = 0.0
                     has_target = False
                     if self.boss is not None and self.boss.alive:
-                        _ti = entities.find_nearest_threat(
+                        _target_ids = entities.find_nearest_threats(
                             self.hero.center_x, self.hero.center_y,
                             self.enemy_controller,
-                            graphics.ws(BOSS_ADD_THREAT_FRONT))
-                        if _ti >= 0:
-                            target_x = self.enemy_pool.cx[_ti]
-                            target_y = self.enemy_pool.cy[_ti]
+                            graphics.ws(BOSS_ADD_THREAT_FRONT),
+                            MAX_BOSS_ADD_TARGETS)
+                        if _target_ids:
+                            # Reserve a majority of each volley for the actual
+                            # objective. Two add slots still prevent attrition
+                            # spirals without starving boss damage.
+                            target_points = [
+                                (self.boss.cx, self.boss.cy),
+                                (self.boss.cx, self.boss.cy),
+                                (self.boss.cx, self.boss.cy),
+                            ] + [
+                                (self.enemy_pool.cx[i], self.enemy_pool.cy[i])
+                                for i in _target_ids
+                            ]
                         else:
-                            target_x, target_y = self.boss.cx, self.boss.cy
+                            target_points = [(self.boss.cx, self.boss.cy)]
+                        target_x, target_y = target_points[0]
                         has_target = True
                     else:
                         _rng_px = (self._weapon_range_px
                                    if self._weapon_range_px is not None
                                    else graphics.ws(99999.0))
-                        _ti = entities.find_nearest_threat(
+                        _target_ids = entities.find_nearest_threats(
                             self.hero.center_x, self.hero.center_y,
-                            self.enemy_controller, _rng_px)
-                        if _ti >= 0:
-                            target_x = self.enemy_pool.cx[_ti]
-                            target_y = self.enemy_pool.cy[_ti]
+                            self.enemy_controller, _rng_px,
+                            MAX_AUTO_TARGETS)
+                        if _target_ids:
+                            target_points = [
+                                (self.enemy_pool.cx[i], self.enemy_pool.cy[i])
+                                for i in _target_ids
+                            ]
+                            target_x, target_y = target_points[0]
                             has_target = True
                     # Stash for the reticle when the GA drives in manual mode.
                     self._auto_target = (target_x, target_y) if has_target else None
@@ -2070,9 +2105,8 @@ class GameScreen(ui.StyledScreen):
                     # enemies are no longer trivialized by a 100-runner squad.
                     if len(positions) > MAX_SHOOTERS_PER_SHOT:
                         positions = self._fire_rng.sample(positions, MAX_SHOOTERS_PER_SHOT)
-                    # Apply weapon-tier damage multiplier from the player's
-                    # shop purchases (state.get_weapon_tier). Tier 1 (default)
-                    # = 1.0×; tier 4 = 3.0×.
+                    # Apply effective tier damage from the player's shop
+                    # purchases (state.get_weapon_tier).
                     running_app = ui.app()
                     tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                             if running_app and running_app.state else 1)
@@ -2107,11 +2141,23 @@ class GameScreen(ui.StyledScreen):
                                 locked = (abs(self.enemy_pool.cx[near] - self._reticle_x) < lock_x
                                           and abs(self.enemy_pool.cy[near] - self._reticle_y) < lock_y)
                         self.aim_reticle.set_locked(locked)
-                    entities.fire_from_positions(
-                        positions, target_x, target_y, weapon,
-                        self.projectile_controller, self._fire_rng,
-                        damage_override=effective_damage,
-                    )
+                    volley_targets = target_points[:max(1, len(positions))]
+                    if len(volley_targets) == 1:
+                        entities.fire_from_positions(
+                            positions, target_x, target_y, weapon,
+                            self.projectile_controller, self._fire_rng,
+                            damage_override=effective_damage,
+                        )
+                    else:
+                        groups = [[] for _ in volley_targets]
+                        for i, position in enumerate(positions):
+                            groups[i % len(groups)].append(position)
+                        for group, (aim_x, aim_y) in zip(groups, volley_targets):
+                            entities.fire_from_positions(
+                                group, aim_x, aim_y, weapon,
+                                self.projectile_controller, self._fire_rng,
+                                damage_override=effective_damage,
+                            )
                     self._fire_cooldown = 1.0 / weapon.fire_rate
                     if overdrive:
                         self._fire_cooldown /= boosters.OVERDRIVE_FIRE_MULT
@@ -2322,13 +2368,11 @@ class GameScreen(ui.StyledScreen):
         running_app = ui.app()
         tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                 if running_app and running_app.state else 1)
-        # Tier indicator: 1-4 filled diamonds (gold) followed by 0-3
-        # empty diamonds — visual at-a-glance tier read that doesn't
-        # need the player to parse "Lv3" each time.
-        tier = max(1, min(4, tier))
+        tier = max(1, min(weapons.MAX_TIER, tier))
         # Bracket-style tier indicator — single line, fits the chip
         # width regardless of font support for special Unicode glyphs.
-        weapon_label = "{} [{}/4]".format(weapon_name, tier)
+        weapon_label = "{} [{}/{}]".format(
+            weapon_name, tier, weapons.MAX_TIER)
 
         # Stat chips.
         if self.squad_chip is not None:
@@ -2387,6 +2431,7 @@ class GameScreen(ui.StyledScreen):
             gate_reward *= 2
         self._coins_earned += gate_reward
         _prev_squad = self.squad_count
+        _weapon_changed = False
         if gate.op == gates.OP_MUL:
             self.squad_count = min(MAX_SQUAD, max(1, self.squad_count * int(gate.value)))
         elif gate.op == gates.OP_ADD:
@@ -2401,9 +2446,20 @@ class GameScreen(ui.StyledScreen):
             self.squad_count = max(0, self.squad_count // divisor)
         elif gate.op == gates.OP_WEAPON:
             if gate.value in weapons.WEAPONS:
-                self.current_weapon_id = gate.value
-                self._update_weapon_range()
-                self._fire_cooldown = 0.0
+                running = ui.app()
+                current_tier = (running.state.get_weapon_tier(self.current_weapon_id)
+                                if running and running.state else 1)
+                candidate_tier = (running.state.get_weapon_tier(gate.value)
+                                  if running and running.state else 1)
+                current_power = weapons.combat_power(
+                    weapons.get(self.current_weapon_id), current_tier)
+                candidate_power = weapons.combat_power(
+                    weapons.get(gate.value), candidate_tier)
+                if candidate_power >= current_power:
+                    self.current_weapon_id = gate.value
+                    self._update_weapon_range()
+                    self._fire_cooldown = 0.0
+                    _weapon_changed = True
         elif gate.op == gates.OP_GRENADE:
             self._apply_grenade_effect(int(gate.value))
         elif gate.op == gates.OP_REINFORCE:
@@ -2422,14 +2478,16 @@ class GameScreen(ui.StyledScreen):
             _color = GATE_GAIN_COLOR if _delta >= 0 else GATE_LOSS_COLOR
             self._float_text("{}{}".format(_sym, int(gate.value)), _color)
         elif gate.op == gates.OP_WEAPON:
-            self._float_text("{}!".format(str(gate.value).upper()),
-                             GATE_WEAPON_COLOR)
+            text = ("{}!".format(str(gate.value).upper())
+                    if _weapon_changed else "KEPT {}".format(
+                        weapons.get(self.current_weapon_id).name.upper()))
+            self._float_text(text, GATE_WEAPON_COLOR)
         # Reward gates pop their own booster float-text from the effect calls.
         # Audio + particle burst at the hero so the pickup reads. Weapon gates
         # get the weapon-swap cue; everything else the generic pickup blip.
         running = ui.app()
         running.audio.play_sfx(
-            "weapon_swap" if gate.op == gates.OP_WEAPON else "gate_pickup")
+            "weapon_swap" if _weapon_changed else "gate_pickup")
         if self.particle_controller is not None and self.hero is not None:
             self.particle_controller.burst(
                 self.hero.center_x, self.hero.center_y + graphics.ws(HERO_H * 0.3),
@@ -3304,11 +3362,9 @@ class GameScreen(ui.StyledScreen):
             running_app = ui.app()
             tier = (running_app.state.get_weapon_tier(self.current_weapon_id)
                     if running_app and running_app.state else 1)
-            tier = max(1, min(4, tier))
-            pips = "*" * tier + "." * (4 - tier)
-            tier = max(1, min(4, tier))
+            tier = max(1, min(weapons.MAX_TIER, tier))
             self.weapon_chip.set_value(
-                "{} [{}/4]".format(weapon_name, tier))
+                "{} [{}/{}]".format(weapon_name, tier, weapons.MAX_TIER))
 
         # First-tick handshake: tell the host which weapon the client
         # equipped from their own shop. Host uses it as the opponent's
@@ -3864,6 +3920,9 @@ class GameScreen(ui.StyledScreen):
                 )
             self._add_shake(0.6)
             return
+        if self._attrition_hits_this_tick >= MAX_ATTRITION_LOSSES_PER_TICK:
+            return
+        self._attrition_hits_this_tick += 1
         self.squad_count -= 1
         self.attrition_total += 1
         if self.particle_controller is not None:

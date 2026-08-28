@@ -17,8 +17,26 @@ def test_damage_mult_covers_all_tiers_and_increases():
 
 def test_tier_damage_at_top():
     rifle = weapons.get("rifle")   # damage 1
-    assert weapons.tier_damage(rifle, 6) == max(1, round(1 * weapons.TIER_DAMAGE_MULT[6]))
+    expected = max(round(rifle.damage * weapons.TIER_DAMAGE_MULT[6]),
+                   rifle.damage + weapons.TIER_DAMAGE_FLOOR_BONUS[6])
+    assert weapons.tier_damage(rifle, 6) == expected
     assert weapons.tier_damage(rifle, 99) == weapons.tier_damage(rifle, 6)   # clamps
+
+
+def test_every_paid_tier_increases_effective_damage():
+    for weapon in weapons.WEAPONS.values():
+        damage = [weapons.tier_damage(weapon, tier)
+                  for tier in range(1, weapons.MAX_TIER + 1)]
+        assert all(a < b for a, b in zip(damage, damage[1:])), (weapon.id, damage)
+    assert [weapons.tier_damage(weapons.get("rifle"), tier)
+            for tier in range(1, weapons.MAX_TIER + 1)] == [1, 2, 3, 4, 6, 8]
+
+
+def test_combat_power_reflects_tier_and_projectile_count():
+    rifle = weapons.get("rifle")
+    shotgun = weapons.get("shotgun")
+    assert weapons.combat_power(rifle, 6) > weapons.combat_power(shotgun, 1)
+    assert weapons.combat_power(rifle, 2) > weapons.combat_power(rifle, 1)
 
 
 if __name__ == "__main__":

@@ -7,21 +7,11 @@ purchase actions live on `state.GameState` (`purchase_weapon`,
 Economy design
 ==============
 
-A typical W1-W3 run yields ~250-400 coins (1 per kill + 50 completion +
-30 per star). After clearing W1+W2 the player has ~3000 coins, enough to
-buy the Rifle starter weapon (800) which is the gate to playing W4+ at
-all. Continued play through W3-W4 funds the Shotgun (1500) which makes
-W5-W6 survivable. Top tier (Sniper, full squad bonus) is a stretch goal.
-
-The progression:
-
-    Coins after W1   ~1500       → Rifle (800) leaves headroom for boosters
-    Coins after W2   ~3500       → Squad +1 (1000) + grenade stock
-    Coins after W3   ~6500       → Shotgun (1500)
-    Coins after W4   ~12000      → Squad +2 (2200 cumulative) + Sniper (2500)
-
-Bosses pay extra coin so finishing a world has a tangible "you can now
-afford the next upgrade" moment.
+Completion and star rewards are the dependable income floor; kill fractions
+and ground pickups add a smaller skill bonus. The weapon prices are centered
+on upgrading one preferred weapon once per world, while optional squad and
+booster purchases provide alternate recovery paths. All weapons remain free at
+tier 1, so a player can change style without first paying an unlock fee.
 
 Catalog items
 =============
@@ -59,10 +49,10 @@ class ShopItem:
 # Per-weapon, per-tier prices: TIER_PRICES[weapon][tier] = coins.
 # Cheaper weapons have cheaper upgrades; tier 1 is always free for all weapons.
 TIER_PRICES: dict[str, dict[int, int]] = {
-    "pistol":  {2: 200,  3: 500,  4: 1200, 5: 2400,  6: 4500},
-    "rifle":   {2: 400,  3: 1000, 4: 2200, 5: 4500,  6: 8500},
-    "shotgun": {2: 700,  3: 1500, 4: 3000, 5: 6000,  6: 11000},
-    "sniper":  {2: 1000, 3: 2500, 4: 5000, 5: 10000, 6: 19000},
+    "pistol":  {2: 150, 3: 350, 4: 700,  5: 1200, 6: 1800},
+    "rifle":   {2: 400, 3: 900, 4: 1800, 5: 2200, 6: 3000},
+    "shotgun": {2: 500, 3: 1000, 4: 1800, 5: 2800, 6: 4000},
+    "sniper":  {2: 700, 3: 1400, 4: 2400, 5: 3600, 6: 5200},
 }
 
 
@@ -81,7 +71,7 @@ CATALOG: list[ShopItem] = [
     # in the UI based on the player's current tier; this static price is
     # the floor (tier 2 entry price) used for the catalog declaration only.
     ShopItem(
-        id="weapon_pistol", label="Pistol", price=200, category="weapon",
+        id="weapon_pistol", label="Pistol", price=150, category="weapon",
         description="Reliable starter — 2.5 shots/s, 1 damage. Tap to equip; "
                     "tap upgrade for more damage per shot.",
         weapon_id="pistol",
@@ -93,14 +83,14 @@ CATALOG: list[ShopItem] = [
         weapon_id="rifle",
     ),
     ShopItem(
-        id="weapon_shotgun", label="Shotgun", price=700, category="weapon",
-        description="5 projectiles per shot, wide spread. Crushes swarmer "
+        id="weapon_shotgun", label="Shotgun", price=500, category="weapon",
+        description="6 projectiles per shot, wide spread. Crushes swarmer "
                     "clusters and dense W5+ waves.",
         weapon_id="shotgun",
     ),
     ShopItem(
-        id="weapon_sniper", label="Sniper", price=1000, category="weapon",
-        description="3 damage per shot, slow fire rate. Punches through "
+        id="weapon_sniper", label="Sniper", price=700, category="weapon",
+        description="5 damage per shot, slow fire rate. Punches through "
                     "tanks; pairs with a big squad for W6.",
         weapon_id="sniper",
     ),
@@ -174,21 +164,33 @@ CATALOG: list[ShopItem] = [
 
     # --- squad bonuses (cumulative) --------------------------------------
     ShopItem(
-        id="squad_1", label="Starting Squad +1", price=1000, category="squad",
+        id="squad_1", label="Starting Squad +1", price=500, category="squad",
         description="Permanent. +1 follower at every non-boss level start.",
         squad_target=1,
     ),
     ShopItem(
-        id="squad_2", label="Starting Squad +2", price=2200, category="squad",
+        id="squad_2", label="Starting Squad +2", price=900, category="squad",
         description="Permanent. Requires Starting Squad +1 first. +2 followers "
                     "at every non-boss level start.",
         squad_target=2,
     ),
     ShopItem(
-        id="squad_3", label="Starting Squad +3", price=3600, category="squad",
+        id="squad_3", label="Starting Squad +3", price=1400, category="squad",
         description="Permanent. Requires Starting Squad +2 first. +3 followers "
                     "at every non-boss level start.",
         squad_target=3,
+    ),
+    ShopItem(
+        id="squad_4", label="Starting Squad +4", price=2000, category="squad",
+        description="Permanent. Requires Starting Squad +3 first. +4 followers "
+                    "at every non-boss level start.",
+        squad_target=4,
+    ),
+    ShopItem(
+        id="squad_5", label="Starting Squad +5", price=2800, category="squad",
+        description="Permanent. Requires Starting Squad +4 first. +5 followers "
+                    "at every non-boss level start.",
+        squad_target=5,
     ),
 ]
 

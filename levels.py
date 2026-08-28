@@ -24,7 +24,7 @@ the result at module load. Game logic reads per-level dicts via
 #     enemy_speed               180 → 290 px/s
 #     enemy_chase_min/max       (25 → 80) / (80 → 170) px/s lateral
 #     gate_interval_px          720 → 420 px
-#     boss_hp (boss levels)     350 → 1100 HP
+#     boss_hp authored floor    1100 → 2200 HP
 #     squad_target_2_star       10 → 40
 #     squad_target_3_star       20 → 80
 #
@@ -34,8 +34,8 @@ the result at module load. Game logic reads per-level dicts via
 #     allowed_ops               per world (see _allowed_enemy_types below)
 #     allowed_weapons           per world (rifle / shotgun / sniper unlocks)
 #     allowed_enemy_types       per world (grunt → +swarmer → +tank → +bomber → +splitter)
-#     starting_squad (boss)     3 → 12 (depends on world, not t)
-#     starting_weapon (boss)    pistol / rifle / sniper by world
+#     starting_squad (boss)     4 → 11 (depends on world, not t)
+#     starting_weapon (boss)    fallback when no valid equipped weapon exists
 #
 #   ─── global knobs (apply to every level) ───
 #     LEVEL_BASE_DURATION_SEC   L1's floor
@@ -58,8 +58,8 @@ the result at module load. Game logic reads per-level dicts via
 #      passive→W or greedy→L beyond what you want.
 #   5. Want gate cadence tighter?  Bump the gate_interval_px endpoints.
 #
-# The same `tools/difficulty_sim.py` runs every level with a passive and a
-# greedy agent so you can verify a change before shipping.
+# `tools/difficulty_sim.py` runs passive, fresh greedy, and on-curve
+# progression profiles so changes can be checked before shipping.
 # ---------------------------------------------------------------
 """
 
@@ -76,13 +76,10 @@ TOTAL_LEVELS = NUM_WORLDS * LEVELS_PER_WORLD
 SCROLL_SPEED_PX_PER_SEC = 360.0
 
 # Level "type" tags describe how spawn intensity responds to the player.
-#   static  — fixed spawn script; missed gates are forgivable since later
-#             gates compensate. Easy / forgiving feel.
-#   hybrid  — static baseline + periodic dynamic spike windows where spawn
-#             interval halves for a few seconds.
-#   dynamic — spawn interval scales inversely with current squad firepower.
-#             Missing a x2 gate punishes hard: the spawner ramps up to
-#             match the squad you should have had.
+#   static  — mostly authored density, with a light safety/pressure correction.
+#   hybrid  — authored density plus a moderate squad-strength correction.
+#   dynamic — fully responsive density: struggling squads get breathing room,
+#             while overpowered squads face tighter formations.
 TYPE_STATIC = "static"
 TYPE_HYBRID = "hybrid"
 TYPE_DYNAMIC = "dynamic"
@@ -139,6 +136,33 @@ def _lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 
+def formation_pressure_factor(level_type: str, squad: int, target: int) -> float:
+    """Return a bounded multiplier for formation spacing.
+
+    Values above 1 give a struggling squad more breathing room; values below 1
+    tighten ranks for a squad far above the level's two-star target. Level type
+    controls how strongly this correction applies, preserving the authored
+    curve while preventing both unwinnable spirals and long trivial stretches.
+    """
+    target = max(1, int(target))
+    ratio = max(0.0, int(squad) / target)
+    if ratio <= 0.5:
+        responsive = 2.00
+    elif ratio < 1.0:
+        responsive = 1.0 + (1.0 - ratio) * 2.0
+    elif ratio < 2.0:
+        responsive = 1.0 - (ratio - 1.0) * 0.10
+    else:
+        responsive = 0.90
+
+    weight = {
+        TYPE_STATIC: 0.50,
+        TYPE_HYBRID: 0.60,
+        TYPE_DYNAMIC: 1.0,
+    }.get(level_type, 0.0)
+    return 1.0 + (responsive - 1.0) * weight
+
+
 def build_levels() -> dict[int, dict[str, Any]]:
     """Produce the full level table.
 
@@ -181,9 +205,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
             # global ramp `t`, so later worlds field a denser army; within a
             # level the spawner tightens the interval further (game.py ramps
             # start->end by distance progress).
-            formation_columns = int(round(_lerp(5.0, 8.0, t)))
-            rank_interval_start = _lerp(260.0, 120.0, t)
-            rank_interval_end = _lerp(140.0, 75.0, t)
+            formation_columns = int(round(_lerp(4.0, 6.0, t)))
+            rank_interval_start = _lerp(420.0, 390.0, t)
+            rank_interval_end = _lerp(280.0, 260.0, t)
             # Gate cadence: target a fixed number of pairs per level so the
             # player makes 10-24 decisions per run regardless of level
             # length. Earlier formulas used a fixed px interval, which gave
@@ -256,10 +280,9 @@ def build_levels() -> dict[int, dict[str, Any]]:
 
             # The last level of every world is a boss fight (M10). It
             # overrides the distance-goal win condition with "deplete boss
-            # HP", disables gates (the player can't pivot mid-fight) and
-            # gives the player a head-start squad + a world-appropriate weapon
-            # so the fight isn't starting from pistol+1 — but the head start
-            # is small enough that *passive* play loses.
+            # HP", keeps sparser rescue gates available, and gives the player a
+            # head-start squad while preserving their equipped weapon investment.
+            # The head start is small enough that active gate choices still matter.
             is_boss = (in_world == LEVELS_PER_WORLD)
             # Boss HP is high enough that a passive squad of `starting_squad`
             # cannot grind it down before the boss's volleys overwhelm the
@@ -279,7 +302,7 @@ def build_levels() -> dict[int, dict[str, Any]]:
                 # Non-boss starting squad = 4 + world: W1=5, W2=6, ... W6=10.
                 # A squad of 5 gives a brand-new player enough muzzles to clear
                 # the front rank and reach the first gates (W1 used to start at 1
-                # and die before gate 2). The sub-linear fire cap (22) means the
+                # and die before gate 2). The sub-linear fire cap (36) means the
                 # higher-world bumps mostly absorb attrition rather than add
                 # firepower. The persistent shop squad_bonus stacks on top.
                 starting_squad = 4 + world
@@ -351,10 +374,10 @@ def _allowed_enemy_types(world: int) -> list[tuple[str, float]]:
     if world == 4:
         return [("grunt", 0.50), ("swarmer", 0.20), ("tank", 0.30)]
     if world == 5:
-        return [("grunt", 0.40), ("swarmer", 0.15),
-                ("tank", 0.20), ("bomber", 0.25)]
-    return [("grunt", 0.32), ("swarmer", 0.15),
-            ("tank", 0.18), ("bomber", 0.20), ("splitter", 0.15)]
+        return [("grunt", 0.50), ("swarmer", 0.15),
+                ("tank", 0.20), ("bomber", 0.15)]
+    return [("grunt", 0.45), ("swarmer", 0.13),
+            ("tank", 0.18), ("bomber", 0.14), ("splitter", 0.10)]
 
 
 LEVELS: dict[int, dict[str, Any]] = build_levels()

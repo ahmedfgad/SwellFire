@@ -87,6 +87,42 @@ def test_big_enemies_stay_on_rail():
         assert c["x"] + c["w"] * 0.5 <= 400.0 + 1e-6
 
 
+def test_mixed_rank_caps_cluster_archetypes():
+    ctrl = _FakeCtrl()
+    fs = entities.FormationSpawner(ctrl, seed=1)
+    fs.columns = 6
+    fs.rank_interval_px = 100.0
+    fs.enemy_hp = 1
+    fs.spawn_table = [(entities.TYPE_GRUNT, 1.0),
+                      (entities.TYPE_SWARMER, 1.0)]
+    fs._pick_type = lambda: entities.TYPE_SWARMER
+    fs.reset_per_level(0.0)
+    fs.update(100.0, 0.0, 0.0, 400.0, 1000.0)
+    swarmers = [c for c in ctrl.calls if c["enemy_type"] == entities.TYPE_SWARMER]
+    grunts = [c for c in ctrl.calls if c["enemy_type"] == entities.TYPE_GRUNT]
+    assert len(swarmers) == 4
+    assert len(grunts) == 5
+
+
+def test_mixed_rank_caps_total_special_cells():
+    ctrl = _FakeCtrl()
+    fs = entities.FormationSpawner(ctrl, seed=1)
+    fs.columns = 6
+    fs.rank_interval_px = 100.0
+    fs.enemy_hp = 1
+    fs.spawn_table = [(entities.TYPE_GRUNT, 1.0),
+                      (entities.TYPE_TANK, 1.0),
+                      (entities.TYPE_BOMBER, 1.0),
+                      (entities.TYPE_SPLITTER, 1.0)]
+    picks = iter([entities.TYPE_TANK, entities.TYPE_BOMBER,
+                  entities.TYPE_SPLITTER] * 2)
+    fs._pick_type = lambda: next(picks)
+    fs.reset_per_level(0.0)
+    fs.update(100.0, 0.0, 0.0, 400.0, 1000.0)
+    special = [c for c in ctrl.calls if c["enemy_type"] != entities.TYPE_GRUNT]
+    assert len(special) == 2
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

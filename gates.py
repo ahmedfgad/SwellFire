@@ -19,7 +19,7 @@ Effects applied here in M7:
     * `OP_MUL` ×N           — squad_count = min(MAX, squad_count * N)
     * `OP_ADD` +N           — squad_count = min(MAX, squad_count + N)
     * `OP_SUB` -N           — squad_count = max(1,   squad_count - N)
-    * `OP_WEAPON` <wid>     — current_weapon_id = <wid>
+    * `OP_WEAPON` <wid>     — switch when the candidate is not a downgrade
 
 M8 will render the squad as a Mesh-batched runner crowd; M7's
 gate effects already drive the integer squad_count so the renderer
@@ -435,12 +435,23 @@ class GateSpawner:
 
         # Pity floor: if the player has missed the last few pairs, force a
         # math pair with at least one safe op (MUL or ADD) so they recover.
+        opening_pair = self._pairs_spawned == 0
+        launch_pair = self._pairs_spawned < 3
         force_safe = (self.consecutive_misses >= self.PITY_AFTER_MISSES
-                      or self._pairs_spawned == 0)
+                      or launch_pair)
         if force_safe:
-            safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops] \
-                or [OP_MUL, OP_ADD]
+            if launch_pair and OP_MUL in self.allowed_ops:
+                # Three dependable launch multipliers let active players reach
+                # sustainable firepower before formation pressure peaks. Only
+                # the opener is x3; the next two use the regular x2 value.
+                safe_pool = [OP_MUL]
+            else:
+                safe_pool = [op for op in (OP_MUL, OP_ADD) if op in self.allowed_ops] \
+                    or [OP_MUL, OP_ADD]
             op_a, value_a, label_a = self._pick_op(exclude_op=None, allowed=safe_pool)
+            if opening_pair and op_a == OP_MUL:
+                value_a = 3
+                label_a = self._equation_label(op_a, value_a)
             op_b, value_b, label_b = self._pick_op(exclude_op=op_a, allowed=math_pool)
             self.consecutive_misses = 0
         else:
@@ -452,6 +463,11 @@ class GateSpawner:
             else:
                 op_a, value_a, label_a = self._pick_op(exclude_op=None, allowed=math_pool)
                 op_b, value_b, label_b = self._pick_op(exclude_op=op_a, allowed=math_pool)
+                if op_a in (OP_SUB, OP_DIV) and op_b in (OP_SUB, OP_DIV):
+                    growth_ops = [op for op in (OP_MUL, OP_ADD) if op in math_pool]
+                    if growth_ops:
+                        op_a, value_a, label_a = self._pick_op(
+                            exclude_op=op_b, allowed=growth_ops)
         self.controller.spawn_pair(
             (left_x,  y_top, gate_w, gate_h, op_a, value_a, label_a),
             (right_x, y_top, gate_w, gate_h, op_b, value_b, label_b),
@@ -505,14 +521,20 @@ class GateSpawner:
         always a genuine choice. Math ops get an equation label; bonus ops a
         literal one.
 
-        Reward magnitudes are intentionally tight: MUL ×2 only (no ×3), ADD
-        capped at 7, SUB up to 7, DIV /2–/4; GRENADE uses the tier-weighted
-        1–3 reward strength (``_bonus_value``). The cumulative effect across
-        many gates makes the level passable; no single gate carries the run.
+        Reward magnitudes are intentionally tight: regular MUL is ×2 (the
+        opening launch gate is the sole ×3), ADD scales from 3–7 in W1 to
+        8–16 in W5/W6, SUB reaches 7, and DIV uses /2 or /4. Cumulative choices
+        carry the run without making later random multipliers explosive.
         """
+        if self.world_tier <= 2:
+            add_values = [3, 5, 7]
+        elif self.world_tier <= 4:
+            add_values = [5, 8, 12]
+        else:
+            add_values = [8, 12, 16]
         op_table = {
-            OP_MUL:     ([2, 3],           lambda v: "x{}".format(v)),
-            OP_ADD:     ([3, 5, 7],        lambda v: "+{}".format(v)),
+            OP_MUL:     ([2],              lambda v: "x{}".format(v)),
+            OP_ADD:     (add_values,       lambda v: "+{}".format(v)),
             OP_SUB:     ([2, 3, 5, 7],     lambda v: "-{}".format(v)),
             OP_DIV:     ([2, 4],           lambda v: "/{}".format(v)),
             OP_WEAPON:  (self.allowed_weapons or self.DEFAULT_WEAPONS,

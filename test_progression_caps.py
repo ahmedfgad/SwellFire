@@ -2,6 +2,7 @@
 Run: SDL_AUDIODRIVER=dummy venv/bin/python test_progression_caps.py"""
 import state
 import levels
+import shop
 import weapons
 
 
@@ -59,6 +60,18 @@ def test_squad_bonus_blocked_above_cap():
     s2 = _s(31)
     assert s2.purchase_squad_bonus(3, 50) is True
     assert s2.purchase_squad_bonus(4, 50) is False
+
+
+def test_shop_exposes_every_world_gated_squad_bonus():
+    targets = [item.squad_target for item in shop.category_items("squad")]
+    assert targets == [1, 2, 3, 4, 5]
+
+
+def test_weapon_upgrade_prices_cover_all_tiers_and_increase():
+    for weapon_id, prices in shop.TIER_PRICES.items():
+        assert sorted(prices) == list(range(2, weapons.MAX_TIER + 1))
+        values = [prices[tier] for tier in sorted(prices)]
+        assert all(a < b for a, b in zip(values, values[1:])), weapon_id
 
 
 if __name__ == "__main__":

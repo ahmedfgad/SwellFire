@@ -14,16 +14,16 @@ def test_starting_squad_grows_by_world():
 
 def test_w1_density_softened():
     c = levels.get_level(1)
-    assert c["formation_columns"] == 5                     # was 6
-    assert abs(c["rank_interval_start"] - 260.0) < 1e-6    # was 220
-    assert abs(c["rank_interval_end"] - 140.0) < 1e-6      # was 120
+    assert c["formation_columns"] == 4
+    assert abs(c["rank_interval_start"] - 420.0) < 1e-6
+    assert abs(c["rank_interval_end"] - 280.0) < 1e-6
 
 
 def test_late_density_high_end():
     c = levels.get_level(60)                                # W6 last, t=1
-    assert c["formation_columns"] == 8                      # softened from 9 (Task 5)
-    assert abs(c["rank_interval_start"] - 120.0) < 1e-6
-    assert abs(c["rank_interval_end"] - 75.0) < 1e-6        # softened from 60 (Task 5)
+    assert c["formation_columns"] == 6
+    assert abs(c["rank_interval_start"] - 390.0) < 1e-6
+    assert abs(c["rank_interval_end"] - 260.0) < 1e-6
 
 
 if __name__ == "__main__":
