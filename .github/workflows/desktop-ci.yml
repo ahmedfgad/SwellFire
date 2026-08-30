@@ -33,6 +33,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements/dev.txt
 
       - name: Install SDL2 and Kivy runtime libraries
         run: |
