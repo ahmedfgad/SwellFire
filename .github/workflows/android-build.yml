@@ -62,24 +62,26 @@ jobs:
       - name: Install Buildozer and Cython
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade buildozer cython
+          python -m pip install 'buildozer>=1.5,<2' 'Cython>=0.29.34,<3.2'
 
-      # Cache the SDK/NDK and p4a build dir. The key is tied to buildozer.spec
-      # so a change to the build config (e.g. android.api) busts the cache.
+      # Cache the SDK/NDK and p4a build dir. The key is tied to the Android
+      # build config and the internal pip pin so either change busts the cache.
       - name: Cache the Buildozer toolchain
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             .buildozer
-          key: ${{ runner.os }}-buildozer-2204-${{ hashFiles('buildozer.spec') }}
+          key: ${{ runner.os }}-buildozer-v2-2204-${{ hashFiles('buildozer.spec', 'android/pip-constraints.txt') }}
           restore-keys: |
-            ${{ runner.os }}-buildozer-2204-
+            ${{ runner.os }}-buildozer-v2-2204-
 
       # Equivalent to `./scripts/build_android.sh --debug --skip-deps`: a debug apk
       # needs no signing. Run buildozer directly so we don't drag in the local
       # script's venv/setup bootstrapping, which CI already handles above.
       - name: Build the debug apk
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/android/pip-constraints.txt
         run: buildozer android debug
 
       - name: Locate the apk
