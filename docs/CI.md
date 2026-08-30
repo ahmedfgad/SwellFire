@@ -6,7 +6,7 @@ builds that run on demand, directly or through the manual combined release workf
 
 | Workflow | File | Trigger | What it does |
 | --- | --- | --- | --- |
-| Desktop CI | `desktop-ci.yml` | every push and PR | Installs deps, byte-compiles, boots the app headless under xvfb. |
+| Desktop CI | `desktop-ci.yml` | every push and PR | Installs dev dependencies, runs regression tests, byte-compiles, and boots the app headless under xvfb. |
 | Build desktop apps | `desktop-build.yml` | manual + called by Release | PyInstaller binaries for Linux, Windows and macOS, one artifact each. |
 | Build Android app | `android-build.yml` | manual + called by Release | Buildozer debug `.apk` artifact. |
 | Build iOS app | `ios-build.yml` | manual + called by Release | Xcode 26 unsigned `.ipa` and configured Xcode project. |
@@ -16,7 +16,7 @@ builds that run on demand, directly or through the manual combined release workf
 ## Per-push smoke (`desktop-ci.yml`)
 
 Runs on every push and pull request against `main`/`master`. It installs the
-requirements on a clean Ubuntu runner, validates the Play-critical Android
+requirements on a clean Ubuntu runner, runs the regression suite, validates the Play-critical Android
 target/toolchain settings without building, byte-compiles every `.py` (catching
 syntax errors), and boots `main.py` under xvfb for a few seconds (catching
 import errors and first-frame crashes). It deliberately does **not** package
@@ -32,12 +32,12 @@ from the Actions tab with **Run workflow** (`workflow_dispatch`), or manually
 run `release.yml` to call all three in one workflow run.
 
 - **desktop-build.yml** — a Linux/Windows/macOS matrix that runs
-  `build_desktop.sh` (PyInstaller) on each OS and uploads the binary
+  `scripts/build_desktop.sh` (PyInstaller) on each OS and uploads the binary
   (`Swellfire-linux`, `Swellfire-windows`, `Swellfire-macos`). The Linux job
   also boots the packaged binary from a foreign cwd under xvfb to catch the
   packaged-asset-path class of bugs (see CLAUDE.md) that source-tree runs miss.
 - **android-build.yml** — runs `buildozer android debug` (the same thing as
-  `build_android.sh --debug`, reading the shared `buildozer.spec`) and uploads
+  `scripts/build_android.sh --debug`, reading the shared `buildozer.spec`) and uploads
   an unsigned `.apk`. It runs `tools/check_android_config.py` first so an old
   target API or packaging toolchain fails before the long build. No secrets
   needed; the signed Play `.aab` is built locally. The SDK/NDK are cached,
@@ -45,8 +45,8 @@ run `release.yml` to call all three in one workflow run.
 - **ios-build.yml** — unsigned `.ipa` plus the App Store-configured Xcode
   project on an Xcode 26 runner. **ios-app-store.yml** is a separate manual
   signing/archive workflow that requires protected Apple secrets and never
-  uploads automatically. Full notes are in `IOS_BUILD_WORKFLOW.md` and
-  `APP_STORE_RELEASE.md`.
+  uploads automatically. Full notes are in `docs/platforms/ios-build-workflow.md` and
+  `docs/release/app-store.md`.
 
 ## Combined release build (manual)
 
@@ -58,11 +58,11 @@ artifacts to a public release only after reviewing them.
 
 The signed Google Play `.aab` is intentionally **not** built in CI: it needs the
 private upload keystore, which must never live in a workflow. Build it locally
-with `./build_android.sh`. See `SIGNING.md`.
+with `./scripts/build_android.sh`. See `docs/platforms/android-signing.md`.
 
 ## Local builds
 
 The build scripts that CI wraps are documented in the project `README.md`:
-`build_desktop.sh`, `build_android.sh`, `build_ios.sh`. CI runs the same scripts
+`scripts/build_desktop.sh`, `scripts/build_android.sh`, `scripts/build_ios.sh`. CI runs the same scripts
 and the shared `buildozer.spec`, so a green local build is a good predictor of a
 green CI build.

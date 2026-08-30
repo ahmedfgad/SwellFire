@@ -3,7 +3,7 @@
 #
 # This is the heavy counterpart to desktop-ci.yml: where that workflow only
 # boots the app under xvfb on every push, this one runs the actual packaging
-# (build_desktop.sh -> PyInstaller) on a runner of each OS, because PyInstaller
+# (scripts/build_desktop.sh -> PyInstaller) on a runner of each OS, because PyInstaller
 # cannot cross-build. It is intentionally NOT run on every push — it is meant
 # for releases and on-demand checks:
 #
@@ -64,16 +64,16 @@ jobs:
             xvfb libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
             libsdl2-ttf-2.0-0 libgl1-mesa-dri libgles2 libmtdev1
 
-      # build_desktop.sh detects the OS, makes a venv, installs requirements +
+      # scripts/build_desktop.sh detects the OS, makes a venv, installs requirements +
       # PyInstaller and runs the packaging. Running it (rather than calling
       # PyInstaller directly) keeps CI and local builds on the exact same path.
       # bash is available on all three runners (Git Bash on Windows).
       - name: Build the desktop binary
-        # build_desktop.sh self-handles headless CI: it runs PyInstaller under
+        # scripts/build_desktop.sh self-handles headless CI: it runs PyInstaller under
         # xvfb on Linux when there is no display, and selects the ANGLE GL
         # backend on Windows. So CI and local builds run the exact same command.
         shell: bash
-        run: ./build_desktop.sh
+        run: ./scripts/build_desktop.sh
 
       # Linux: the onefile binary is ready to upload as-is. Boot it once from a
       # foreign working directory under xvfb to catch the packaged-asset-path

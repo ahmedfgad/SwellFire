@@ -6,7 +6,7 @@
 # What it produces (download from the run's Artifacts section):
 #   1. Swellfire-unsigned-ipa   an unsigned app file for sideloading with AltStore
 #                                or Sideloadly. Those tools sign it with your own
-#                                Apple ID. See IOS_INSTALL.md.
+#                                Apple ID. See docs/platforms/ios-install.md.
 #   2. Swellfire-xcode-project  the Xcode project. Open it on a Mac to set your
 #                                team, Archive, and upload to the App Store.
 #
@@ -61,7 +61,7 @@ jobs:
       - name: Install kivy-ios
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-ios.txt
+          python -m pip install -r requirements/ios.txt
 
       # The toolchain build (python3 and kivy) is the long step. Caching the
       # build and dist folders makes later runs much faster. To force a clean
@@ -73,7 +73,7 @@ jobs:
           path: |
             build
             dist
-          key: ${{ runner.os }}-xcode26-kivyios-${{ hashFiles('requirements-ios.txt') }}-v1
+          key: ${{ runner.os }}-xcode26-kivyios-${{ hashFiles('requirements/ios.txt') }}-v1
 
       - name: Build the iOS toolchain (python3 and kivy)
         run: |
@@ -85,8 +85,9 @@ jobs:
       # keeps the dev environment, build outputs and any secrets out of the app.
       - name: Stage the app files
         run: |
-          mkdir -p ios_app/assets
-          rsync -a --exclude='test_*.py' --include='*.py' --exclude='*' ./ ios_app/
+          mkdir -p ios_app/assets ios_app/swellfire
+          rsync -a main.py ios_app/
+          rsync -a --include='*/' --include='*.py' --exclude='*' swellfire/ ios_app/swellfire/
           # Mirror the runtime asset tree (atlases/music/sfx/ui). Use rsync so
           # we don't fail if a subfolder is empty during early development.
           rsync -a --exclude='raw/' assets/ ios_app/assets/ 2>/dev/null || true
@@ -175,7 +176,7 @@ jobs:
             echo ""
             echo "Two files are ready in the Artifacts section of this run."
             echo ""
-            echo "- Swellfire-unsigned-ipa: an unsigned app file. Install it on an iPhone with AltStore or Sideloadly, which sign it with your own Apple ID. See IOS_INSTALL.md."
+            echo "- Swellfire-unsigned-ipa: an unsigned app file. Install it on an iPhone with AltStore or Sideloadly, which sign it with your own Apple ID. See docs/platforms/ios-install.md."
             echo "- Swellfire-xcode-project: the Xcode project. Open it on a Mac to set your team, Archive, and upload to the App Store."
             echo ""
             echo "The app was not signed here, so no Apple account or secrets were needed."

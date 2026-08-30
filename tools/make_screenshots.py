@@ -3,7 +3,7 @@
 Scenes (mirroring CoinTex's set): title, world map, level select, gameplay
 (gates swelling the squad), boss fight, level-complete + stars, shop, guide.
 Each is captured by running capture.py as a subprocess so every shot gets a
-clean app boot. Run: `venv/bin/python tools/make_screenshots.py`
+clean app boot. Run: `.venv/bin/python tools/make_screenshots.py`
 """
 
 import os
@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from tools import capture_run
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 SIZE = "720x1280"   # portrait (the game is portrait: 540x960 logical)
 
 # (filename, kind, value, warmup-frames, frames, win)

@@ -2,10 +2,10 @@
 #
 # This builds the DEBUG apk, which is unsigned. That is deliberate: it needs no
 # keystore and no secrets, so the workflow runs on a fork or a fresh clone with
-# nothing to configure. It is the same thing `./build_android.sh --debug` does
+# nothing to configure. It is the same thing `./scripts/build_android.sh --debug` does
 # locally, reading the shared buildozer.spec, so a green local debug build
 # predicts a green CI build. The signed release .aab for Google Play is still
-# produced locally by `./build_android.sh` (it creates and uses a private
+# produced locally by `./scripts/build_android.sh` (it creates and uses a private
 # keystore that must never live in CI).
 #
 # Buildozer downloads the Android SDK/NDK on the first run (a few GB), so the
@@ -76,7 +76,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildozer-2204-
 
-      # Equivalent to `./build_android.sh --debug --skip-deps`: a debug apk
+      # Equivalent to `./scripts/build_android.sh --debug --skip-deps`: a debug apk
       # needs no signing. Run buildozer directly so we don't drag in the local
       # script's venv/setup bootstrapping, which CI already handles above.
       - name: Build the debug apk

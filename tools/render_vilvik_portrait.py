@@ -4,7 +4,7 @@ Reuses the Vilvik bumper visuals + audio from the moved package
 (/home/ahmed-gad/projects/vilvik/vilvik_brand) but renders frames with the
 thread-pool + per-worker-profile method used by make_swellfire_title (the
 package's ProcessPool renderer produces blank frames in this environment).
-Output: swellfire_media/videos/vilvik_<intro|outro>_1920p.mp4
+Output: marketing/videos/vilvik_<intro|outro>_1920p.mp4
 """
 
 import os
@@ -26,7 +26,7 @@ import make_vilvik_cards as V  # noqa: E402
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 CHS = V.CHS
 W, H, FPS = 1080, 1920, 60
-OUTDIR = os.path.join(ROOT, "swellfire_media", "videos")
+OUTDIR = os.path.join(ROOT, "marketing", "videos")
 
 
 def render_frames(html_text, work):

@@ -30,8 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kivy.clock import Clock        # noqa: E402
 
-import gates as gates_mod           # noqa: E402
-import levels                       # noqa: E402
+from swellfire import gates as gates_mod           # noqa: E402
+from swellfire import levels                       # noqa: E402
 import main as m                    # noqa: E402
 
 

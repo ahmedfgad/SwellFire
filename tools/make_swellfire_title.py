@@ -22,7 +22,7 @@ CHS = os.environ.get(
     "CHROME_SHELL",
     os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1223/"
                        "chrome-headless-shell-linux64/chrome-headless-shell"))
-ICON = os.path.join(ROOT, "swellfire_media", "icon.png")
+ICON = os.path.join(ROOT, "marketing", "icon.png")
 SECONDS = 3.8
 SR = 44100
 
@@ -158,7 +158,7 @@ def main():
     ap.add_argument("--width", type=int, default=1080)
     ap.add_argument("--height", type=int, default=1920)
     ap.add_argument("--fps", type=int, default=60)
-    ap.add_argument("--outdir", default=os.path.join(ROOT, "swellfire_media", "videos"))
+    ap.add_argument("--outdir", default=os.path.join(ROOT, "marketing", "videos"))
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
     work = os.path.join(a.outdir, ".title_work")

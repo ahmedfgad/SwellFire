@@ -1,5 +1,5 @@
 """Upscale the 8 phone screenshots (720x1280 portrait) to tablet size
-(1080x1920) with LANCZOS. Run: `venv/bin/python tools/upscale_screenshots.py`
+(1080x1920) with LANCZOS. Run: `.venv/bin/python tools/upscale_screenshots.py`
 """
 
 import glob
@@ -8,7 +8,7 @@ import os
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC = os.path.join(ROOT, "swellfire_media")
+SRC = os.path.join(ROOT, "marketing")
 DST = os.path.join(SRC, "tablet_screenshots")
 TARGET = (1080, 1920)   # portrait 9:16
 

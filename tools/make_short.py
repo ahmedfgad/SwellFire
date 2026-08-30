@@ -2,7 +2,7 @@
 
 Full-frame portrait gameplay (the game is portrait) with bold top captions and a
 short logo bookend. Captures at 540x960 and upscales on encode. Run:
-`venv/bin/python tools/make_short.py`
+`.venv/bin/python tools/make_short.py`
 """
 
 import os
@@ -18,7 +18,7 @@ import numpy as np
 from tools import capture_run, mix_audio, video_core, title_cards
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 WORK = os.path.join(ROOT, "build", "short_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")

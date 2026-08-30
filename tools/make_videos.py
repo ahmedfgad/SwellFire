@@ -5,7 +5,7 @@
 Captures gameplay at 540x960 (fast under the Xvfb software-GL display) and
 ffmpeg-upscales to 1080x1920; rebuilds each segment's soundtrack from the game's
 OWN wav files via tools/mix_audio; frames an intro/outro logo card. Heavy:
-captures thousands of frames. Run: `venv/bin/python tools/make_videos.py long`
+captures thousands of frames. Run: `.venv/bin/python tools/make_videos.py long`
 """
 
 import os
@@ -18,11 +18,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import numpy as np
 
-import levels
+from swellfire import levels
 from tools import capture_run, mix_audio, video_core, title_cards
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 WORK = os.path.join(ROOT, "build", "video_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")

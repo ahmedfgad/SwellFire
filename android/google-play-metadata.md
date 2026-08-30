@@ -63,9 +63,9 @@ No account, advertisements, tracking, or in-app purchases.
 | Play Console slot | Repository asset |
 | --- | --- |
 | 512×512 app icon | `icon.png` |
-| 1024×500 feature graphic | `swellfire_media/feature_graphic_1024x500.png` |
-| Phone screenshots, eight | `swellfire_media/01_menu.png` through `08_guide.png` |
-| 10-inch tablet screenshots, eight | `swellfire_media/tablet_screenshots/` |
+| 1024×500 feature graphic | `marketing/feature_graphic_1024x500.png` |
+| Phone screenshots, eight | `marketing/01_menu.png` through `08_guide.png` |
+| 10-inch tablet screenshots, eight | `marketing/tablet_screenshots/` |
 | Optional preview video | Use the published promo-video URL, not a local file path |
 
 The feature graphic is a 24-bit, alpha-free PNG. Google accepts up to eight

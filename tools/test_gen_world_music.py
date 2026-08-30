@@ -1,6 +1,6 @@
 """Headless tests for tools/gen_world_music.py — plain asserts, no pytest.
 
-Run: venv/bin/python tools/test_gen_world_music.py
+Run: .venv/bin/python tools/test_gen_world_music.py
 """
 import os
 import sys

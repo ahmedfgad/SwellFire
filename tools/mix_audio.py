@@ -12,7 +12,7 @@ import wave
 
 import numpy as np
 
-import audio as game_audio  # SFX_FILES, world_music_name, MENU/BOSS_MUSIC
+from swellfire import audio as game_audio  # SFX_FILES, world_music_name, MENU/BOSS_MUSIC
 
 SR = 44100
 MUSIC_DUCK = 0.55   # bed level under SFX

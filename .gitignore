@@ -260,4 +260,4 @@ assets/raw/
 .superpowers/
 
 # Generated marketing videos — large binaries, reproducible via tools/make_*.py
-swellfire_media/*.mp4
+marketing/*.mp4

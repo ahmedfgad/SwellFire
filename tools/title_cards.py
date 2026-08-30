@@ -6,7 +6,7 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-LOGO = os.path.join(ROOT, "swellfire_media", "re", "swellfire_logo.png")
+LOGO = os.path.join(ROOT, "marketing", "re", "swellfire_logo.png")
 BG = (18, 20, 16)            # dark ember to match the logo art
 GOLD = (255, 214, 120)
 

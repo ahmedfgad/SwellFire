@@ -25,7 +25,7 @@ end. Each *distinct* action should have a *distinct, fitting* cue — don't reus
 one generic blip for unrelated actions. If an action has **no** suitable sound,
 **generate one** and wire it:
 
-- Add a logical name → filename entry in `audio.py: SFX_FILES`, then play it
+- Add a logical name → filename entry in `swellfire/audio.py: SFX_FILES`, then play it
   with `app().audio.play_sfx("<name>")` at the action site.
 - New cues are synthesized by **`tools/gen_sfx.py`** (stdlib only) — add a
   builder there and run `python tools/gen_sfx.py` to (re)generate the WAV under
@@ -44,7 +44,7 @@ Prefer **reusing the existing effect primitives** rather than reinventing:
 - `graphics.ShieldAura` — glowing aura around the hero (model for other auras).
 - `kivy.animation.Animation(prop=…, duration=…, t="out_quad").start(widget)` — tween any property (opacity/pos/size/font_size/color).
 - `ui._fade_in_modal(modal)` — dialogs fade in instead of popping; use on every new modal.
-- `audio.play_sfx(name)` — sfx cue (bank in `audio.py: SFX_FILES`).
+- `audio.play_sfx(name)` — sfx cue (bank in `swellfire/audio.py: SFX_FILES`).
 
 When you finish a change, sanity-check that nothing meaningful happens silently
 or instantly. If you must bound coverage, say what you left un-juiced — don't
@@ -53,14 +53,14 @@ imply full coverage you didn't do.
 ## Architecture quick map
 
 - `main.py` — App + ScreenManager (FadeTransition); registers all screens incl. `"shop"`, `"game"`. Navigate via `app().go("<screen>")`.
-- `game.py` — `GameScreen`: the run loop (`_update`), HUD, boosters, boss, pause, multiplayer host/client.
-- `gates.py` — `Gate` (two-line glyph labels), `GateSpawner` (math-vs-math pairing, bonus pairs), `GateController`.
-- `boosters.py` — booster registry; effects live in `GameScreen` (keys G/S/R/F/O/M).
-- `levels.py` — config-driven levels (`get_level`, `build_mp_level`); everything (gates/enemies/boss) reads from the level `cfg`.
-- `state.py` — JSON save: coins, booster balances (`*_balance`), weapon tiers, flags.
-- `shop.py` — `CATALOG` of `ShopItem`s (weapons/boosters/squad); `ui.ShopScreen` renders, `state` purchases.
-- `graphics.py` — `SpriteAtlas` (atlas UVs — see note), `BatchedRenderer` (pooled mesh draws), sprite widgets, `Background`, `ShieldAura`.
-- `entities.py` — pools/controllers (enemies, projectiles, particles, pickups, squad).
+- `swellfire/game.py` — `GameScreen`: the run loop (`_update`), HUD, boosters, boss, pause, multiplayer host/client.
+- `swellfire/gates.py` — `Gate` (two-line glyph labels), `GateSpawner` (math-vs-math pairing, bonus pairs), `GateController`.
+- `swellfire/boosters.py` — booster registry; effects live in `GameScreen` (keys G/S/R/F/O/M).
+- `swellfire/levels.py` — config-driven levels (`get_level`, `build_mp_level`); everything (gates/enemies/boss) reads from the level `cfg`.
+- `swellfire/state.py` — JSON save: coins, booster balances (`*_balance`), weapon tiers, flags.
+- `swellfire/shop.py` — `CATALOG` of `ShopItem`s (weapons/boosters/squad); `ui.ShopScreen` renders, `state` purchases.
+- `swellfire/graphics.py` — `SpriteAtlas` (atlas UVs — see note), `BatchedRenderer` (pooled mesh draws), sprite widgets, `Background`, `ShieldAura`.
+- `swellfire/entities.py` — pools/controllers (enemies, projectiles, particles, pickups, squad).
 
 ## Gotchas
 
@@ -80,8 +80,8 @@ imply full coverage you didn't do.
   magnitude, wrap it in `graphics.ws()`** — keep the base constant as the
   readable logical value. Sites that bypass the scaled spawners (direct
   `enemy_controller.spawn` in the splitter code + `boss.py` minions) scale
-  inline. Regression test: `SDL_AUDIODRIVER=dummy venv/bin/python
-  test_world_scale.py`. (MP positions are sent normalized to stage fraction —
+  inline. Regression test: `SDL_AUDIODRIVER=dummy .venv/bin/python
+  tests/test_world_scale.py`. (MP positions are sent normalized to stage fraction —
   `norm_x` — so they stay density-independent; cross-device *different*-density
   lockstep is still untested.)
 - **Atlas UVs**: `SpriteAtlas._build_frames` maps frames with **no vertical flip** (this Kivy/provider loads PIL-row-0 at GL v=0). Don't "restore" a `1 - y/H` flip or `get_region`-derived coords — they sample the empty half and render transparent against the 256×256 atlases.
@@ -93,10 +93,10 @@ imply full coverage you didn't do.
 
 ## Media generation
 
-Marketing/store assets live in `swellfire_media/` (build-excluded) and are
-reproducible from `tools/` — dev deps in `requirements-media.txt` (PIL, numpy,
+Marketing/store assets live in `marketing/` (build-excluded) and are
+reproducible from `tools/` — dev deps in `requirements/media.txt` (PIL, numpy,
 imageio-ffmpeg; never a runtime/mobile dep). Brand graphics derive from the
-hand-authored art in `swellfire_media/re/` (`gen_brand_assets`,
+hand-authored art in `marketing/re/` (`gen_brand_assets`,
 `make_feature_graphic`, `make_youtube_thumbnail`). Screenshots + video frames are
 captured from the real game by `tools/capture.py` (fixed-dt harness that drives
 the GA autoplayer inline and grabs the GL framebuffer). The game is **portrait**;
@@ -107,10 +107,9 @@ import-time `Config` would otherwise force a too-tall window). Video soundtracks
 are rebuilt from the game's own wavs by `tools/mix_audio.py` and muxed via the
 static ffmpeg in `tools/video_core.py`; `make_videos`/`make_promo`/`make_short`
 build the three videos, `title_cards` renders logo cards/labels. See
-`swellfire_media/README.md` for regen commands.
+`marketing/README.md` for regen commands.
 
 ## Verify
 
-`SDL_AUDIODRIVER=dummy venv/bin/python main.py` (needs a display). Headless logic
-tests run via `venv/bin/python - <<'PY' … PY` from the repo root (cwd import).
-Media tool tests: `SDL_AUDIODRIVER=dummy venv/bin/python -m pytest tools/tests/ -q`.
+Run all regression tests from the repository root with `SDL_AUDIODRIVER=dummy .venv/bin/python -m pytest -q`. Boot the app with `SDL_AUDIODRIVER=dummy .venv/bin/python main.py` (needs a display).
+Media tool tests: `SDL_AUDIODRIVER=dummy .venv/bin/python -m pytest tools/tests/ -q`.

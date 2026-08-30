@@ -20,7 +20,7 @@ def test_segments_one_regular_level_for_worlds_1_to_4():
 def test_segment_frame_cap_covers_real_time_length():
     """The safety cap must exceed the level's real-time frame count (so a full
     real-time playthrough is never truncated mid-level)."""
-    import levels
+    from swellfire import levels
     from tools import make_videos
     for label, level, warmup, frames in make_videos._segments():
         secs = (levels.get_level(level)["distance_goal"]

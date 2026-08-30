@@ -44,7 +44,12 @@ jobs:
       - name: Install Python requirements
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements/dev.txt
+
+      - name: Run the regression suite
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: python -m pytest -q
 
       - name: Check Google Play target configuration
         run: python tools/check_android_config.py

@@ -8,7 +8,7 @@ ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 
 def test_feature_graphic_dims_and_written():
     fg.main()
-    p = os.path.join(ROOT, "swellfire_media", "feature_graphic_1024x500.png")
+    p = os.path.join(ROOT, "marketing", "feature_graphic_1024x500.png")
     assert os.path.exists(p)
     im = Image.open(p)
     assert im.size == (1024, 500)

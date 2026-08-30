@@ -19,7 +19,7 @@ from tools.make_screenshots import SHOTS
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media", "app_store")
+MEDIA = os.path.join(ROOT, "marketing", "app_store")
 
 # Apple accepts these exact portrait dimensions for their current largest
 # iPhone and iPad screenshot groups. One complete set per device class is enough

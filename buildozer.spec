@@ -18,9 +18,9 @@ source.include_exts = py,png,wav,json,atlas
 
 # Folders to leave out of the package. PlayerGA is the research version of the
 # auto-player and pulls in pygad+numpy. tools/ is dev-only.
-source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache__, PlayerGA, tools, assets/raw, swellfire_media
+source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache__, PlayerGA, tools, tests, scripts, docs, requirements, assets/raw, marketing
 
-# Root-level regression tests are not runtime code and must not inflate the app.
+# Keep stray regression-test modules out as a defense in depth.
 source.exclude_patterns = test_*.py
 
 # Version shown to users.
@@ -81,7 +81,7 @@ android.archs = arm64-v8a, armeabi-v7a
 android.accept_sdk_license = True
 
 # Release file to build: aab or apk. The Play Store upload uses the aab.
-# build_android.sh switches this when it also builds the apk for testing.
+# scripts/build_android.sh switches this when it also builds the apk for testing.
 android.release_artifact = aab
 
 # Version code for the API 36 compliance update, raised from 10000. It must be
@@ -92,7 +92,7 @@ android.numeric_version = 10001
 # Background color of the splash screen.
 android.presplash_color = #000000
 
-# Release signing is passed in by build_android.sh through the P4A_RELEASE_KEYSTORE
+# Release signing is passed in by scripts/build_android.sh through the P4A_RELEASE_KEYSTORE
 # environment variables, so no keystore is written here.
 
 

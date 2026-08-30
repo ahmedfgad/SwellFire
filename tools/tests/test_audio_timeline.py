@@ -1,7 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-import audio
+from swellfire import audio
 
 
 def test_timeline_off_by_default():

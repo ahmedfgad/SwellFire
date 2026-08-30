@@ -6,9 +6,9 @@ frame, and writes a frames dir + audio-event JSON.
 
 Usage examples:
   # one screenshot of a meta screen
-  venv/bin/python tools/capture.py --screen menu --shot out/menu.png --size 1280x720
+  .venv/bin/python tools/capture.py --screen menu --shot out/menu.png --size 1280x720
   # a gameplay segment of level 2 for N frames at 1080p
-  venv/bin/python tools/capture.py --level 2 --frames 600 --out out/seg_w1_lvl \
+  .venv/bin/python tools/capture.py --level 2 --frames 600 --out out/seg_w1_lvl \
       --size 1920x1080 --audio out/seg_w1_lvl.json
 """
 
@@ -122,7 +122,7 @@ def main(argv=None):
     import main as appmod
     from kivy.clock import Clock
     from tools.capture_core import grab_frame
-    import autoplay
+    from swellfire import autoplay
 
     app = appmod.SwellfireApp()
     state = {"frame": 0, "simt": 0.0, "ap_accum": 0.0, "done": False,
@@ -184,7 +184,7 @@ def main(argv=None):
             # Capture-only "upgraded weapons": scale weapon damage so the squad
             # genuinely shreds enemies and clears the level (squad still grows/
             # shrinks via gates and losses — nothing is pinned).
-            import weapons as _wp
+            from swellfire import weapons as _wp
             _orig_td = _wp.tier_damage
             _wp.tier_damage = (lambda w, t, _o=_orig_td, _k=float(args.power):
                                max(1, int(round(_o(w, t) * _k))))

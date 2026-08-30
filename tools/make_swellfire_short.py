@@ -3,7 +3,7 @@
 SwellFire is already portrait, so no reframing is needed: take the Swellfire
 title, a few punchy gameplay snippets across worlds, and the Vilvik outro, and
 concatenate. Reuses the promo's per-world segments. Run after the promo build:
-  venv/bin/python tools/make_swellfire_short.py
+  .venv/bin/python tools/make_swellfire_short.py
 """
 
 import os
@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import imageio_ffmpeg
 FF = imageio_ffmpeg.get_ffmpeg_exe()
 
-VIDEOS = os.path.join(ROOT, "swellfire_media", "videos")
+VIDEOS = os.path.join(ROOT, "marketing", "videos")
 BUILD = os.path.join(VIDEOS, ".promo_build")
 WORK = os.path.join(VIDEOS, ".short_work")
 OUTPUT = os.path.join(VIDEOS, "swellfire_short_9x16.mp4")

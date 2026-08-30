@@ -1,0 +1,4 @@
+# Complete local development and test environment.
+-r base.txt
+-r media.txt
+pygad

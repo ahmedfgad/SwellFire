@@ -1,6 +1,6 @@
 """Promo video (portrait 1080x1920, ~35s): logo intro -> fast highlight windows
 (squad growth, combat across worlds, a boss fight) -> end card. Captures at
-540x960 and upscales on encode. Run: `venv/bin/python tools/make_promo.py`
+540x960 and upscales on encode. Run: `.venv/bin/python tools/make_promo.py`
 """
 
 import os
@@ -16,7 +16,7 @@ import numpy as np
 from tools import capture_run, mix_audio, video_core, title_cards
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 WORK = os.path.join(ROOT, "build", "promo_work")
 MUSIC_DIR = os.path.join(ROOT, "assets", "music")
 SFX_DIR = os.path.join(ROOT, "assets", "sfx")

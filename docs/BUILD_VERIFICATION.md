@@ -8,9 +8,9 @@ stay reproducible. This document tracks what is automated and how to run it.
 
 | Platform | Build method | Automated? | Workflow | Notes |
 | --- | --- | --- | --- | --- |
-| Linux (desktop) | `build_desktop.sh` + PyInstaller | ✅ full build + boot | `desktop-build.yml` | Onefile binary; also boots from a foreign cwd under xvfb. Boot-only smoke on every push via `desktop-ci.yml`. |
-| Windows (desktop) | `build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.exe` on a `windows-latest` runner. |
-| macOS (desktop) | `build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.app` (zipped with `ditto`) on a `macos-14` runner. |
+| Linux (desktop) | `scripts/build_desktop.sh` + PyInstaller | ✅ full build + boot | `desktop-build.yml` | Onefile binary; also boots from a foreign cwd under xvfb. Boot-only smoke on every push via `desktop-ci.yml`. |
+| Windows (desktop) | `scripts/build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.exe` on a `windows-latest` runner. |
+| macOS (desktop) | `scripts/build_desktop.sh` + PyInstaller | ✅ full build | `desktop-build.yml` | `Swellfire.app` (zipped with `ditto`) on a `macos-14` runner. |
 | Android | `buildozer android debug` | ✅ full build | `android-build.yml` | Unsigned debug `.apk`. Signed Play `.aab` stays local. |
 | iOS | kivy-ios + Xcode 26 | ✅ unsigned build; signed archive ready | `ios-build.yml`, `ios-app-store.yml` | Universal iPhone/iPad; signed workflow requires Apple secrets. |
 | Web (optional) | — | ❌ | — | Out of scope unless requested. |
@@ -38,11 +38,11 @@ The iOS half was already done (`ios-build.yml`); it is now reusable via
 | --- | --- |
 | Build one platform on demand | Actions tab → pick the workflow → **Run workflow** |
 | Build everything and publish a release | `git tag v1.0 && git push origin v1.0` |
-| Build locally | `build_desktop.sh`, `build_android.sh`, `build_ios.sh` (see README) |
+| Build locally | `scripts/build_desktop.sh`, `scripts/build_android.sh`, `scripts/build_ios.sh` (see README) |
 
 ## Verification status
 
-- **Linux desktop** — verified locally: `build_desktop.sh` produces a working
+- **Linux desktop** — verified locally: `scripts/build_desktop.sh` produces a working
   onefile `dist/Swellfire` that boots cleanly from a foreign cwd
   (`cd /tmp && SDL_AUDIODRIVER=dummy <path>/dist/Swellfire`), exercising the
   exact smoke step `desktop-build.yml` runs.

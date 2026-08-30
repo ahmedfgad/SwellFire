@@ -44,7 +44,7 @@ def main() -> None:
     )
     for required in (
         "runs-on: macos-26",
-        "requirements-ios.txt",
+        "requirements/ios.txt",
         "toolchain pip install certifi",
         "tools/ios_configure_project.py",
         "Archive iOS for App Store",
@@ -63,7 +63,7 @@ def main() -> None:
         expect(required in asset_script, f"App Store icon generator is missing {required!r}")
 
     for path in (
-        "APP_STORE_RELEASE.md",
+        "docs/release/app-store.md",
         "PRIVACY.md",
         "SUPPORT.md",
         "ios/app-store-metadata.md",

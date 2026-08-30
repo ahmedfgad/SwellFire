@@ -2,7 +2,7 @@
 
 The user supplied a logo, presplash, and YouTube cover but no feature graphic,
 so we derive one from the cover (same style): center-crop it to the 1024:500
-aspect ratio, then resize. Run: `venv/bin/python tools/make_feature_graphic.py`
+aspect ratio, then resize. Run: `.venv/bin/python tools/make_feature_graphic.py`
 """
 
 import os
@@ -10,10 +10,10 @@ import os
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-RAW_SRC = os.path.join(ROOT, "swellfire_media", "re", "swellfire_youtube_cover.png")
-FALLBACK_SRC = os.path.join(ROOT, "swellfire_media", "youtube_thumbnail_1280x720.png")
+RAW_SRC = os.path.join(ROOT, "marketing", "re", "swellfire_youtube_cover.png")
+FALLBACK_SRC = os.path.join(ROOT, "marketing", "youtube_thumbnail_1280x720.png")
 SRC = RAW_SRC if os.path.exists(RAW_SRC) else FALLBACK_SRC
-OUT = os.path.join(ROOT, "swellfire_media", "feature_graphic_1024x500.png")
+OUT = os.path.join(ROOT, "marketing", "feature_graphic_1024x500.png")
 TARGET = (1024, 500)
 
 

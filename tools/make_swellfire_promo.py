@@ -7,7 +7,7 @@ genuinely fail) -> Vilvik outro. Per-world soundtrack (world music + SFX) is
 rebuilt from the capture's audio-event log. Emits chapter timestamps.
 
 Reuses tools/capture.py (--playthrough --mp4 [--no-seed]) + tools/mix_audio.
-Run: venv/bin/python tools/make_swellfire_promo.py
+Run: .venv/bin/python tools/make_swellfire_promo.py
 """
 
 import os
@@ -20,11 +20,11 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import imageio_ffmpeg
-import levels
+from swellfire import levels
 from tools import capture_run, mix_audio
 
 FF = imageio_ffmpeg.get_ffmpeg_exe()
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 VIDEOS = os.path.join(MEDIA, "videos")
 BUILD = os.path.join(VIDEOS, ".promo_build")
 MUSIC = os.path.join(ROOT, "assets", "music")

@@ -1,12 +1,12 @@
 """Apply the user-provided brand art (icon + presplash) into place.
 
 The launcher/window icon and the presplash are authored by hand and live under
-`swellfire_media/re/`. This script resizes/copies them into the canonical
+`marketing/re/`. This script resizes/copies them into the canonical
 locations the build configs reference:
-  - icon.png       (512x512)  at repo root + swellfire_media/
-  - presplash.png  (native)   at repo root + swellfire_media/
+  - icon.png       (512x512)  at repo root + marketing/
+  - presplash.png  (native)   at repo root + marketing/
 
-Re-run: `venv/bin/python tools/gen_brand_assets.py`
+Re-run: `.venv/bin/python tools/gen_brand_assets.py`
 """
 
 import os
@@ -15,7 +15,7 @@ import shutil
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MEDIA = os.path.join(ROOT, "swellfire_media")
+MEDIA = os.path.join(ROOT, "marketing")
 RE = os.path.join(MEDIA, "re")
 
 RAW_LOGO_SRC = os.path.join(RE, "swellfire_logo.png")

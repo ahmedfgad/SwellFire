@@ -83,14 +83,14 @@ Generate and visually review the eight screenshots for both checked-in device
 families:
 
 ```bash
-python -m pip install -r requirements-media.txt
+python -m pip install -r requirements/media.txt
 python tools/make_app_store_screenshots.py
 ```
 
 Upload from:
 
-- `swellfire_media/app_store/iphone_6_9/` — 1284×2778 portrait;
-- `swellfire_media/app_store/ipad_13/` — 2064×2752 portrait.
+- `marketing/app_store/iphone_6_9/` — 1284×2778 portrait;
+- `marketing/app_store/ipad_13/` — 2064×2752 portrait.
 
 App Store icons are generated into the Xcode asset catalog during the build,
 including the alpha-free 1024×1024 marketing icon.

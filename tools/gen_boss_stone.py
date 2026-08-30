@@ -15,7 +15,7 @@ silhouette stays intact (transparent stays transparent).
 
 Run once and commit the twins:
 
-    venv/bin/python tools/gen_boss_stone.py
+    .venv/bin/python tools/gen_boss_stone.py
 """
 
 from __future__ import annotations

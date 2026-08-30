@@ -3,9 +3,9 @@
 M1: screen scaffolding. All eleven meta screens (menu, world map, level select,
 settings, about, guide, tutorial, autoplayer tuning, multiplayer menu, host,
 join) are wired through a ScreenManager and persist progress to a JSON save
-via state.GameState. Gameplay (auto-scroll world, hero, enemies, gates,
-weapons, squad mechanic, boss waves, networked sync, GA autoplay) lands in
-M3-M13 — see the plan at /home/ahmed-gad/.claude/plans/.
+via `swellfire.state.GameState`. Gameplay (auto-scroll world, hero, enemies, gates,
+weapons, squad mechanics, boss waves, networked sync, and GA autoplay) lives
+in the `swellfire` runtime package.
 """
 
 import os
@@ -78,12 +78,9 @@ else:
     ASSET_ROOT = os.path.dirname(os.path.abspath(__file__))
 resource_add_path(ASSET_ROOT)
 
-import ui
-import levels
-import stresstest
-import game
-from audio import AudioManager
-from state import GameState
+from swellfire import game, levels, stresstest, ui
+from swellfire.audio import AudioManager
+from swellfire.state import GameState
 
 
 def app():

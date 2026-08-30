@@ -15,7 +15,7 @@
 #
 # Each build workflow is reused via `uses:` and can also be run on its own from
 # the Actions tab. The signed Google Play .aab is produced locally with
-# ./build_android.sh, not here.
+# ./scripts/build_android.sh, not here.
 
 name: Release
 
