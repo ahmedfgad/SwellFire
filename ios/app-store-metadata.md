@@ -12,7 +12,7 @@ record. Review every field against the final archive before submitting.
 | Primary language | English (U.S.) |
 | Primary category | Games — Action |
 | Secondary category | Games — Casual |
-| Version | `1.0.1` |
+| Version | `1.0.2` |
 | Copyright | 2026 Ahmed Fawzy Gad |
 | Support URL | `https://github.com/ahmedfgad/SwellFire/blob/main/SUPPORT.md` |
 | Privacy policy URL | `https://github.com/ahmedfgad/SwellFire/blob/main/PRIVACY.md` |

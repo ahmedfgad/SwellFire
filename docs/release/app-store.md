@@ -1,7 +1,7 @@
 # Publishing Swellfire on the Apple App Store
 
 The repository is prepared for a universal iPhone/iPad App Store build. It uses
-bundle ID `com.vilvik.swellfire`, version `1.0.1`, minimum iOS 15, a complete icon
+bundle ID `com.vilvik.swellfire`, version `1.0.2`, minimum iOS 15, a complete icon
 catalog, a privacy manifest, verified HTTPS, and the iOS 26 SDK baseline. No
 certificate, provisioning profile, signed archive, or upload is committed.
 

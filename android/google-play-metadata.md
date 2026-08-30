@@ -14,8 +14,8 @@ account or contact details that are not stored in this repository.
 | Price | Free |
 | Contains ads | No |
 | In-app purchases | No |
-| Version name | `1.0.1` |
-| Version code | `10001` |
+| Version name | `1.0.2` |
+| Version code | `10002` |
 | Contact email | `ahmed.f.gad@gmail.com` |
 | Support URL | `https://github.com/ahmedfgad/SwellFire/blob/main/SUPPORT.md` |
 | Privacy policy URL | `https://github.com/ahmedfgad/SwellFire/blob/main/PRIVACY.md` |
@@ -50,13 +50,12 @@ Features:
 
 No account, advertisements, tracking, or in-app purchases.
 
-## What's new in 1.0.1
+## What's new in 1.0.2
 
-- Updated for Android 16 and API level 36.
-- Improved edge-to-edge spacing and larger touch controls.
-- Improved pause, resume, Back button, and audio behavior.
-- Hardened saved progress, purchases, boosters, and multiplayer messages.
-- Fixed delayed dialogs and multiplayer connection cleanup.
+- Rebalanced the early-game difficulty and progression curve.
+- Improved gate selection, spawning, weapon tiers, and combat feedback.
+- Reorganized the app into a maintainable package without changing save data.
+- Expanded regression coverage across gameplay and release tooling.
 
 ## Graphics
 
@@ -118,8 +117,8 @@ answers consistent with `PRIVACY.md`.
 
 ## Production upload
 
-Upload the signed Android App Bundle for version `1.0.1` (`10001`) to the
+Upload the signed Android App Bundle for version `1.0.2` (`10002`) to the
 production release in Play Console. Keep the signed APK for direct downloads
 and the GitHub release. Before rollout, confirm that Play App Signing accepts
-the active upload certificate and that `10001` is higher than the version code
+the active upload certificate and that `10002` is higher than the version code
 already published.

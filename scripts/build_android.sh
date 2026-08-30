@@ -154,7 +154,7 @@ ls -1 bin/ 2>/dev/null || true
 
 # Print package details from the apk using aapt from the downloaded SDK.
 AAPT="$(find "$HOME/.buildozer" -type f -name aapt 2>/dev/null | sort | tail -1 || true)"
-APK="$(ls -1 bin/*.apk 2>/dev/null | head -1 || true)"
+APK="$(ls -1t bin/*-release.apk 2>/dev/null | head -1 || true)"
 if [[ -n "$AAPT" && -n "$APK" ]]; then
     echo ""
     echo "Details of $APK:"

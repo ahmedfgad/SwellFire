@@ -9,7 +9,7 @@ on:
       build_number:
         description: Unique App Store build number (positive integer)
         required: true
-        default: "10001"
+        default: "10002"
         type: string
 
 permissions:

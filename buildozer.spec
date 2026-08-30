@@ -24,7 +24,7 @@ source.exclude_dirs = bin, dist, build, venv, .venv, .buildozer, .git, __pycache
 source.exclude_patterns = test_*.py
 
 # Version shown to users.
-version = 1.0.1
+version = 1.0.2
 
 # Packages the app needs. Networking uses the Python standard library.
 requirements = python3,kivy,certifi
@@ -87,7 +87,7 @@ android.release_artifact = aab
 # Version code for the API 36 compliance update, raised from 10000. It must be
 # higher than the version code already on Google Play or the upload is rejected;
 # confirm the live value in Play Console before building.
-android.numeric_version = 10001
+android.numeric_version = 10002
 
 # Background color of the splash screen.
 android.presplash_color = #000000

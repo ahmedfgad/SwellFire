@@ -16,7 +16,7 @@ together.
 | Public name | Swellfire |
 | Android package | `com.vilvik.swellfire` |
 | Apple bundle ID | `com.vilvik.swellfire` |
-| Current version | `1.0.1` |
+| Current version | `1.0.2` |
 | Developer | Ahmed Fawzy Gad |
 | Support email | `ahmed.f.gad@gmail.com` |
 | Support page | `SUPPORT.md` |
