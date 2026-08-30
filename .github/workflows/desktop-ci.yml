@@ -50,7 +50,7 @@ jobs:
       - name: Run the regression suite
         env:
           SDL_AUDIODRIVER: dummy
-        run: python -m pytest -q
+        run: xvfb-run -a python -m pytest -q
 
       - name: Check Google Play target configuration
         run: python tools/check_android_config.py
