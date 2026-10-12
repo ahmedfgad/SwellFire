@@ -61,12 +61,18 @@ fingerprint and refuses to silently create a replacement key. Details are in
   attestation. App Store Connect still needs the account's EU trader-status
   information and applicable agreements, tax, banking, content rights,
   encryption, pricing, and availability declarations.
-- App Store screenshot files are prepared in the required iPhone and iPad
-  sizes; they still need uploading to the App Store Connect media slots.
-- App Review contact name and email are filled from the existing Apple app
-  listing. App Store Connect still requires the review contact phone number.
-- Apple signing materials are not currently present in GitHub Actions, so a
-  signed iOS archive cannot yet be produced by the workflow.
+- Eight screenshots for the current iPhone Dynamic Island medium slot and eight
+  for the iPad 13-inch slot are uploaded in App Store Connect. Their source
+  images remain under `marketing/app_store/`.
+- App Review contact details are saved in App Store Connect, including the
+  phone number supplied by the account holder.
+- The privacy label is saved as a draft. The account holder confirmed its data
+  answers, but Apple still asks for an action-time confirmation to publish the
+  label.
+- Apple signing materials are not currently present in GitHub Actions. The
+  CoinTex release uses the same Apple team and is coordinating creation of a
+  team-wide distribution certificate/API key before SwellFire configures its
+  app-specific provisioning profile and secrets.
 - The Android upload key is verified and stored in the encrypted backup and
   GitHub Actions secrets. The signed release workflow is ready; its AAB still
   needs to be built and uploaded to Play Console.
