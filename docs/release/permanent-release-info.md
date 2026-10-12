@@ -16,6 +16,9 @@ The iOS marketing version and build number live in `ios/app.env`. Bump the
 build number for every uploaded App Store build. Keep the listing text in
 `ios/app-store-metadata.md`, Android listing text in
 `android/google-play-metadata.md`, and screenshots in `marketing/`.
+The App Store Connect draft is configured as a free public app in all 175
+countries or regions, matching the free Google Play listing. Availability takes
+effect only when the app is released.
 
 ## Apple signing recovery
 
@@ -50,6 +53,8 @@ not silently create a replacement key. Never commit these files.
   encryption, pricing, and availability declarations.
 - App Store screenshot files are prepared in the required iPhone and iPad
   sizes; they still need uploading to the App Store Connect media slots.
+- App Review contact name and email are filled from the existing Apple app
+  listing. App Store Connect still requires the review contact phone number.
 - Apple signing materials are not currently present in GitHub Actions, so a
   signed iOS archive cannot yet be produced by the workflow.
 - The Android production signing files are not in the repository checkout. A
