@@ -77,9 +77,15 @@ fingerprint and refuses to silently create a replacement key. Details are in
   images remain under `marketing/app_store/`.
 - App Review contact details are saved in App Store Connect, including the
   phone number supplied by the account holder.
-- The privacy label is saved as a draft. The account holder confirmed its data
-  answers, but Apple still asks for an action-time confirmation to publish the
-  label.
+- The App Privacy label is published with the account holder's confirmed
+  answers: Other Data linked to the user, used for app functionality, and not
+  used for tracking. It should be revisited if data practices or provider
+  behavior changes.
+- The account holder confirmed non-trader status while choosing EU distribution;
+  Apple's Digital Services Act compliance shows Active for all 27 EU regions.
+- The account holder confirmed the background soundfont is their own work.
+  App Store Connect content rights are set to no third-party content; revisit
+  this declaration if third-party content is added.
 - Apple signing materials are configured in GitHub Actions. Swellfire uses the
   existing team distribution certificate and API key shared with CoinTex, and
   its own App Store profile. Do not create a duplicate team certificate or API
@@ -89,7 +95,7 @@ fingerprint and refuses to silently create a replacement key. Details are in
   automatic protection requires minimum API 24; the app configuration now
   targets API 24 and the replacement release uses version code 10004. This
   drops support for Android 5.0–6.x while that Play protection remains enabled.
-  The first AAB remains in the production release draft as a rejected upload;
-  it must be replaced with the rebuilt 10004 bundle before rollout.
+  The rejected upload was removed from the production release draft; upload the
+  rebuilt 10004 bundle before rollout.
 - Keep the original signing material and recovery instructions backed up before
   making future releases.

@@ -1,3 +1,7 @@
 # Python-for-android's Python 3.14 host build bundles pip 25.3. Upgrading that
 # temporary venv to pip 26 currently leaves mixed internals during cross-builds.
 pip==25.3
+# P4A resolves Requests for its Python 3.14 target. Keep charset-normalizer on
+# the pure-Python release so host pip does not try to install its Android-tagged
+# cp314 wheel into the cross-compiled target site-packages directory.
+charset-normalizer==3.4.2

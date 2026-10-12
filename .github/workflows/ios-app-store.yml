@@ -8,7 +8,7 @@ on:
       build_number:
         description: Unique App Store build number (positive integer)
         required: true
-        default: "10003"
+        default: "10004"
         type: string
 
 permissions:
@@ -207,6 +207,18 @@ jobs:
           $PB -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
           $PB -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
           $PB -c 'Print :CFBundleVersion' "$APP/Info.plist"
+          ENCRYPTION=$($PB -c 'Print :ITSAppUsesNonExemptEncryption' "$APP/Info.plist")
+          if [ "$ENCRYPTION" != "false" ]; then
+            echo "Expected ITSAppUsesNonExemptEncryption=false in the exported app." >&2
+            exit 1
+          fi
+          PRIVACY_MANIFEST="$APP/PrivacyInfo.xcprivacy"
+          test -f "$PRIVACY_MANIFEST"
+          DATA_LINKED=$($PB -c 'Print :NSPrivacyCollectedDataTypes:0:NSPrivacyCollectedDataTypeLinked' "$PRIVACY_MANIFEST")
+          if [ "$DATA_LINKED" != "true" ]; then
+            echo "The privacy manifest must match the published linked-data declaration." >&2
+            exit 1
+          fi
 
       - name: Preserve the signed IPA and archive
         uses: actions/upload-artifact@v4

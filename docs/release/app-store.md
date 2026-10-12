@@ -26,7 +26,10 @@ The draft listing text, Games category, 13+ age rating, App Review contact and
 notes, and privacy policy URL are saved in App Store Connect. Eight screenshots
 are uploaded for the current iPhone Dynamic Island medium size and eight for the
 iPad 13-inch size. Their source PNGs are under `marketing/app_store/`. The
-privacy label remains a draft until its accuracy attestation is published.
+privacy label is published with the account holder's confirmed answers;
+revisit it if the app's data practices change. The account holder also
+confirmed non-trader EU distribution status and that Swellfire contains no
+third-party content; both declarations are saved in App Store Connect.
 
 The bundle ID is the app's permanent identity. Do not use the old CI-only ID
 `com.ahmedgad.swellfire`.
