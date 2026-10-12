@@ -14,8 +14,8 @@ account or contact details that are not stored in this repository.
 | Price | Free |
 | Contains ads | No |
 | In-app purchases | No |
-| Version name | `1.0.2` |
-| Version code | `10002` |
+| Version name | `1.0.3` |
+| Version code | `10003` |
 | Contact email | `ahmed.f.gad@gmail.com` |
 | Support URL | `https://github.com/ahmedfgad/SwellFire/blob/main/SUPPORT.md` |
 | Privacy policy URL | `https://github.com/ahmedfgad/SwellFire/blob/main/PRIVACY.md` |
@@ -49,6 +49,11 @@ Features:
 - optional direct two-player multiplayer over a reachable network.
 
 No account, advertisements, tracking, or in-app purchases.
+
+## What's new in 1.0.3
+
+- Swipe inward from either screen edge to navigate back on touch devices.
+- Keep edge touches available for steering while a level is in progress.
 
 ## What's new in 1.0.2
 
@@ -117,8 +122,8 @@ answers consistent with `PRIVACY.md`.
 
 ## Production upload
 
-Upload the signed Android App Bundle for version `1.0.2` (`10002`) to the
+Upload the signed Android App Bundle for version `1.0.3` (`10003`) to the
 production release in Play Console. Keep the signed APK for direct downloads
 and the GitHub release. Before rollout, confirm that Play App Signing accepts
-the active upload certificate and that `10002` is higher than the version code
+the active upload certificate and that `10003` is higher than the version code
 already published.

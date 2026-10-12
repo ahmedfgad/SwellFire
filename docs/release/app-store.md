@@ -1,30 +1,29 @@
 # Publishing Swellfire on the Apple App Store
 
+The App Store Connect record is created and its draft listing is initialized.
 The repository is prepared for a universal iPhone/iPad App Store build. It uses
-bundle ID `com.vilvik.swellfire`, version `1.0.2`, minimum iOS 15, a complete icon
+bundle ID `com.vilvik.swellfire`, version `1.0.3`, minimum iOS 15, a complete icon
 catalog, a privacy manifest, verified HTTPS, and the iOS 26 SDK baseline. No
 certificate, provisioning profile, signed archive, or upload is committed.
 
 Apple currently requires uploads to use Xcode 26 or newer with the iOS 26 SDK.
 See [Apple's upcoming requirements](https://developer.apple.com/news/upcoming-requirements/).
 
-## 1. Create the Apple records
+## 1. Apple records
 
 After the Apple Developer Program membership is active:
 
-1. In Certificates, Identifiers & Profiles, register an explicit App ID with
-   bundle ID `com.vilvik.swellfire`. No optional capabilities are currently
-   required.
-2. In App Store Connect, create a new iOS app using that bundle ID, the name
-   **Swellfire**, primary language English (U.S.), and an internal SKU such as
-   `SWELLFIRE-IOS-1`.
+1. The explicit App ID `com.vilvik.swellfire` is registered under team
+   `Y4Q9DBXM59`; no optional capabilities are currently required.
+2. The App Store Connect app record is **Swellfire**, primary language English
+   (U.S.), with SKU `SWELLFIRE-IOS-1`.
 3. Complete Agreements, Tax, and Banking if required for the chosen distribution
    and price. Complete the Digital Services Act trader-status information and
    other regional compliance questions that apply to the account.
 4. Use [ios/app-store-metadata.md](../../ios/app-store-metadata.md) for the listing.
 
-The bundle ID is the app's permanent identity. Do not create the App Store
-record with the old CI-only ID `com.ahmedgad.swellfire`.
+The bundle ID is the app's permanent identity. Do not use the old CI-only ID
+`com.ahmedgad.swellfire`.
 
 ## 2. Validate without building or signing
 

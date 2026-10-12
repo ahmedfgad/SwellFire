@@ -37,7 +37,11 @@ def test_grab_frame_nonblank_correct_size():
     r = subprocess.run([sys.executable, "-c", HARNESS], cwd=os.path.abspath(ROOT),
                        env=env, capture_output=True, text=True, timeout=120)
     out = r.stdout + r.stderr
-    assert "SHAPE (540, 960, 3)" in out or "SHAPE (1080, 1920, 3)" in out, out
+    assert any(shape in out for shape in (
+        "SHAPE (540, 960, 3)",
+        "SHAPE (810, 1440, 3)",  # SDL logical size at 1.5x display scaling
+        "SHAPE (1080, 1920, 3)",
+    )), out
     # max pixel value > 0 means the menu actually rendered
     nb = [l for l in out.splitlines() if l.startswith("NONBLANK")]
     assert nb and int(nb[0].split()[1]) > 0, out

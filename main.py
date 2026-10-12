@@ -13,8 +13,10 @@ import sys
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.metrics import dp
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
 from kivy.uix.modalview import ModalView
+from kivy.utils import platform
 from kivy.config import Config
 from kivy.resources import resource_add_path
 
@@ -87,6 +89,76 @@ def app():
     return App.get_running_app()
 
 
+class BackGestureScreenManager(ScreenManager):
+    """Route familiar edge-swipe gestures through the app's Back behavior.
+
+    The full-screen game keeps every edge available for steering. Other screens
+    support iOS's left-edge Back swipe and Android's inward swipe from either edge.
+    """
+
+    EDGE_WIDTH = dp(24)
+    MIN_SWIPE = dp(64)
+    MAX_VERTICAL_DRIFT = dp(48)
+
+    def __init__(self, app_instance, **kwargs):
+        self.app_instance = app_instance
+        self._back_touch = None
+        super().__init__(**kwargs)
+
+    def _edge_direction(self, start_x):
+        if start_x <= self.EDGE_WIDTH:
+            return 1
+        if platform == "android" and start_x >= self.width - self.EDGE_WIDTH:
+            return -1
+        return None
+
+    def on_touch_down(self, touch):
+        if self.current in ("menu", "game") or self._back_touch is not None:
+            return super().on_touch_down(touch)
+
+        start_x, start_y = touch.pos
+        direction = self._edge_direction(start_x)
+        if direction is None:
+            return super().on_touch_down(touch)
+
+        self._back_touch = {
+            "uid": touch.uid,
+            "origin": (start_x, start_y),
+            "direction": direction,
+            "screen": self.current,
+        }
+        touch.grab(self)
+        return True
+
+    def on_touch_move(self, touch):
+        if self._back_touch is None or touch.uid != self._back_touch["uid"]:
+            return super().on_touch_move(touch)
+
+        origin_x, origin_y = self._back_touch["origin"]
+        dx = (touch.x - origin_x) * self._back_touch["direction"]
+        dy = abs(touch.y - origin_y)
+        self._back_touch["valid"] = (
+            dx >= self.MIN_SWIPE
+            and dx >= dy * 1.3
+            and dy <= self.MAX_VERTICAL_DRIFT
+        )
+        return True
+
+    def on_touch_up(self, touch):
+        if self._back_touch is None or touch.uid != self._back_touch["uid"]:
+            return super().on_touch_up(touch)
+
+        gesture = self._back_touch
+        self._back_touch = None
+        touch.ungrab(self)
+        if (
+            gesture.get("valid", False)
+            and gesture["screen"] == self.current
+        ):
+            self.app_instance.navigate_back()
+        return True
+
+
 class SwellfireApp(App):
     title = "Swellfire"
 
@@ -124,7 +196,10 @@ class SwellfireApp(App):
             except Exception:
                 pass
 
-        self.sm = ScreenManager(transition=FadeTransition(duration=0.25))
+        self.sm = BackGestureScreenManager(
+            app_instance=self,
+            transition=FadeTransition(duration=0.25),
+        )
         self.sm.add_widget(ui.MenuScreen(name="menu"))
         self.sm.add_widget(ui.WorldMapScreen(name="worldmap"))
         self.sm.add_widget(ui.LevelSelectScreen(name="levelselect"))
@@ -195,6 +270,13 @@ class SwellfireApp(App):
     def _on_keyboard(self, _window, key, *_args):
         """Route Escape/legacy Android Back through the visible app hierarchy."""
         if key != 27 or self.sm is None:
+            return False
+
+        return self.navigate_back()
+
+    def navigate_back(self):
+        """Apply the app's Back behavior to system keys and edge gestures."""
+        if self.sm is None:
             return False
 
         # Non-auto-dismiss dialogs need an explicit cancel/resume action;

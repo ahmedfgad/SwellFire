@@ -4,7 +4,7 @@ Swellfire is a cross-platform mobile game written in Python with the [Kivy](http
 
 It is the second cross-platform Kivy game by Ahmed Gad, following [CoinTex](https://github.com/ahmedfgad/CoinTex). Swellfire mirrors CoinTex's build, packaging and screen-flow tooling — the same one codebase runs on Windows, Linux, macOS, Android and iPhone.
 
-> Current release: 1.0.2. The shared Kivy codebase supports desktop, Android, and iOS builds.
+> Current release: 1.0.3. The shared Kivy codebase supports desktop, Android, and iOS builds.
 
 ## Contents
 
@@ -26,6 +26,7 @@ The Android edition is the current public mobile release. The iPhone/iPad editio
 Auto-forward motion; you control only lateral movement and (eventually) which gate to pass through.
 
 - Drag left/right to steer; release to coast.
+- On iPhone and Android menu screens, swipe inward from either edge to go back.
 - Gates appear in pairs ahead. The one you pass through applies its effect to your squad: `×2` doubles the crowd, `+5` adds five, `SHOTGUN` swaps your weapon.
 - Enemy waves stream toward you. Your whole squad auto-fires at the nearest target.
 - Squad members are lost on contact with enemies or hazards. Reach the boss at the end of each world with as many runners as possible.
