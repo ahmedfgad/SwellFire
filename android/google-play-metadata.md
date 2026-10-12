@@ -15,7 +15,7 @@ account or contact details that are not stored in this repository.
 | Contains ads | No |
 | In-app purchases | No |
 | Version name | `1.0.3` |
-| Version code | `10003` |
+| Version code | `10004` |
 | Contact email | `ahmed.f.gad@gmail.com` |
 | Support URL | `https://github.com/ahmedfgad/SwellFire/blob/main/SUPPORT.md` |
 | Privacy policy URL | `https://github.com/ahmedfgad/SwellFire/blob/main/PRIVACY.md` |
@@ -54,6 +54,7 @@ No account, advertisements, tracking, or in-app purchases.
 
 - Swipe inward from either screen edge to navigate back on touch devices.
 - Keep edge touches available for steering while a level is in progress.
+- This update requires Android 7.0 or later.
 
 ## What's new in 1.0.2
 

@@ -27,6 +27,15 @@ repository root, run:
 The script checks both the keystore and, when present, the PEM certificate
 before invoking Buildozer.
 
+## Play release compatibility
+
+Google Play's automatic protection is enabled for Swellfire. It requires a
+minimum Android API level of 24, so the 1.0.3 gesture-navigation release raises
+`android.minapi` from 21 to 24. This update and future releases will not support
+Android 5.0–6.x while that Play protection remains enabled. The first signed
+bundle built at API 21 was rejected by Play; the replacement uses version code
+10004.
+
 ## Play App Signing
 
 Keep Play App Signing enabled. Google then protects the app-signing key while

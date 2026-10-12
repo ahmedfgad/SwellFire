@@ -85,7 +85,11 @@ fingerprint and refuses to silently create a replacement key. Details are in
   its own App Store profile. Do not create a duplicate team certificate or API
   key. The CoinTex session has created its separate app profile.
 - The Android upload key is verified and stored in the encrypted backup and
-  GitHub Actions secrets. The signed release workflow is ready; its AAB still
-  needs to be built and uploaded to Play Console.
+  GitHub Actions secrets. Google Play rejected the first signed AAB because
+  automatic protection requires minimum API 24; the app configuration now
+  targets API 24 and the replacement release uses version code 10004. This
+  drops support for Android 5.0–6.x while that Play protection remains enabled.
+  The first AAB remains in the production release draft as a rejected upload;
+  it must be replaced with the rebuilt 10004 bundle before rollout.
 - Keep the original signing material and recovery instructions backed up before
   making future releases.

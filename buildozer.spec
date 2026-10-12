@@ -60,13 +60,13 @@ android.extra_manifest_application_arguments = android/manifest_application_attr
 # version supported below.
 android.api = 36
 
-# Lowest Android version the app runs on. python-for-android needs 21 or higher.
-android.minapi = 21
+# Automatic Play protection requires Android API 24 or higher for this app.
+android.minapi = 24
 
 # Use the NDK recommended by python-for-android's 2026 release. NDK r28c also
 # emits native libraries that are compatible with Android's 16 KB page sizes.
 android.ndk = 28c
-android.ndk_api = 21
+android.ndk_api = 24
 
 # API 36 support depends on the modern python-for-android toolchain. Keep the
 # upstream branch that contains the signed v2026.05.09 release commit selected,
@@ -87,7 +87,7 @@ android.release_artifact = aab
 # Version code for the API 36 compliance update, raised from 10000. It must be
 # higher than the version code already on Google Play or the upload is rejected;
 # confirm the live value in Play Console before building.
-android.numeric_version = 10003
+android.numeric_version = 10004
 
 # Background color of the splash screen.
 android.presplash_color = #000000
