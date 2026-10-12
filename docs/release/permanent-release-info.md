@@ -103,8 +103,9 @@ fingerprint and refuses to silently create a replacement key. Details are in
   automatic protection requires minimum API 24; the app configuration now
   targets API 24 and the replacement release uses version code 10004. This
   drops support for Android 5.0–6.x while that Play protection remains enabled.
-  The rejected upload was removed from the production release draft; the
-  replacement signed 10004 build is in progress and must be uploaded before
-  rollout.
+  The rejected upload was removed from the production release draft. Signed
+  version 10004 was submitted to Google Play review for a full rollout on
+  2026-10-12; Play's automatic pre-review checks are still running. If approved,
+  managed publishing is off, so Play can publish it automatically.
 - Keep the original signing material and recovery instructions backed up before
   making future releases.
