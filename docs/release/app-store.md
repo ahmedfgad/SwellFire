@@ -22,6 +22,12 @@ After the Apple Developer Program membership is active:
    other regional compliance questions that apply to the account.
 4. Use [ios/app-store-metadata.md](../../ios/app-store-metadata.md) for the listing.
 
+The draft listing text, Games category, 13+ age rating, App Review notes, and
+privacy policy URL are saved in App Store Connect. The privacy label is a draft
+until its accuracy attestation is published. Current required iPhone and iPad
+screenshots are prepared under `marketing/app_store/`; upload them to the
+matching media slots before submission.
+
 The bundle ID is the app's permanent identity. Do not use the old CI-only ID
 `com.ahmedgad.swellfire`.
 

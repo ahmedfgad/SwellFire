@@ -43,9 +43,13 @@ not silently create a replacement key. Never commit these files.
 
 ## Account and release gates
 
-- Apple age ratings are saved. App Store Connect still needs the account's EU
-  trader-status information and any applicable agreements, tax, banking,
-  privacy, content rights, encryption, pricing, and availability declarations.
+- Apple age ratings and the privacy label are prepared. The privacy label is
+  saved as a draft; publishing it requires the account holder's accuracy/legal
+  attestation. App Store Connect still needs the account's EU trader-status
+  information and applicable agreements, tax, banking, content rights,
+  encryption, pricing, and availability declarations.
+- App Store screenshot files are prepared in the required iPhone and iPad
+  sizes; they still need uploading to the App Store Connect media slots.
 - Apple signing materials are not currently present in GitHub Actions, so a
   signed iOS archive cannot yet be produced by the workflow.
 - The Android production signing files are not in the repository checkout. A

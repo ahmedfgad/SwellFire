@@ -61,10 +61,13 @@ in App Store Connect against the final binary.
 ## Privacy questionnaire draft
 
 Answer **Yes, data is collected**, then declare **Other Data** used only for
-**App Functionality**, **not linked to the user**, and **not used for tracking**.
-This conservative disclosure covers the internet-facing IP address received by
-the public-address provider when the user opens the Host screen. There is no
-developer-operated server, account, analytics, advertising, or tracking.
+**App Functionality**, **linked to the user/device**, and **not used for
+tracking**. The public-address provider necessarily receives the user's
+internet-facing IP address, and the privacy policy says providers may process
+operational logs. Apple says retained IP addresses should be disclosed and that
+linkage must be reported unless privacy protections de-identify the data before
+collection. There is no developer-operated server, account, analytics,
+advertising, or tracking.
 
 Reconfirm the providers' behavior immediately before submission. The answers
 must include all third-party practices and must match `PRIVACY.md` and the
