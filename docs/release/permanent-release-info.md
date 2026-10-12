@@ -43,9 +43,9 @@ not silently create a replacement key. Never commit these files.
 
 ## Account and release gates
 
-- Apple App Store Connect still needs the account's EU trader-status information
-  and any applicable agreements, tax, banking, privacy, age-rating, content
-  rights, encryption, pricing, and availability declarations completed.
+- Apple age ratings are saved. App Store Connect still needs the account's EU
+  trader-status information and any applicable agreements, tax, banking,
+  privacy, content rights, encryption, pricing, and availability declarations.
 - Apple signing materials are not currently present in GitHub Actions, so a
   signed iOS archive cannot yet be produced by the workflow.
 - The Android production signing files are not in the repository checkout. A

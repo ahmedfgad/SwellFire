@@ -1,7 +1,7 @@
 # App Store Connect metadata draft
 
-Use this as the source of truth when creating the first App Store Connect
-record. Review every field against the final archive before submitting.
+Use this as the source of truth for the App Store Connect listing. Review every
+field against the final archive before submitting.
 
 | Field | Value |
 | --- | --- |
@@ -79,8 +79,8 @@ regional rating, so do not enter a guessed numeric rating from this document.
 
 ## Required media
 
-Generate and visually review the eight screenshots for both checked-in device
-families:
+Generate and visually review the eight screenshots for the required iPhone
+Dynamic Island medium display and iPad 13-inch display:
 
 ```bash
 python -m pip install -r requirements/media.txt
@@ -89,7 +89,7 @@ python tools/make_app_store_screenshots.py
 
 Upload from:
 
-- `marketing/app_store/iphone_6_9/` — 1284×2778 portrait;
+- `marketing/app_store/iphone_dynamic_island_medium/` — 1206×2622 portrait;
 - `marketing/app_store/ipad_13/` — 2064×2752 portrait.
 
 App Store icons are generated into the Xcode asset catalog during the build,

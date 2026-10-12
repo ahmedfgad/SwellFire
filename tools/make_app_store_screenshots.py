@@ -12,6 +12,8 @@ import os
 import subprocess
 import sys
 
+from PIL import Image
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from tools import capture_run
@@ -21,15 +23,16 @@ from tools.make_screenshots import SHOTS
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MEDIA = os.path.join(ROOT, "marketing", "app_store")
 
-# Apple accepts these exact portrait dimensions for their current largest
-# iPhone and iPad screenshot groups. One complete set per device class is enough
-# for App Store Connect to scale to smaller displays.
+# The large iPhone set also provides a source for Apple's required medium
+# Dynamic Island screenshots. The iPad set covers the required 13-inch display.
 # Retina density keeps dp/sp layout equivalent to the physical Apple device;
 # Xvfb otherwise reports density 1 and treats every output pixel as one dp.
 DEVICE_SETS = (
     ("iphone_6_9", "1284x2778", 3),
     ("ipad_13", "2064x2752", 2),
 )
+IPHONE_MEDIUM_DIR = "iphone_dynamic_island_medium"
+IPHONE_MEDIUM_SIZE = (1206, 2622)
 
 
 def main() -> None:
@@ -56,6 +59,17 @@ def main() -> None:
                 check=True,
                 timeout=1200,
             )
+    source_dir = os.path.join(MEDIA, "iphone_6_9")
+    medium_dir = os.path.join(MEDIA, IPHONE_MEDIUM_DIR)
+    os.makedirs(medium_dir, exist_ok=True)
+    for filename, *_ in SHOTS:
+        source = os.path.join(source_dir, filename)
+        target = os.path.join(medium_dir, filename)
+        with Image.open(source) as image:
+            image.convert("RGB").resize(
+                IPHONE_MEDIUM_SIZE, Image.Resampling.LANCZOS
+            ).save(target, optimize=True)
+    print(f"Prepared required iPhone screenshots at {IPHONE_MEDIUM_SIZE}")
     print(f"App Store screenshots written to {MEDIA}")
 
 
