@@ -39,10 +39,20 @@ currently configured or required by that workflow.
 
 ## Android signing recovery
 
-Restore `swellfire-upload.keystore`, `.env`, and `upload_certificate.pem` from
-the encrypted backup as described in `docs/platforms/android-signing.md`. The
-release script checks the established upload-certificate fingerprint and will
-not silently create a replacement key. Never commit these files.
+The verified signing backup is stored in the owner's encrypted OneDrive folder
+`SwellFire Play Console Upload Key`. It contains `swellfire-upload.keystore`,
+`.env`, and `upload_certificate.pem`. Keep that backup and a second encrypted
+password-manager/backup copy for future releases; never commit these files.
+
+The matching key, password, and alias are configured as GitHub Actions
+repository secrets: `SWELLFIRE_UPLOAD_KEYSTORE_BASE64`,
+`SWELLFIRE_UPLOAD_KEYSTORE_PASSWORD`, and
+`SWELLFIRE_UPLOAD_KEYSTORE_ALIAS`. The one-time **Build signed Google Play
+bundle** workflow verifies the upload certificate before creating an AAB and
+keeps the build as a short-lived Actions artifact. Download the artifact and
+upload it in Play Console. The local release script also checks the known
+fingerprint and refuses to silently create a replacement key. Details are in
+`docs/platforms/android-signing.md`.
 
 ## Account and release gates
 
@@ -57,7 +67,8 @@ not silently create a replacement key. Never commit these files.
   listing. App Store Connect still requires the review contact phone number.
 - Apple signing materials are not currently present in GitHub Actions, so a
   signed iOS archive cannot yet be produced by the workflow.
-- The Android production signing files are not in the repository checkout. A
-  release AAB cannot be built or published until they are restored.
+- The Android upload key is verified and stored in the encrypted backup and
+  GitHub Actions secrets. The signed release workflow is ready; its AAB still
+  needs to be built and uploaded to Play Console.
 - Keep the original signing material and recovery instructions backed up before
   making future releases.
