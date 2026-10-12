@@ -208,8 +208,8 @@ jobs:
           $PB -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
           $PB -c 'Print :CFBundleVersion' "$APP/Info.plist"
           ENCRYPTION=$($PB -c 'Print :ITSAppUsesNonExemptEncryption' "$APP/Info.plist")
-          if [ "$ENCRYPTION" != "false" ]; then
-            echo "Expected ITSAppUsesNonExemptEncryption=false in the exported app." >&2
+          if [ "$ENCRYPTION" != "true" ]; then
+            echo "Expected ITSAppUsesNonExemptEncryption=true for the bundled OpenSSL TLS use." >&2
             exit 1
           fi
           PRIVACY_MANIFEST="$APP/PrivacyInfo.xcprivacy"

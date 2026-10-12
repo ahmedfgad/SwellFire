@@ -54,9 +54,11 @@ Local Network permission. To exercise multiplayer, open Multiplayer, choose
 Host on one device and Join on another reachable device, then enter the host's
 displayed IP address. The Local Network purpose string explains this use.
 
-The app uses standard HTTPS/TLS only and declares
-`ITSAppUsesNonExemptEncryption = false`. Confirm the export-compliance answers
-in App Store Connect against the final binary.
+The app uses Python's OpenSSL-backed TLS for the optional public-IP lookup and
+declares `ITSAppUsesNonExemptEncryption = true`. Complete App Store Connect's
+export-compliance determination for industry-standard encryption outside the
+Apple operating system, including any France-specific documentation Apple
+requires, against the final binary.
 
 ## Privacy questionnaire draft
 

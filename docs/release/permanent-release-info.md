@@ -86,6 +86,9 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - The account holder confirmed the background soundfont is their own work.
   App Store Connect content rights are set to no third-party content; revisit
   this declaration if third-party content is added.
+- The iOS app uses OpenSSL-backed TLS for its optional public-IP lookup.
+  Its Info.plist declares non-exempt encryption and Apple's export compliance
+  determination must be completed before App Review submission.
 - Apple signing materials are configured in GitHub Actions. Swellfire uses the
   existing team distribution certificate and API key shared with CoinTex, and
   its own App Store profile. Do not create a duplicate team certificate or API
