@@ -18,7 +18,8 @@ build number for every uploaded App Store build. Keep the listing text in
 `android/google-play-metadata.md`, and screenshots in `marketing/`.
 The App Store Connect draft is configured as a free public app in all 175
 countries or regions, matching the free Google Play listing. Availability takes
-effect only when the app is released.
+effect only when the app is released. France remains selected, so complete the
+French encryption declaration before submitting the version for review.
 
 ## Apple signing recovery
 
@@ -67,11 +68,26 @@ fingerprint and refuses to silently create a replacement key. Details are in
 
 ## Account and release gates
 
-- Apple age ratings and the privacy label are prepared. The privacy label is
-  saved as a draft; publishing it requires the account holder's accuracy/legal
-  attestation. App Store Connect still needs the account's EU trader-status
-  information and applicable agreements, tax, banking, content rights,
-  encryption, pricing, and availability declarations.
+- The App Privacy label is published with the account holder's confirmed
+  answers: Other Data linked to the user, used for app functionality, and not
+  used for tracking. Revisit it if data practices or provider behavior change.
+- The account holder confirmed non-trader status while choosing EU distribution;
+  Apple's Digital Services Act compliance shows Active for all 27 EU regions.
+- The account holder confirmed the background soundfont is their own work.
+  App Store Connect content rights are set to no third-party content; revisit
+  this declaration if third-party content is added.
+- The free Apps Agreement is active. Paid Apps Agreement is not needed unless
+  the app later adds paid distribution or in-app purchases.
+- The iOS app uses OpenSSL-backed TLS for its optional public-IP lookup. Its
+  Info.plist declares non-exempt encryption, and the build must receive Apple's
+  export-compliance determination before App Review.
+- Because France is selected and TLS uses standard encryption outside Apple's
+  operating system, Apple requires a French encryption declaration in App
+  Store Connect. ANSSI's official filing is at
+  <https://demarche.numerique.gouv.fr/commencer/declaration-relative-a-un-moyen-de-cryptologie>.
+  The current process requires an authenticated applicant and supporting
+  organization and product materials. The account holder must complete the
+  authenticated declaration and its legal attestation; it has not been filed.
 - Eight screenshots for the current iPhone Dynamic Island medium slot and eight
   for the iPad 13-inch slot are uploaded in App Store Connect. Their source
   images remain under `marketing/app_store/`.
@@ -86,9 +102,6 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - The account holder confirmed the background soundfont is their own work.
   App Store Connect content rights are set to no third-party content; revisit
   this declaration if third-party content is added.
-- The iOS app uses OpenSSL-backed TLS for its optional public-IP lookup.
-  Its Info.plist declares non-exempt encryption and Apple's export compliance
-  determination must be completed before App Review submission.
 - Apple signing materials are configured in GitHub Actions. Swellfire uses the
   existing team distribution certificate and API key shared with CoinTex, and
   its own App Store profile. Do not create a duplicate team certificate or API
