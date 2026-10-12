@@ -250,12 +250,12 @@ jobs:
           source ios/app.env
           IPA=$(find "$RUNNER_TEMP/app-store-export" -maxdepth 1 -name '*.ipa' | head -1)
           test -n "$IPA"
-          xcrun iTMSTransporter \
-            -m upload \
-            -apiIssuer "$API_ISSUER_ID" \
-            -apiKey "$API_KEY_ID" \
-            -v informational \
-            -assetFile "$IPA"
+          xcrun altool \
+            --upload-app \
+            --file "$IPA" \
+            --type ios \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$API_ISSUER_ID"
 
       - name: Clean up signing material
         if: always()
