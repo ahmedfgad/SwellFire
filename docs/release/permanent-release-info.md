@@ -16,10 +16,10 @@ The iOS marketing version and build number live in `ios/app.env`. Bump the
 build number for every uploaded App Store build. Keep the listing text in
 `ios/app-store-metadata.md`, Android listing text in
 `android/google-play-metadata.md`, and screenshots in `marketing/`.
-The App Store Connect draft is configured as a free public app in all 175
-countries or regions, matching the free Google Play listing. Availability takes
-effect only when the app is released. France remains selected, so complete the
-French encryption declaration before submitting the version for review.
+The App Store Connect draft is configured as a free public app in 174
+countries or regions. France is temporarily excluded until its encryption
+declaration is filed; add it back after ANSSI clearance. Availability takes
+effect only when the app is released.
 
 ## Apple signing recovery
 
@@ -81,9 +81,10 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - The iOS app uses OpenSSL-backed TLS for its optional public-IP lookup. Its
   Info.plist declares non-exempt encryption, and the build must receive Apple's
   export-compliance determination before App Review.
-- Because France is selected and TLS uses standard encryption outside Apple's
-  operating system, Apple requires a French encryption declaration in App
-  Store Connect. ANSSI's official filing is at
+- Because TLS uses standard encryption outside Apple's operating system, Apple
+  requires a French encryption declaration before France is made available.
+  France is currently excluded per the account holder's instruction. ANSSI's
+  official filing is at
   <https://demarche.numerique.gouv.fr/commencer/declaration-relative-a-un-moyen-de-cryptologie>.
   The current process requires an authenticated applicant and supporting
   organization and product materials. The account holder must complete the
@@ -93,15 +94,6 @@ fingerprint and refuses to silently create a replacement key. Details are in
   images remain under `marketing/app_store/`.
 - App Review contact details are saved in App Store Connect, including the
   phone number supplied by the account holder.
-- The App Privacy label is published with the account holder's confirmed
-  answers: Other Data linked to the user, used for app functionality, and not
-  used for tracking. It should be revisited if data practices or provider
-  behavior changes.
-- The account holder confirmed non-trader status while choosing EU distribution;
-  Apple's Digital Services Act compliance shows Active for all 27 EU regions.
-- The account holder confirmed the background soundfont is their own work.
-  App Store Connect content rights are set to no third-party content; revisit
-  this declaration if third-party content is added.
 - Apple signing materials are configured in GitHub Actions. Swellfire uses the
   existing team distribution certificate and API key shared with CoinTex, and
   its own App Store profile. Do not create a duplicate team certificate or API
@@ -111,7 +103,8 @@ fingerprint and refuses to silently create a replacement key. Details are in
   automatic protection requires minimum API 24; the app configuration now
   targets API 24 and the replacement release uses version code 10004. This
   drops support for Android 5.0–6.x while that Play protection remains enabled.
-  The rejected upload was removed from the production release draft; upload the
-  rebuilt 10004 bundle before rollout.
+  The rejected upload was removed from the production release draft; the
+  replacement signed 10004 build is in progress and must be uploaded before
+  rollout.
 - Keep the original signing material and recovery instructions backed up before
   making future releases.
