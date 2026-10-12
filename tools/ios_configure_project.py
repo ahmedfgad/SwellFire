@@ -213,7 +213,10 @@ def configure_info_plist(path: Path, config: dict[str, str]) -> None:
             "CFBundleName": config["IOS_APP_NAME"],
             "CFBundleShortVersionString": "$(MARKETING_VERSION)",
             "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
-            "ITSAppUsesNonExemptEncryption": True,
+            # Apple classifies this standard TLS use as exempt on the
+            # territories currently selected in App Store Connect (France is
+            # temporarily excluded pending the French declaration).
+            "ITSAppUsesNonExemptEncryption": False,
             "NSHumanReadableCopyright": config["IOS_COPYRIGHT"],
             "NSLocalNetworkUsageDescription": (
                 "Swellfire uses your local network only when you host or join a two-player game."

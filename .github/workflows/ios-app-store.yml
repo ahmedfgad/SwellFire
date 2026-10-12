@@ -208,8 +208,8 @@ jobs:
           $PB -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
           $PB -c 'Print :CFBundleVersion' "$APP/Info.plist"
           ENCRYPTION=$($PB -c 'Print :ITSAppUsesNonExemptEncryption' "$APP/Info.plist")
-          if [ "$ENCRYPTION" != "true" ]; then
-            echo "Expected ITSAppUsesNonExemptEncryption=true for the bundled OpenSSL TLS use." >&2
+          if [ "$ENCRYPTION" != "false" ]; then
+            echo "Expected OpenSSL TLS to be declared as exempt from non-exempt encryption documentation for selected territories." >&2
             exit 1
           fi
           CAMERA_USAGE=$($PB -c 'Print :NSCameraUsageDescription' "$APP/Info.plist")

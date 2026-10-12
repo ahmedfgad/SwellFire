@@ -26,13 +26,21 @@ implementation details; it is not a legal classification or government filing.
   implement direct TCP gameplay.
 - `requirements/ios.txt`: selects the `kivy-ios` build toolchain.
 - `tools/ios_configure_project.py`: writes
-  `ITSAppUsesNonExemptEncryption = true` into the iOS app plist.
+  `ITSAppUsesNonExemptEncryption = false` into the iOS app plist. This key
+  means the app's encryption is exempt from non-exempt-encryption filing; it
+  does not mean that the app has no TLS. The app's OpenSSL TLS use is disclosed
+  in App Store Connect.
 
 ## Filing status
 
-App Store Connect requires its export-compliance determination. Because the
-listing includes France and the app uses standard TLS outside Apple's OS,
-Apple's documentation says a French encryption declaration is required.
-ANSSI's authenticated filing and required organization/product attachments
-remain for the account holder to complete. See
+The account holder answered Apple's export questionnaire: the app uses
+standard encryption, does not use proprietary encryption, and will not be
+distributed in France until the French declaration is complete. App Store
+Connect said no supporting documentation is required for the selected
+territories. Apple's `ITSAppUsesNonExemptEncryption` key is therefore `false`,
+which denotes encryption exempt from non-exempt-encryption documentation; it
+does not deny the OpenSSL TLS implementation described above. Apple's
+documentation says a French encryption declaration is required before France
+is enabled. The account holder must complete ANSSI's authenticated filing and
+legal attestation. See
 [`permanent-release-info.md`](permanent-release-info.md).

@@ -79,8 +79,10 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - The free Apps Agreement is active. Paid Apps Agreement is not needed unless
   the app later adds paid distribution or in-app purchases.
 - The iOS app uses OpenSSL-backed TLS for its optional public-IP lookup. Its
-  Info.plist declares non-exempt encryption, and the build must receive Apple's
-  export-compliance determination before App Review.
+  Info.plist declares this use as exempt from non-exempt-encryption filing for
+  the currently selected territories. Apple's export questionnaire said no
+  documentation is required for those territories. This key does not mean the
+  app has no TLS.
 - Because TLS uses standard encryption outside Apple's operating system, Apple
   requires a French encryption declaration before France is made available.
   France is currently excluded per the account holder's instruction. ANSSI's
