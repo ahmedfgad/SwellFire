@@ -10,7 +10,7 @@ keys, certificates, or keystores in Git.
 | --- | --- | --- |
 | Apple | `com.vilvik.swellfire` | Apple Developer team `Y4Q9DBXM59` |
 | App Store Connect | App Apple ID `6821999904`; SKU `SWELLFIRE-IOS-1` | App name `Swellfire`; English (U.S.) |
-| Google Play | Existing package ID in `buildozer.spec` | Upload certificate SHA-256 is recorded in `docs/platforms/android-signing.md` |
+| Google Play | `com.vilvik.swellfire`; Play app ID `4975235522428198839` | Personal developer account `4818949690814466544`; upload certificate SHA-256 is recorded in `docs/platforms/android-signing.md` |
 
 The iOS marketing version and build number live in `ios/app.env`. Bump the
 build number for every uploaded App Store build. Keep the listing text in
