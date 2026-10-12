@@ -3,8 +3,8 @@
 The App Store Connect record is created and its draft listing is initialized.
 The repository is prepared for a universal iPhone/iPad App Store build. It uses
 bundle ID `com.vilvik.swellfire`, version `1.0.3`, minimum iOS 15, a complete icon
-catalog, a privacy manifest, verified HTTPS, and the iOS 26 SDK baseline. No
-certificate, provisioning profile, signed archive, or upload is committed.
+catalog, a privacy manifest, verified HTTPS, and the iOS 26 SDK baseline. Signing
+materials are stored outside Git and in encrypted GitHub Actions secrets.
 
 Apple currently requires uploads to use Xcode 26 or newer with the iOS 26 SDK.
 See [Apple's upcoming requirements](https://developer.apple.com/news/upcoming-requirements/).
@@ -31,7 +31,7 @@ privacy label remains a draft until its accuracy attestation is published.
 The bundle ID is the app's permanent identity. Do not use the old CI-only ID
 `com.ahmedgad.swellfire`.
 
-## 2. Validate without building or signing
+## 2. Validate the iOS configuration
 
 This works on Linux or macOS and makes no network requests:
 
@@ -39,18 +39,17 @@ This works on Linux or macOS and makes no network requests:
 ./scripts/build_ios.sh --check
 ```
 
-The normal unsigned workflow, **Build iOS app**, builds with Xcode 26 and is the
-safe first remote test. It needs no Apple credentials and cannot upload.
+The local configuration check verifies the app identity and Xcode project
+settings. The signed release workflow runs on macOS 26 and uses Xcode 26.
 
 ## 3. Prepare signing secrets
 
-Coordinate with any other app releases using team `Y4Q9DBXM59` before creating
-the team-wide Apple Distribution certificate or App Store Connect API key. If a
-shared distribution certificate is created, create an app-specific App Store
-provisioning profile for `com.vilvik.swellfire`. Export the certificate and
-private key from Keychain Access as a password-protected `.p12` file.
-Base64-encode the `.p12` and `.mobileprovision` files, then add these GitHub
-Actions repository secrets:
+The existing team Apple Distribution certificate and App Store Connect API key
+are shared with the CoinTex release. Swellfire has its own App Store profile,
+named **Swellfire App Store**, for `com.vilvik.swellfire`. The profile and
+certificate are stored outside Git in the encrypted OneDrive signing folder.
+The certificate container password was rotated on 2026-10-12; the certificate
+and private key were not replaced. These repository secrets are configured:
 
 | Secret | Contents |
 | --- | --- |
@@ -58,6 +57,9 @@ Actions repository secrets:
 | `APPLE_DISTRIBUTION_CERTIFICATE_BASE64` | Base64 of the distribution `.p12` |
 | `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
 | `APPLE_PROVISIONING_PROFILE_BASE64` | Base64 of the App Store provisioning profile |
+| `APPLE_API_KEY_BASE64` | Base64 of the team's App Store Connect API `.p8` key |
+| `APPLE_API_KEY_ID` | App Store Connect API key ID |
+| `APPLE_API_ISSUER_ID` | App Store Connect API issuer ID |
 
 Never commit those files or values. The workflow imports them into a temporary
 keychain, verifies that the profile's team and bundle ID match, and removes the
@@ -73,25 +75,23 @@ build number. The workflow:
 - creates the universal iPhone/iPad Xcode project;
 - embeds the privacy manifest and complete icon catalog;
 - signs and validates an `.xcarchive` and App Store `.ipa`; and
-- uploads those files only as private workflow artifacts.
+- preserves those files as private workflow artifacts; and
+- uploads the validated IPA to App Store Connect for build processing.
 
-It deliberately does **not** upload anything to Apple. Alternatively, on a Mac,
+It does not submit the app for review or release it. Alternatively, on a Mac,
 run `./scripts/build_ios.sh`, select the team in Xcode, and choose Product > Archive.
 
 ## 5. Test and submit
 
-1. Download the signed workflow artifact.
-2. Upload the `.ipa` with Apple's Transporter app, or distribute the archive
-   from Xcode Organizer.
-3. Wait for App Store Connect processing and resolve any validation messages.
-4. Add the build to TestFlight. Test solo play, saved progress, audio, every
+1. Wait for App Store Connect processing and resolve any validation messages.
+2. Add the build to TestFlight. Test solo play, saved progress, audio, every
    screen, denied/allowed Local Network permission, host/join multiplayer, and
    a cold launch on at least one iPhone and one iPad.
-5. In Xcode Organizer, generate the archive's Privacy Report and compare it with
+3. In Xcode Organizer, generate the archive's Privacy Report and compare it with
    `ios/PrivacyInfo.xcprivacy`, `PRIVACY.md`, and the App Privacy answers.
-6. Confirm the uploaded screenshots and complete any remaining metadata,
+4. Confirm the uploaded screenshots and complete any remaining metadata,
    accessibility, encryption, content-rights, pricing, and availability fields.
-7. Submit for App Review. Do not release automatically until the approved build
+5. Submit for App Review. Do not release automatically until the approved build
    has passed the intended TestFlight checks.
 
 Apple requires a privacy-policy URL and accurate disclosure of the app and its

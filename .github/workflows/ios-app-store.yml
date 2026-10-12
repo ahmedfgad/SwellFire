@@ -1,5 +1,4 @@
-# Creates a signed App Store Connect .ipa, but deliberately does not upload it.
-# Run only after completing docs/release/app-store.md and adding the listed secrets.
+# Creates, signs, validates, and uploads an App Store Connect .ipa.
 
 name: Archive iOS for App Store
 
@@ -40,12 +39,15 @@ jobs:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
         run: |
           if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
             echo "build_number must be a positive integer." >&2
             exit 1
           fi
-          for NAME in APPLE_TEAM_ID CERTIFICATE_BASE64 CERTIFICATE_PASSWORD PROFILE_BASE64; do
+          for NAME in APPLE_TEAM_ID CERTIFICATE_BASE64 CERTIFICATE_PASSWORD PROFILE_BASE64 API_KEY_ID API_ISSUER_ID API_KEY_BASE64; do
             if [ -z "${!NAME}" ]; then
               echo "Missing required App Store signing secret: $NAME" >&2
               exit 1
@@ -206,7 +208,7 @@ jobs:
           $PB -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
           $PB -c 'Print :CFBundleVersion' "$APP/Info.plist"
 
-      - name: Upload the signed IPA and archive
+      - name: Preserve the signed IPA and archive
         uses: actions/upload-artifact@v4
         with:
           name: Swellfire-App-Store-${{ inputs.build_number }}
@@ -215,11 +217,40 @@ jobs:
             ${{ runner.temp }}/Swellfire.xcarchive
           retention-days: 14
 
+      - name: Restore App Store Connect API key
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          test -n "$API_KEY_ID" || { echo "Missing APPLE_API_KEY_ID secret" >&2; exit 1; }
+          test -n "$API_KEY_BASE64" || { echo "Missing APPLE_API_KEY_BASE64 secret" >&2; exit 1; }
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          printf '%s' "$API_KEY_BASE64" | base64 --decode > "$KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          chmod 600 "$KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          echo "API_KEY_PATH=$KEY_DIR/AuthKey_${API_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Upload the validated IPA to App Store Connect
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          source ios/app.env
+          IPA=$(find "$RUNNER_TEMP/app-store-export" -maxdepth 1 -name '*.ipa' | head -1)
+          test -n "$IPA"
+          xcrun iTMSTransporter \
+            -m upload \
+            -apiIssuer "$API_ISSUER_ID" \
+            -apiKey "$API_KEY_ID" \
+            -v informational \
+            -assetFile "$IPA"
+
       - name: Clean up signing material
         if: always()
         run: |
           if [ -n "${PROFILE_DEST:-}" ]; then rm -f "$PROFILE_DEST"; fi
           if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
+          if [ -n "${API_KEY_PATH:-}" ]; then rm -f "$API_KEY_PATH"; fi
 
       - name: Write a run summary
         run: |
@@ -227,6 +258,6 @@ jobs:
             echo "## Swellfire App Store archive"
             echo ""
             echo "The signed IPA and xcarchive are in this run's artifacts."
-            echo "They were validated but were **not uploaded** to App Store Connect."
-            echo "Follow docs/release/app-store.md for Transporter, TestFlight, and submission."
+            echo "The IPA was validated and uploaded to App Store Connect for processing."
+            echo "App Store review submission still requires completed account declarations and app metadata."
           } >> "$GITHUB_STEP_SUMMARY"

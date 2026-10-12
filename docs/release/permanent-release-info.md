@@ -22,8 +22,16 @@ effect only when the app is released.
 
 ## Apple signing recovery
 
-Back up these items in the password manager or encrypted archive and add the
-workflow values to GitHub Actions before running **Archive iOS for App Store**:
+The shared Apple signing backup is in the owner's encrypted OneDrive folder
+`Secrets\apple-signing`. It contains the team distribution certificate and
+private key, App Store Connect API key, issuer/key identifiers, and the
+Swellfire-specific profile at `Swellfire Profile\Swellfire_Provisioning_Profile.mobileprovision`.
+The P12 was re-encrypted on 2026-10-12 with a fresh password; `Info.txt` in
+that folder now has the updated password. The Apple certificate itself was not
+replaced or revoked. Keep this folder backed up in the password manager or a
+second encrypted archive.
+
+These workflow values are configured as encrypted GitHub Actions secrets:
 
 | GitHub Actions secret | Secure backup item |
 | --- | --- |
@@ -31,11 +39,14 @@ workflow values to GitHub Actions before running **Archive iOS for App Store**:
 | `APPLE_DISTRIBUTION_CERTIFICATE_BASE64` | Base64 of the Apple Distribution `.p12` export |
 | `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD` | Password for the `.p12` export |
 | `APPLE_PROVISIONING_PROFILE_BASE64` | Base64 of the App Store provisioning profile for `com.vilvik.swellfire` |
+| `APPLE_API_KEY_BASE64` | Base64 of the team's App Store Connect API `.p8` key |
+| `APPLE_API_KEY_ID` | App Store Connect API key identifier |
+| `APPLE_API_ISSUER_ID` | App Store Connect API issuer identifier |
 
-Keep the original `.p12`, its password, and the provisioning profile together
-in the encrypted backup. The current workflow creates and validates the signed
-IPA but does not upload it to Apple. App Store Connect API credentials are not
-currently configured or required by that workflow.
+Keep the `.p12`, its password, API key, and provisioning profile together in the
+encrypted backup. The **Archive iOS for App Store** workflow signs and validates
+the build, preserves a private workflow artifact, and uploads the IPA to App
+Store Connect for processing. It does not submit the app for review or release it.
 
 ## Android signing recovery
 
@@ -69,10 +80,10 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - The privacy label is saved as a draft. The account holder confirmed its data
   answers, but Apple still asks for an action-time confirmation to publish the
   label.
-- Apple signing materials are not currently present in GitHub Actions. The
-  CoinTex release uses the same Apple team and is coordinating creation of a
-  team-wide distribution certificate/API key before SwellFire configures its
-  app-specific provisioning profile and secrets.
+- Apple signing materials are configured in GitHub Actions. Swellfire uses the
+  existing team distribution certificate and API key shared with CoinTex, and
+  its own App Store profile. Do not create a duplicate team certificate or API
+  key. The CoinTex session has created its separate app profile.
 - The Android upload key is verified and stored in the encrypted backup and
   GitHub Actions secrets. The signed release workflow is ready; its AAB still
   needs to be built and uploaded to Play Console.
