@@ -212,6 +212,11 @@ jobs:
             echo "Expected ITSAppUsesNonExemptEncryption=true for the bundled OpenSSL TLS use." >&2
             exit 1
           fi
+          CAMERA_USAGE=$($PB -c 'Print :NSCameraUsageDescription' "$APP/Info.plist")
+          case "$CAMERA_USAGE" in
+            "Swellfire does not access the camera."*) ;;
+            *) echo "Missing accurate NSCameraUsageDescription for camera APIs referenced by Kivy." >&2; exit 1 ;;
+          esac
           PRIVACY_MANIFEST="$APP/PrivacyInfo.xcprivacy"
           test -f "$PRIVACY_MANIFEST"
           DATA_LINKED=$($PB -c 'Print :NSPrivacyCollectedDataTypes:0:NSPrivacyCollectedDataTypeLinked' "$PRIVACY_MANIFEST")

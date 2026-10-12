@@ -92,6 +92,10 @@ fingerprint and refuses to silently create a replacement key. Details are in
 - Eight screenshots for the current iPhone Dynamic Island medium slot and eight
   for the iPad 13-inch slot are uploaded in App Store Connect. Their source
   images remain under `marketing/app_store/`.
+- The iOS app executable contains camera API references from Kivy although
+  Swellfire never accesses the camera. Its generated `Info.plist` includes an
+  accurate `NSCameraUsageDescription` to satisfy App Store upload checks; the
+  archive workflow verifies this value before upload.
 - App Review contact details are saved in App Store Connect, including the
   phone number supplied by the account holder.
 - Apple signing materials are configured in GitHub Actions. Swellfire uses the

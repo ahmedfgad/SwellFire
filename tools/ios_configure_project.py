@@ -218,6 +218,10 @@ def configure_info_plist(path: Path, config: dict[str, str]) -> None:
             "NSLocalNetworkUsageDescription": (
                 "Swellfire uses your local network only when you host or join a two-player game."
             ),
+            "NSCameraUsageDescription": (
+                "Swellfire does not access the camera. This description is present because an "
+                "included Kivy framework references camera APIs."
+            ),
             "UIRequiresFullScreen": True,
             "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
             "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],

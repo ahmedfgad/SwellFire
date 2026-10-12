@@ -38,6 +38,16 @@ def main() -> None:
     expect(privacy.get("NSPrivacyTracking") is False, "privacy manifest must disable tracking")
     expect(bool(privacy.get("NSPrivacyAccessedAPITypes")), "privacy manifest has no required-reason API entries")
 
+    project_script = (ROOT / "tools" / "ios_configure_project.py").read_text(encoding="utf-8")
+    expect(
+        '"NSCameraUsageDescription"' in project_script,
+        "generated iOS plist must explain Kivy camera API references",
+    )
+    expect(
+        "Swellfire does not access the camera." in project_script,
+        "camera usage text must accurately state the app does not access the camera",
+    )
+
     workflow = "\n".join(
         (ROOT / ".github" / "workflows" / path).read_text(encoding="utf-8")
         for path in ("ios-build.yml", "ios-app-store.yml")

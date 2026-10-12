@@ -119,7 +119,7 @@ jobs:
           xcodebuild -list -project "$XCODEPROJ" || true
 
       # Persist the shared identity, version, device family, privacy manifest,
-      # encryption declaration and local-network purpose in the Xcode project.
+      # encryption declaration and privacy purpose strings in the Xcode project.
       - name: Configure the App Store project
         run: python tools/ios_configure_project.py "$PROJ_DIR"
 
